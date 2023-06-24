@@ -24,7 +24,14 @@ const datasetSchema = new mongoose.Schema({
     snpList: {
         type: String,
         required: true,
-        minLength: 1
+        minLength: 1,
+        // Add a value of 0 or 1 for each SNP in the list
+        value: {
+            type: String,
+            required: true,
+            minLength: 1,
+            maxLength: 1
+        }
     }
 })
 
