@@ -7,9 +7,14 @@ import mongoose from "mongoose"
 import User from "./models/user";
 import bcrypt from "bcrypt";
 import Session from "./models/session";
+import mongodb from "mongodb";
+import csvtojson from "csvtojson";
 
 logger.info('---')
 logger.info('Connecting to MongoDB')
+const url = "mongodb://localhost:27017/";
+const dbName = "zkoder_db";
+const collectionName = "category";
 
 mongoose.set('strictQuery', false)
 mongoose.connect(config.MONGODB_URI as string)
@@ -111,11 +116,28 @@ app.post('/join-session', async (req: Request, res: Response) => {
 });
 
 // Upload dataset route
-app.post('/upload-dataset', (req, res) => {
-    // Handle dataset upload logic
-    // Retrieve data from req.body and perform necessary operations
-    // Respond with appropriate result or error message
-  })
+// Route for inserting CSV data into MongoDB
+app.post("/upload-dataset", async (req: Request, res: Response) => {
+  try {
+    // Read the CSV file and convert it to JSON
+    const csvData = await csvtojson().fromFile("filepath.csv");
+
+    // Connect to MongoDB
+    const client = await mongodb.connect(url, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    const db = client.db(dbName);
+
+    // Insert the JSON data into the collection
+    const result = await db.collection(collectionName).insertMany(csvData);
+    client.close();
+    res.json({ insertedCount: result.insertedCount });
+  } catch (error) {
+    // Handle any errors that occur during the insertion process
+    res.status(500).json({ error: "Failed to insert CSV data" });
+  }
+});
   
   // Perform operations on dataset route
   app.post('/perform-operations', (req, res) => {
