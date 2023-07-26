@@ -8,9 +8,6 @@ import userRouter from "./controllers/userController";
 
 logger.info('---')
 logger.info('Connecting to MongoDB')
-const url = "mongodb://localhost:27017/";
-const dbName = "zkoder_db";
-const collectionName = "category";
 
 mongoose.set('strictQuery', false)
 mongoose.connect(config.MONGODB_URI as string)
