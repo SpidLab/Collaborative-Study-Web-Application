@@ -1,7 +1,11 @@
 import express from "express";
 import { Request, Response } from "express";
-import User from "./models/user";
+import User from "../models/user";
+import Session from "../models/session"
 import mongoose from "mongoose";
+import bcrypt from 'bcrypt';
+import { MongoClientOptions} from 'mongodb';
+
 
 const userRouter = express.Router();
 
@@ -83,23 +87,25 @@ userRouter.post('/join-session', async (req: Request, res: Response) => {
     }
 });
 
-// Upload dataset route
+
+
+// Upload dataset route -- some are placeholder code
 // Route for inserting CSV data into MongoDB
 userRouter.post("/upload-dataset", async (req: Request, res: Response) => {
     try {
-        // Read the CSV file and convert it to JSON
-        //const csvData = await csvtojson().fromFile("filepath.csv");
+        // Read the CSV file and convert it to JSON, needs corrections
+        //const csvData = await csvtojson().fromFile("filepath.csv"); 
 
         // Connect to MongoDB
-        const client = await mongoose.connect(url, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
-        });
+        const url = "mongodb+srv://collaborativestudyapp:3amrcBv8RaPxFNP6@collaborativestudy.70fk9ca.mongodb.net/?retryWrites=true&w=majority"
+        const options: MongoClientOptions = {};
+        const client = await mongoose.connect(url, options);
+        
         //const db = client.db(dbName);
-
+        
         // Insert the JSON data into the collection
         // const result = await db.collection(collectionName).insertMany(csvData);
-        client.close();
+        client.disconnect();
         //res.json({ insertedCount: result.insertedCount });
     } catch (error) {
         // Handle any errors that occur during the insertion process
@@ -113,3 +119,5 @@ userRouter.post('/perform-operations', (req, res) => {
     // Retrieve data from req.body and perform necessary operations
     // Respond with appropriate result or error message
 })
+
+export { userRouter};

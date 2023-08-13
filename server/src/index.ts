@@ -4,7 +4,7 @@ import logger from "./utils/logger"
 import middleware from "./utils/middleware"
 import config from "./utils/config"
 import mongoose from "mongoose"
-import userRouter from "./controllers/userController";
+import { userRouter } from "./controllers/userController";
 
 logger.info('---')
 logger.info('Connecting to MongoDB')
