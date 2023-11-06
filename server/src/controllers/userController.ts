@@ -3,11 +3,19 @@ import { Request, Response } from "express";
 import User from "../models/user";
 import Session from "../models/session"
 import mongoose from "mongoose";
-import bcrypt from 'bcrypt';
 import { MongoClientOptions} from 'mongodb';
+import user from "../models/user";
+
 
 
 const userRouter = express.Router();
+
+/*
+userRouter.get('/', (req: Request, res: Response) => {
+    res.send('<a href="/auth/google">Authenticate with Google</a>');
+});
+*/
+ */
 
 // Register route
 userRouter.post('/register', async (req: Request, res: Response) => {
@@ -30,36 +38,6 @@ userRouter.post('/register', async (req: Request, res: Response) => {
     catch (error) {
         // Handle any errors that occur during the registration process
         res.status(500).json({ error: "Failed to register user" });
-    }
-});
-
-
-// Login route
-userRouter.post('/login', async (req: Request, res: Response) => {
-    try {
-        const {email, password} = req.body;
-
-        // Find the user by userID or email
-        const user = await User.findOne({email});
-
-        // If the user is not found, return an error response
-        if (!user) {
-            return res.status(401).json({error: "This email is not registered"});
-        }
-
-        // Compare the provided password with the stored password hash
-        const passwordMatch = await bcrypt.compare(password, user.passwordHash);
-
-        // If the passwords do not match, return an error response
-        if (!passwordMatch) {
-            return res.status(401).json({ error: "The pass word is wrong" });
-        }
-
-        res.json({ message: "Login successful" });
-    }
-    catch (error) {
-        // Handle any errors that occur during the login process
-        res.status(500).json({ error: "There was an error logging in" });
     }
 });
 
@@ -120,4 +98,4 @@ userRouter.post('/perform-operations', (req, res) => {
     // Respond with appropriate result or error message
 })
 
-export { userRouter};
+//export {userRouter};
