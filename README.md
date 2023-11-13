@@ -1,4 +1,5 @@
 # Metadata Sharing Project
+How to run the backend: npm run dev
 
 ## Project Description
 
