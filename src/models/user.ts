@@ -1,25 +1,24 @@
-import mongoose from "mongoose"
+import mongoose, { Document } from "mongoose";
 
-const userSchema = new mongoose.Schema({
-    userID: {
-        type: String,
-        required: true,
-        minLength: 1
-    },
-    name: {
-        type: String,
-        required: true,
-        minLength: 1
-    },
-    email: {
-        type: String,
-        required: true,
-        minLength: 1
-    },
-    passwordHash: String,
-})
+const Schema = mongoose.Schema;
 
-userSchema.set('toJSON', {
+export type UserDocument = Document & {
+    username: string;
+    email: string;
+    googleId: string;
+  };
+  
+  const userSchema = new Schema<UserDocument>({
+    username: String,
+    email: String,
+    googleId: String,
+  });
+  
+  const User = mongoose.model<UserDocument>("User", userSchema);
+  
+  export default User;
+
+/*userSchema.set('toJSON', {
     transform: (_document, returnedObject) => {
         returnedObject.id = returnedObject._id.toString()
         delete returnedObject._id
@@ -30,4 +29,4 @@ userSchema.set('toJSON', {
 
 const User = mongoose.model('User', userSchema)
 
-export default User
+export default User */

@@ -1,11 +1,14 @@
 import express from "express";
 import mongoose from "mongoose";
 import { PORT, MONGO_URI } from "./utils/secret";
+import "./config/passport";
+import authRoutes from "./routes/authRoutes";
 
 const app = express();
 
 app.set("view engine", "ejs");
 
+app.use("/auth", authRoutes);
 
 mongoose.connect(MONGO_URI, {
     useNewUrlParser: true,

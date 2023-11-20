@@ -18,7 +18,7 @@ const metadataSchema = new mongoose.Schema({
     },
     //the .csv metadata file will be parsed and stored as entries in the database
     mi: {
-        type: csv,
+        type: String,
         required: true,
         minLength: 1
     }
