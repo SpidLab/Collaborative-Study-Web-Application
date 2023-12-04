@@ -23,3 +23,5 @@ if (!MONGO_URI) {
   console.error("No mongo connection string. Set MONGODB_URI environment variable.");
   process.exit(1);
 }
+
+export const COOKIE_KEY = process.env.COOKIE_KEY as string;

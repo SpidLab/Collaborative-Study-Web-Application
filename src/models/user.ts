@@ -5,19 +5,15 @@ const Schema = mongoose.Schema;
 export type UserDocument = Document & {
     username: string;
     email: string;
-    googleId: string;
+    id: string;
   };
   
-  const userSchema = new Schema<UserDocument>({
+const userSchema = new Schema<UserDocument>({
     username: String,
     email: String,
-    googleId: String,
-  });
+    id: String,
+});
   
-  const User = mongoose.model<UserDocument>("User", userSchema);
+const User = mongoose.model<UserDocument>("User", userSchema);
   
-  export default User;
-
-const User = mongoose.model('User', userSchema)
-
 export default User;

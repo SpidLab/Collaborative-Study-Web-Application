@@ -1,12 +1,27 @@
 import express from "express";
 import mongoose from "mongoose";
-import { PORT, MONGO_URI } from "./utils/secret";
+import { PORT, MONGO_URI, COOKIE_KEY } from "./utils/secrets";
 import "./config/passport";
 import authRoutes from "./routes/authRoutes";
+
+import cookieSession from "cookie-session";
+import passport from "passport";
 
 const app = express();
 
 app.set("view engine", "ejs");
+
+// setting up cookieSession
+app.use(
+    cookieSession({
+        maxAge: 24 * 60 * 60 * 1000,
+        keys: [COOKIE_KEY],
+    })
+);
+
+// initialize passport
+app.use(passport.initialize());
+app.use(passport.session());
 
 app.use("/auth", authRoutes);
 
