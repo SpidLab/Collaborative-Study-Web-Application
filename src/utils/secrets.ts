@@ -11,9 +11,6 @@ if (fs.existsSync(".env")) {
 export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID as string;           // moved below checking for .env file existing
 export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET as string;
 
-// checking the environment, so that we can set up our database accordingly
-export const ENVIRONMENT = process.env.NODE_ENV;
-
 export const PORT = (process.env.PORT || 3000) as number;
 
 // use MONGODB_URI directly from the environment

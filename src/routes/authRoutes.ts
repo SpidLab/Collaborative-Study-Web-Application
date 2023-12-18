@@ -4,7 +4,16 @@ const router = express.Router();
 
 router.get("/login", (req, res) => {
   // this will render login.ejs file
+  if (req.user) {
+    res.redirect("/profile");
+  }
   res.render("login");
+});
+
+router.get("/logout", (req, res) => {
+  // @ts-ignore
+  req.logout();
+  res.redirect("/");
 });
 
 router.get(
@@ -16,11 +25,6 @@ router.get(
 
 router.get("/google/redirect", passport.authenticate("google"), (req, res) => {
   res.redirect("/profile");
-});
-
-router.get("/logout", (req, res) => {
-  req.logout();
-  res.redirect("/");
 });
 
 export default router;
