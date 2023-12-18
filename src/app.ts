@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { PORT, MONGO_URI, COOKIE_KEY } from "./utils/secrets";
 import "./config/passport";
 import authRoutes from "./routes/authRoutes";
+import profileRoutes from "./routes/profileRoutes";
 
 import cookieSession from "cookie-session";
 import passport from "passport";
@@ -24,6 +25,7 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 app.use("/auth", authRoutes);
+app.use("/profile", profileRoutes);
 
 mongoose.connect(MONGO_URI, {
     useNewUrlParser: true,
