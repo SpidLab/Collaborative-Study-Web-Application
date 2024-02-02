@@ -1,0 +1,9 @@
+setup.py
+generator/__init__.py
+generator/calculate_coefficients.py
+generator/split_dataset.py
+metadata_generator.egg-info/PKG-INFO
+metadata_generator.egg-info/SOURCES.txt
+metadata_generator.egg-info/dependency_links.txt
+metadata_generator.egg-info/requires.txt
+metadata_generator.egg-info/top_level.txt
