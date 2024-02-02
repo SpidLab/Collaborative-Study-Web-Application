@@ -1,15 +1,190 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- <link href="../styles/Login.css" rel="stylesheet" type="type/css"/>     -->
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Login</title>
 </head>
+<style>
+.login_wrapper {
+  width: 100%;
+  height: 100vh;
+  background: #040c18;
+  overflow: hidden;
+}
+
+.login_wrapper .bg_elm_1 {
+  width: 1013px;
+  height: 1013px;
+  position: absolute;
+  top: -320px;
+  left: -347px;
+  background: #002853;
+  filter: blur(300px);
+  z-index: 1;
+}
+
+.login_wrapper .bg_elm_2 {
+  width: 1013px;
+  height: 600px;
+  position: absolute;
+  bottom: 0px;
+  right: 0px;
+  background: #002853;
+  filter: blur(300px);
+  z-index: 1;
+}
+
+.login_container {
+  justify-content: center;
+  display: flex;
+  align-items: center;
+  padding-top: 160px;
+  position: relative;
+  z-index: 2;
+  width: 100%;
+}
+
+.banner_container {
+  width: 535px;
+  height: 588px;
+  margin-left: auto;
+}
+
+.login_box {
+  width: 571px;
+  height: 588px;
+  background-color: #667eea;
+  position: relative;
+}
+
+.form_container {
+  width: 571px;
+  height: 588px;
+  background-color: white;
+  position: absolute;
+  top: -15px;
+  left: -15px;
+  padding: 25px;
+}
+
+.form_header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.form_header h2 {
+  color: #667eea;
+  margin-top: 10px;
+}
+.form_header p {
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.form_body {
+  margin-top: 40px;
+}
+
+.form_container .input_box {
+  width: 100%;
+  height: 51px;
+  background: #edf2f7;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #667eea;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.form_container input {
+  width: 100%;
+  height: 100%;
+  background-color: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.login_btn {
+  height: 51px;
+  width: 100%;
+  background: #899be7;
+  color: white;
+  border: 0;
+  outline: 0;
+  font-weight: 500;
+  margin-top: 20px;
+}
+
+/* .button-link {
+  padding: 10px;
+  border-radius: 10px;
+  background: silver;
+  text-decoration: none;
+  color: black;
+} */
+
+.forget_btn {
+  width: 100%;
+  height: 51px;
+  border: 1px solid #4a5568;
+  background-color: transparent;
+  font-weight: 500;
+  color: #4a5568;
+  margin-top: 35px;
+}
+
+ .register_btn {
+  width: 100%;
+  height: 51px;
+  border: 1px solid #4a5568;
+  background-color: transparent;
+  font-weight: 500;
+  color: #4a5568;
+  margin-top: 35px;
+}
+</style>
 
 <body>
-<a href="/">Homepage</a>
+<!-- <a href="/">Homepage</a>
 <h3>Login to Continue</h3>
-<a href="/auth/google">Login with Google</a>
+<a href="/auth/google">Login with Google</a> -->
+<div class="login_wrapper">
+    <div class="login_container">
+        <div class="login_box">
+            <div class="form_container">
+                <div class="form_header">
+                    <h2>Login</h2>
+                    <p>Sign in to your account</p>
+                </div>
+
+                <div class="form_body">
+
+                    <div class="input_box">
+                        <input type="text" placeholder="Username" />
+                    </div>
+
+                    <div class="input_box">
+                        <input type="password" placeholder="Password" />
+                    </div>
+
+                    <button class="login_btn">Login</button>
+                    <button class="forget_btn"> I forgot my password. Click here to reset</button>
+                    <button class="register_btn">Register New Account</button>
+
+                    <a href="/auth/google">Login with Google</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg_elm_1"></div>
+    <div class="bg_elm_2"></div>
+</div>
 </body>
 </html>
