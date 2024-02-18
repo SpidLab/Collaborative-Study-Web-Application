@@ -1,76 +1,78 @@
-from flask import Flask, render_template, redirect, url_for, session
+from flask import Flask, request, jsonify
 from flask_pymongo import PyMongo
-from flask_login import LoginManager
-from flask_session import Session
-from authlib.integrations.flask_client import OAuth
-from dotenv import load_dotenv
+from flask_login import LoginManager, login_user, logout_user, login_required
+from flask_cors import CORS
+from werkzeug.security import generate_password_hash, check_password_hash
+from bson.objectid import ObjectId
+from bson.json_util import dumps
+import json
 import os
-import sys
+from dotenv import load_dotenv, find_dotenv
 
 app = Flask(__name__)
-
-# Initialize PyMongo
+load_dotenv(find_dotenv())
+SECRET_KEY = os.getenv("SECRET_KEY")
+MONGO_URI = os.getenv("MONGO_URI")
+PORT = os.getenv("PORT")
 mongo = PyMongo(app)
+CORS(app)  # Initialize CORS
 
-# Initialize Flask-Login
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-# Initialize Flask-Session
-Session(app)
+class User(UserMixin):
+    def __init__(self, user_json):
+        self.user_json = user_json
 
-# Initialize OAuth lib with your Flask app
-oauth = OAuth(app)
+    @property
+    def id(self):
+        return str(self.user_json["_id"])
 
-# Check if .env file exists
-if os.path.exists(".env"):
-    load_dotenv(".env")
-else:
-    print(".env file not found.")
-    sys.exit(1)  # Exit if .env file is not found
+    @property
+    def username(self):
+        return self.user_json["username"]
 
-# Accessing environment variables
-app.config['GOOGLE_CLIENT_ID'] = os.getenv("GOOGLE_CLIENT_ID")
-app.config['GOOGLE_CLIENT_SECRET'] = os.getenv("GOOGLE_CLIENT_SECRET")
-app.config['PORT'] = int(os.getenv("PORT", 5000))  # Default to 5000 if PORT is not set
-app.config['MONGO_URI'] = os.getenv("MONGODB_URI")
-app.config['COOKIE_KEY'] = os.getenv("COOKIE_KEY")
+@login_manager.user_loader
+def load_user(user_id):
+    u = mongo.db.users.find_one({"_id": ObjectId(user_id)})
+    if not u:
+        return None
+    return User(u)
 
-if not MONGO_URI:
-    print("No mongo connection string. Set MONGODB_URI environment variable.")
-    sys.exit(1)  # Exit if MONGODB_URI is not set
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data['username']
+    password = data['password']
+    user = mongo.db.users.find_one({'username': username})
 
-# Make sure to set the secret key for sessions
-app.secret_key = app.config['SECRET_KEY']
+    if user:
+        return jsonify({'message': 'Username already exists'}), 409
 
-google = oauth.register(
-    name='google',
-    client_id=app.config['GOOGLE_CLIENT_ID'],
-    client_secret=app.config['GOOGLE_CLIENT_SECRET'],
-    access_token_url='https://accounts.google.com/o/oauth2/token',
-    access_token_params=None,
-    authorize_url='https://accounts.google.com/o/oauth2/auth',
-    authorize_params=None,
-    api_base_url='https://www.googleapis.com/oauth2/v1/',
-    client_kwargs={'scope': 'openid profile email'},
-)
+    hashed_password = generate_password_hash(password, method='sha256')
+    mongo.db.users.insert_one({'username': username, 'password': hashed_password})
 
+    return jsonify({'message': 'User created successfully'}), 201
 
-@app.route('/login')
+@app.route('/api/login', methods=['POST'])
 def login():
-    redirect_uri = url_for('authorize', _external=True)
-    return google.authorize_redirect(redirect_uri)
+    data = request.get_json()
+    username = data['username']
+    password = data['password']
+    user = mongo.db.users.find_one({'username': username})
 
-@app.route('/authorize')
-def authorize():
-    token = google.authorize_access_token()
-    user = google.parse_id_token(token)
-    # Here, you can save the user information in the session or a database, as needed
-    session['user'] = user
-    return redirect('/')
+    if user and check_password_hash(user['password'], password):
+        user_obj = User(user)
+        login_user(user_obj)
+        return jsonify({'message': 'Login successful'}), 200
 
-# Flask does not have a direct equivalent to Express's view engine setup as it uses Jinja2 by default.
-# Ensure you have a 'templates' folder in your project root with 'home.html' inside it.
+    return jsonify({'message': 'Invalid username or password'}), 401
+
+@app.route('/api/logout', methods=['POST'])
+@login_required
+def logout():
+    logout_user()
+    return jsonify({'message': 'Logout successful'})
 
 if __name__ == '__main__':
     app.run(debug=True)
