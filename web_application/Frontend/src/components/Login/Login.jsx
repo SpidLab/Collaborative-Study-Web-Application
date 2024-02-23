@@ -3,9 +3,17 @@ import banner from "../../assets/banner.gif";
 import lockIcon from "../../assets/lock_icon.png";
 import userIcon from "../../assets/user_icon.png";
 import keyIcon from "../../assets/key_icon.png";
+import { GoogleLogin } from '@react-oauth/google';
 import "./Login.css";
 
 const Login = () => {
+  const responseMessage = (response) => {
+    console.log(response);
+  };
+  const errorMessage = (error) => {
+      console.log(error);
+  };
+
   return (
 
     <div className="login_wrapper">
@@ -32,6 +40,9 @@ const Login = () => {
                     <input type="password" placeholder="Password" />
                   </div>
                   <button className="login_btn">Login</button>
+                  <div className="google_btn">
+                    <GoogleLogin onSuccess={responseMessage} onError={errorMessage} />
+                  </div>
                   <div className="text-center">
                     <button className="forget_btn">
                       I forgot my password. Click here to reset

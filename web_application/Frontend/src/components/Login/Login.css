@@ -42,14 +42,14 @@
 
 .login_box {
   width: 571px;
-  height: 588px;
+  height: 600px;
   background-color: #667eea;
   position: relative;
 }
 
 .form_container {
   width: 571px;
-  height: 588px;
+  height: 600px;
   background-color: white;
   position: absolute;
   top: -15px;
@@ -105,7 +105,7 @@
   border: 0;
   outline: 0;
   font-weight: 500;
-  margin-top: 20px;
+  margin-top: 15px;
 }
 
 .form_body .forget_btn {
@@ -122,7 +122,14 @@
   background-color: transparent;
   font-weight: 500;
   color: #4a5568;
-  margin-top: 35px;
+  margin-top: 15px;
+}
+
+.form_body .google_btn {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding-top: 10px;
 }
 
 /* Media query for responsiveness */
