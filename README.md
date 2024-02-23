@@ -1,3 +1,21 @@
+# Metadata Sharing Project
+How to run the backend: npm run dev
+
+This project is a template for a metadata sharing project. It includes a Readme file with sections for:
+
+- Project description
+- Usage instructions
+- Contributing instructions
+- Credits/acknowledgements
+- License
+- Metadata
+- Data
+- Figures
+- Results
+- References
+- Requirements
+- Authors
+
 ## Project Description
 
 The Metadata Sharing Web Application is a platform designed to facilitate the secure sharing and processing of genetic data among researchers. This application allows registered researchers, both administrators and users, to upload and manage genetic metadata related to patient data. The uploaded data can be processed according to researchers' specified criteria, such as genetic similarity analysis.
