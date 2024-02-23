@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_pymongo import PyMongo
-from flask_login import LoginManager, login_user, logout_user, login_required
+from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
@@ -12,8 +12,9 @@ from dotenv import load_dotenv, find_dotenv
 app = Flask(__name__)
 load_dotenv(find_dotenv())
 #SECRET_KEY = os.getenv("SECRET_KEY")
-MONGO_URI = os.getenv("MONGO_URI")
-PORT = os.getenv("PORT")
+#MONGO_URI = os.getenv("MONGO_URI")
+app.config["MONGO_URI"] = os.getenv("MONGO_URI")
+app.config["PORT"] = os.getenv("PORT")
 mongo = PyMongo(app)
 CORS(app)  # Initialize CORS
 
