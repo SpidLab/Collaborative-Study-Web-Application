@@ -11,7 +11,7 @@ from dotenv import load_dotenv, find_dotenv
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
-SECRET_KEY = os.getenv("SECRET_KEY")
+#SECRET_KEY = os.getenv("SECRET_KEY")
 MONGO_URI = os.getenv("MONGO_URI")
 PORT = os.getenv("PORT")
 mongo = PyMongo(app)
@@ -29,12 +29,12 @@ class User(UserMixin):
         return str(self.user_json["_id"])
 
     @property
-    def username(self):
-        return self.user_json["username"]
+    def email(self):
+        return self.user_json["email"]
 
 @login_manager.user_loader
 def load_user(user_id):
-    u = mongo.db.users.find_one({"_id": ObjectId(user_id)})
+    u = mongo.test.users.find_one({"_id": ObjectId(user_id)})
     if not u:
         return None
     return User(u)
@@ -42,31 +42,31 @@ def load_user(user_id):
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()
-    username = data['username']
+    email = data['email']
     password = data['password']
-    user = mongo.db.users.find_one({'username': username})
+    user = mongo.test.users.find_one({'email': email})
 
     if user:
-        return jsonify({'message': 'Username already exists'}), 409
+        return jsonify({'message': 'email already exists'}), 409
 
     hashed_password = generate_password_hash(password, method='sha256')
-    mongo.db.users.insert_one({'username': username, 'password': hashed_password})
+    mongo.test.users.insert_one({'email': email, 'password': hashed_password})
 
     return jsonify({'message': 'User created successfully'}), 201
 
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
-    username = data['username']
+    email = data['email']
     password = data['password']
-    user = mongo.db.users.find_one({'username': username})
+    user = mongo.test.users.find_one({'email': email})
 
     if user and check_password_hash(user['password'], password):
         user_obj = User(user)
         login_user(user_obj)
         return jsonify({'message': 'Login successful'}), 200
 
-    return jsonify({'message': 'Invalid username or password'}), 401
+    return jsonify({'message': 'Invalid email or password'}), 401
 
 @app.route('/api/logout', methods=['POST'])
 @login_required
