@@ -28,6 +28,9 @@ https://harmonious-crepe-4c5102.netlify.app
 Documentation:
 https://www.notion.so/Project-Structure-0199c8ee84834e5a9cee28c5b6496a30?pvs=4
 
+Figma:
+https://www.figma.com/file/tLovm14Otpr1TBp1K3P0PJ/ReactD1-(Copy)?type=design&node-id=0-1&mode=design
+
 ### Features
 
 - **User Authentication:** Researchers can register and log in to the platform securely, ensuring access to their respective data and processing capabilities.
