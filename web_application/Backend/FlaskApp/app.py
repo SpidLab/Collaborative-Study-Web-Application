@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from pymongo.mongo_client import MongoClient
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -7,7 +8,6 @@ from bson.json_util import dumps
 import json
 import os
 from dotenv import load_dotenv, find_dotenv
-from pymongo.mongo_client import MongoClient
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -84,6 +84,13 @@ def login():
 def logout():
     logout_user()
     return jsonify({'message': 'Logout successful'})
+
+@app.route('/api/users', methods=['GET'])
+def get_users():
+    users = db.users.find({})
+    users_list = [{"email": user["email"], "_id": str(user["_id"])} for user in users]
+    # Convert the list to JSON, `dumps` from `bson.json_util` handles MongoDB ObjectId
+    return dumps(users_list), 200
 
 
 if __name__ == '__main__':
