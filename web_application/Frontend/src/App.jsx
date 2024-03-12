@@ -1,10 +1,14 @@
 import "./App.css";
-import { Login } from "./components";
+import {Navigation} from "./components";
+import {Search} from "./components";
+import {Upload} from "./components";
 
 function App() {
   return (
     <>
-      <Login />
+      <Navigation />
+      <Search />
+      <Upload />
     </>
   );
 }
