@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import "./Upload.css";
+import { TextField, Button, Container, Typography } from '@mui/material';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 
 function UploadForm() {
     const [field1, setField1] = useState('');
@@ -27,21 +28,53 @@ function UploadForm() {
     };
 
     return (
-        <div className="body">
-        <form className="upload-form" onSubmit={handleSubmit}>
-            <label className='sec_title'>Dataset Metadata Upload</label>
-            <label htmlFor="field1">Phenotype(s):</label>
-            <input type="text" id="field1" name="field1" value={field1} onChange={handleField1Change} /><br /><br />
-
-            <label htmlFor="field2"># of Samples:</label>
-            <input type="text" id="field2" name="field2" value={field2} onChange={handleField2Change} /><br /><br />
-
-            <label htmlFor="field3">List of SPNs:</label>
-            <input type="text" id="field3" name="field3" value={field3} onChange={handleField3Change} /><br /><br />
-
-            <button type="submit">Upload Dataset</button>
-        </form>
-        </div>
+        <Container component="div" maxWidth="sm" sx={{ marginTop: 4 }}>
+            <Typography variant="h5" align="center" gutterBottom>
+                Dataset Metadata Upload
+            </Typography>
+            <form onSubmit={handleSubmit}>
+                <TextField
+                    fullWidth
+                    label="Phenotype(s)"
+                    id="field1"
+                    name="field1"
+                    value={field1}
+                    onChange={handleField1Change}
+                    variant="outlined"
+                    margin="normal"
+                />
+                <TextField
+                    fullWidth
+                    label="# of Samples"
+                    id="field2"
+                    name="field2"
+                    value={field2}
+                    onChange={handleField2Change}
+                    variant="outlined"
+                    margin="normal"
+                />
+                <TextField
+                    fullWidth
+                    label="List of SPNs"
+                    id="field3"
+                    name="field3"
+                    value={field3}
+                    onChange={handleField3Change}
+                    variant="outlined"
+                    margin="normal"
+                />
+                <Button
+                    type="submit"
+                    variant="contained"
+                    color="primary"
+                    startIcon={<CloudUploadIcon />}
+                    fullWidth
+                    sx={{ marginTop: 2 }}
+                >
+                    Upload Dataset
+                </Button>
+            </form>
+        </Container>
     );
 }
 
