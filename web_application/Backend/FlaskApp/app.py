@@ -6,15 +6,18 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
 from bson.json_util import dumps
 import json
-import os
 from dotenv import load_dotenv, find_dotenv
 import pandas as pd
 from werkzeug.utils import secure_filename
 import os
+import jwt
+import time
+from flask_httpauth import HTTPBasicAuth
 
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
+auth = HTTPBasicAuth()
 
 app.config["MONGO_URI"] = os.getenv("MONGO_URI")
 app.config["PORT"] = os.getenv("PORT")
@@ -22,6 +25,7 @@ CORS(app)  # Initialize CORS
 
 login_manager = LoginManager()
 login_manager.init_app(app)
+
 
 def get_database():
     uri = app.config["MONGO_URI"]
@@ -47,6 +51,23 @@ class User(UserMixin):
     def email(self):
         return self.user_json["email"]
 
+    def verify_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def generate_auth_token(self, expires_in=600):
+        return jwt.encode(
+            {'id': self.id, 'exp': time.time() + expires_in},
+            app.config['SECRET_KEY'], algorithm='HS256')
+
+    @staticmethod
+    def verify_auth_token(token):
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'],
+                              algorithms=['HS256'])
+        except:
+            return
+        return User.query.get(data['id'])
+
 @login_manager.user_loader
 def load_user(user_id):
     u = db.users.find_one({"_id": ObjectId(user_id)})
@@ -68,6 +89,24 @@ def register():
     db.users.insert_one({'email': email, 'password': hashed_password})
 
     return jsonify({'message': 'User created successfully'}), 201
+
+@app.route('/api/token')
+@auth.login_required
+def get_auth_token():
+    token = g.user.generate_auth_token()
+    return jsonify({ 'token': token.decode('ascii') })
+
+@auth.verify_password
+def verify_password(username_or_token, password):
+    # first try to authenticate by token
+    user = User.verify_auth_token(username_or_token)
+    if not user:
+        # try to authenticate with username/password
+        user = User.query.filter_by(username=username_or_token).first()
+        if not user or not user.verify_password(password):
+            return False
+    g.user = user
+    return True
 
 @app.route('/api/login', methods=['POST'])
 def login():
