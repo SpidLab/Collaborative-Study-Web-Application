@@ -79,7 +79,7 @@ def login():
     if user and check_password_hash(user['password'], password):
         user_obj = User(user)
         login_user(user_obj)
-        return jsonify({'message': 'Login successful'}), 200
+        return jsonify({'message': 'Login successful', 'redirect' : '/home'}), 200
 
     return jsonify({'message': 'Invalid email or password'}), 401
 
@@ -95,7 +95,6 @@ def get_users():
     users_list = [{"email": user["email"], "_id": str(user["_id"])} for user in users]
     # Convert the list to JSON, `dumps` from `bson.json_util` handles MongoDB ObjectId
     return dumps(users_list), 200
-
 
 @app.route('/api/uplaod_csv', methods=['POST'])
 @login_required
