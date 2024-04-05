@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from pymongo.mongo_client import MongoClient
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin
 from flask_cors import CORS
