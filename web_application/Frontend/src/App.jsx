@@ -2,7 +2,7 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { AppBar, Toolbar, Typography, Button } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
-import { Upload, Search } from "./components";
+import { Upload, Search, Session } from "./components";
 import BrightnessHighIcon from '@mui/icons-material/BrightnessHigh';
 
 function App() {
@@ -20,11 +20,15 @@ function App() {
           <Button color="inherit" component={RouterLink} to="/search">
             Search
           </Button>
+          <Button color="inherit" component={RouterLink} to="/session">
+            Session
+          </Button>
         </Toolbar>
       </AppBar>
       <Routes>
         <Route index element={<Upload />} />
         <Route path="/search" element={<Search />} />
+        <Route path="/session" element={<Session />} />
       </Routes>
     </Router>
   );
