@@ -51,9 +51,6 @@ class User(UserMixin):
     def email(self):
         return self.user_json["email"]
 
-    def verify_password(self, password):
-        return check_password_hash(self.password_hash, password)
-
     def generate_auth_token(self, expires_in=600):
         return jwt.encode(
             {'id': self.id, 'exp': time.time() + expires_in},
@@ -66,7 +63,7 @@ class User(UserMixin):
                               algorithms=['HS256'])
         except:
             return
-        return User.query.get(data['id'])
+        return load_user(data['id'])
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -97,12 +94,12 @@ def get_auth_token():
     return jsonify({ 'token': token.decode('ascii') })
 
 @auth.verify_password
-def verify_password(username_or_token, password):
+def verify_password(email_or_token, password):
     # first try to authenticate by token
-    user = User.verify_auth_token(username_or_token)
+    user = User.verify_auth_token(email_or_token)
     if not user:
         # try to authenticate with username/password
-        user = User.query.filter_by(username=username_or_token).first()
+        user = db.users.find_one({'email': email_or_token})
         if not user or not user.verify_password(password):
             return False
     g.user = user
