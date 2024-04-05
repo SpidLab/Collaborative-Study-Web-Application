@@ -2,7 +2,7 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { AppBar, Toolbar, Typography, Button } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
-import { Upload, Search, Session } from "./components";
+import { Upload, Search, Session, Login } from "./components";
 import BrightnessHighIcon from '@mui/icons-material/BrightnessHigh';
 
 function App() {
@@ -15,6 +15,9 @@ function App() {
             Collabrative Web Application
           </Typography>
           <Button color="inherit" component={RouterLink} to="/">
+            Login
+          </Button>
+          <Button color="inherit" component={RouterLink} to="/Upload">
             Upload
           </Button>
           <Button color="inherit" component={RouterLink} to="/search">
@@ -26,7 +29,8 @@ function App() {
         </Toolbar>
       </AppBar>
       <Routes>
-        <Route index element={<Upload />} />
+        <Route index element={<Login />} />
+        <Route path="/upload" element={<Upload />} />
         <Route path="/search" element={<Search />} />
         <Route path="/session" element={<Session />} />
       </Routes>
