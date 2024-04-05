@@ -97,7 +97,7 @@ def get_users():
     return dumps(users_list), 200
 
 
-@app.route('/api/uplaod_csv', methods=['POST'])
+@app.route('/api/upload_csv', methods=['POST'])
 @login_required
 def upload_csv():
     # Check if the post request has the file part
