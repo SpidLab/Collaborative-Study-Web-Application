@@ -2,6 +2,7 @@
 import Navigation from "./Navigation/Navigation";
 import Search from "./Search/Search";
 import Upload from "./Upload/Upload";
-import Session from "./Session/Session"
+import Session from "./Session/Session";
+import Login from "./Login/Login";
 
-export { Navigation, Search, Upload, Session };
+export {Login, Navigation, Search, Upload, Session };
