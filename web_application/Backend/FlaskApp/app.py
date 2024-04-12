@@ -1,11 +1,9 @@
 from flask import Flask, request, jsonify, g
-from pymongo.mongo_client import MongoClient
-from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin
+from flask_login import LoginManager, login_user, logout_user, UserMixin
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
 from bson.json_util import dumps
-import json
 from dotenv import load_dotenv, find_dotenv
 import pandas as pd
 from werkzeug.utils import secure_filename
@@ -13,7 +11,6 @@ import os
 import jwt
 import time
 from flask_httpauth import HTTPBasicAuth
-
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -25,7 +22,6 @@ CORS(app)  # Initialize CORS
 
 login_manager = LoginManager()
 login_manager.init_app(app)
-
 
 def get_database():
     uri = app.config["MONGO_URI"]
@@ -87,6 +83,21 @@ def register():
 
     return jsonify({'message': 'User created successfully'}), 201
 
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data['email']
+    password = data['password']
+    user = db.users.find_one({'email': email})
+
+    if user and check_password_hash(user['password'], password):
+        user_obj = User(user)
+        login_user(user_obj)
+        return jsonify({'message': 'Login successful'}), 200
+
+    return jsonify({'message': 'Invalid email or password'}), 401
+
 @app.route('/api/token')
 @auth.login_required
 def get_auth_token():
@@ -105,22 +116,8 @@ def verify_password(email_or_token, password):
     g.user = user
     return True
 
-@app.route('/api/login', methods=['POST'])
-def login():
-    data = request.get_json()
-    email = data['email']
-    password = data['password']
-    user = db.users.find_one({'email': email})
-
-    if user and check_password_hash(user['password'], password):
-        user_obj = User(user)
-        login_user(user_obj)
-        return jsonify({'message': 'Login successful'}), 200
-
-    return jsonify({'message': 'Invalid email or password'}), 401
-
 @app.route('/api/logout', methods=['POST'])
-@login_required
+@auth.login_required
 def logout():
     logout_user()
     return jsonify({'message': 'Logout successful'})
@@ -134,7 +131,7 @@ def get_users():
 
 
 @app.route('/api/upload_csv', methods=['POST'])
-@login_required
+@auth.login_required
 def upload_csv():
     # Check if the post request has the file part
     if 'file' not in request.files:
@@ -156,6 +153,8 @@ def upload_csv():
             return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
     else:
         return jsonify({'message': 'Unsupported file type'}), 400
+
+
     
     
 if __name__ == '__main__':
