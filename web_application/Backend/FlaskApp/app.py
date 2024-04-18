@@ -102,7 +102,7 @@ def login():
 @auth.login_required
 def get_auth_token():
     token = g.user.generate_auth_token()
-    return jsonify({ 'token': token.decode('ascii') })
+    return jsonify({'token': token.decode('ascii')})
 
 @auth.verify_password
 def verify_password(email_or_token, password):
@@ -129,6 +129,68 @@ def get_users():
     # Convert the list to JSON, `dumps` from `bson.json_util` handles MongoDB ObjectId
     return dumps(users_list), 200
 
+@app.route('/api/researchprojects/<user_id>', methods=['GET'])
+def get_research_projects(user_id):
+    projects = db.research_projects.find({'user_id': ObjectId(user_id)})
+    user = db.users.find_one({'_id': ObjectId(user_id)})
+    projects_list = [{"project_name": project["project_name"], "_id": str(project["_id"])} for project in projects]
+    return jsonify({"username": user["username"], "projects": projects_list}), 200
+
+@app.route('/api/researchprojects', methods=['POST'])
+def create_research_project():
+    data = request.get_json()
+    user_id = data['user_id']
+    project_name = data['project_name']
+
+    research_project = {
+        'user_id': ObjectId(user_id),
+        'project_name': project_name
+    }
+
+    db.research_projects.insert_one(research_project)
+
+    return jsonify({'message': 'Research project created successfully'}), 201
+
+@app.route('/api/sendinvitation', methods=['POST'])
+def send_invitation():
+    data = request.get_json()
+    receiver_id = data['receiver_id']
+    sender_id = data['sender_id']
+    research_project_id = data['research_project_id']
+
+    invitation = {
+        'receiver_id': ObjectId(receiver_id),
+        'sender_id': ObjectId(sender_id),
+        'research_project_id': ObjectId(research_project_id),
+        'status': 'pending'  # Add status field
+    }
+
+    db.invitations.insert_one(invitation)
+
+    return jsonify({'message': 'Invitation sent successfully'}), 200
+
+@app.route('/api/acceptinvitation', methods=['POST'])
+def accept_invitation():
+    data = request.get_json()
+    receiver_id = data['receiver_id']
+    sender_id = data['sender_id']
+    research_project_id = data['research_project_id']
+    status = data['status']
+
+    invitation = db.invitations.find_one({
+        'receiver_id': ObjectId(receiver_id),
+        'sender_id': ObjectId(sender_id),
+        'research_project_id': ObjectId(research_project_id)
+    })
+
+    if invitation:
+        db.invitations.update_one(
+            {'_id': invitation['_id']},
+            {'$set': {'status': status}}
+        )
+        return jsonify({'message': 'Invitation status updated successfully'}), 200
+    else:
+        return jsonify({'message': 'No matching invitation found'}), 404
 
 @app.route('/api/upload_csv', methods=['POST'])
 @auth.login_required
@@ -155,8 +217,7 @@ def upload_csv():
         return jsonify({'message': 'Unsupported file type'}), 400
 
 
-    
-    
+
 if __name__ == '__main__':
     app.run(debug=True)
 
