@@ -97,7 +97,8 @@ def login():
     if user and check_password_hash(user['password'], password):
         user_obj = User(user)
         login_user(user_obj)
-        return jsonify({'message': 'Login successful', 'redirect' : '/home'}), 200
+        token = g.user.generate_auth_token()
+        return jsonify({'message': 'Login successful', 'redirect' : '/home', 'token': token.decode('ascii')}), 200
 
     return jsonify({'message': 'Invalid email or password'}), 401
 
