@@ -5,15 +5,14 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
 from bson.json_util import dumps
 from dotenv import load_dotenv, find_dotenv
-import pandas as pd
 from werkzeug.utils import secure_filename
+from pymongo.mongo_client import MongoClient
 import os
 import jwt
 import time
 from flask_httpauth import HTTPBasicAuth
-from models.sessions import Session
-from utils.calculation import compute_coefficients_dictionary
-from mongoengine import DoesNotExist
+import json
+#from utils.calculation import compute_coefficients_dictionary
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -97,8 +96,7 @@ def login():
     if user and check_password_hash(user['password'], password):
         user_obj = User(user)
         login_user(user_obj)
-        token = g.user.generate_auth_token()
-        return jsonify({'message': 'Login successful', 'redirect' : '/home', 'token': token.decode('ascii')}), 200
+        return jsonify({'message': 'Login successful', 'redirect' : '/home'}), 200
 
     return jsonify({'message': 'Invalid email or password'}), 401
 
