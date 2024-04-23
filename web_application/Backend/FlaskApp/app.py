@@ -12,7 +12,6 @@ import jwt
 import time
 from flask_httpauth import HTTPBasicAuth
 import json
-#from utils.calculation import compute_coefficients_dictionary
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -97,15 +96,11 @@ def login():
     if user and check_password_hash(user['password'], password):
         user_obj = User(user)
         login_user(user_obj)
-        return jsonify({'message': 'Login successful', 'redirect' : '/home'}), 200
+        g.user = user_obj  # Set g.user to the logged-in user
+        token = g.user.generate_auth_token()
+        return jsonify({'message': 'Login successful', 'token': token, 'redirect' : '/home'}), 200
 
     return jsonify({'message': 'Invalid email or password'}), 401
-
-@app.route('/api/token')
-@auth.login_required
-def get_auth_token():
-    token = g.user.generate_auth_token()
-    return jsonify({'token': token.decode('ascii')})
 
 @auth.verify_password
 def verify_password(email_or_token, password):

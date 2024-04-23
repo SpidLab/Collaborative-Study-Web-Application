@@ -44,3 +44,4 @@ webdriver-manager==3.8.5
 Werkzeug==2.1.2
 wsproto==1.2.0
 zipp==3.8.0
+PyJWT==2.8.0
