@@ -20,6 +20,7 @@ auth = HTTPBasicAuth()
 
 app.config["MONGO_URI"] = os.getenv("MONGO_URI")
 app.config["PORT"] = os.getenv("PORT")
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 CORS(app)  # Initialize CORS
 
 login_manager = LoginManager()
