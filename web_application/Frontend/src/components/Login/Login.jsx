@@ -34,7 +34,7 @@ const Login = () => {
       }
     } catch (error) {
       // Handle network errors
-      setErrorMessage('error, please try again.');
+      setErrorMessage('Incorrect Login');
     }
   };
 
