@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, g
 from flask_login import LoginManager, login_user, logout_user, UserMixin
 from flask_cors import CORS
+from itsdangerous import Serializer, SignatureExpired, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
 from bson.json_util import dumps
@@ -49,6 +50,9 @@ class User(UserMixin):
     def email(self):
         return self.user_json["email"]
 
+    def verify_password(self, password):
+        return check_password_hash(self.password_hash, password, method='sha256')
+
     def generate_auth_token(self, expires_in=600):
         return jwt.encode(
             {'id': self.id, 'exp': time.time() + expires_in},
@@ -61,7 +65,10 @@ class User(UserMixin):
                               algorithms=['HS256'])
         except:
             return
-        return load_user(data['id'])
+        user = db.users.find_one({"_id": ObjectId(data['id'])})
+        if user:
+            return User(user)
+        return None
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -119,6 +126,11 @@ def verify_password(email_or_token, password):
 def logout():
     logout_user()
     return jsonify({'message': 'Logout successful'})
+
+@app.route('/api/resource')
+@auth.login_required
+def get_resource():
+    return jsonify({'data': 'Hello, %s!' % g.user.email})
 
 @app.route('/api/users', methods=['GET'])
 def get_users():
