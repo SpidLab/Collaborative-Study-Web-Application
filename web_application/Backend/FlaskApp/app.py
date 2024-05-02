@@ -11,7 +11,13 @@ import os
 import jwt
 import time
 from flask_httpauth import HTTPBasicAuth
-import json
+import pandas as pd
+import platform
+from threading import Thread
+
+from python_code.calculate_coefficients import compute_coefficients_dictionary
+
+
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -60,7 +66,7 @@ class User(UserMixin):
             data = jwt.decode(token, app.config['SECRET_KEY'],
                               algorithms=['HS256'])
         except:
-            return
+            return 
         return load_user(data['id'])
 
 @login_manager.user_loader
@@ -69,6 +75,31 @@ def load_user(user_id):
     if not u:
         return None
     return User(u)
+
+
+# for debugging purposes
+@app.after_request
+def after_request(response):
+    app.logger.debug('Headers added by middleware')
+    return response
+
+
+# background computation for the collaboration
+def background_computation(collaboration_id, df):
+    # Perform the computation
+    coeff_dict = compute_coefficients_dictionary(df)
+    # Once computation is done, update the collaboration status and store the results
+    result = {
+        'coefficients': coeff_dict,
+        'status': 'completed'
+    }
+    # Update the database entry for the collaboration
+    db.collaborations.update_one(
+        {'_id': ObjectId(collaboration_id)},
+        {'$set': result}
+    )
+
+
 
 @app.route('/api/register', methods=['POST'])
 def register():
@@ -126,6 +157,22 @@ def get_users():
     users_list = [{"email": user["email"], "_id": str(user["_id"])} for user in users]
     # Convert the list to JSON, `dumps` from `bson.json_util` handles MongoDB ObjectId
     return dumps(users_list), 200
+
+
+# for debugginf puposes
+@app.route('/test_verify_token')
+def test_verify_token():
+    # Create a test user id and token
+    token = request.args.get('token')
+
+    # Try to verify the token
+    user = User.verify_auth_token(token)
+    if not user:
+        return jsonify({'message': 'Invalid or expired token'}), 401
+
+    # If token is valid, return success message
+    return jsonify({'message': 'Token is valid', 'user_id': user.id}), 200
+
 
 @app.route('/api/researchprojects/<user_id>', methods=['GET'])
 def get_research_projects(user_id):
@@ -190,8 +237,9 @@ def accept_invitation():
     else:
         return jsonify({'message': 'No matching invitation found'}), 404
 
+
+
 @app.route('/api/upload_csv', methods=['POST'])
-@auth.login_required
 def upload_csv():
     # Check if the post request has the file part
     if 'file' not in request.files:
@@ -202,86 +250,114 @@ def upload_csv():
         return jsonify({'message': 'No selected file'}), 400
     if file and file.filename.endswith('.csv'):
         filename = secure_filename(file.filename)
-        filepath = os.path.join('/tmp', filename)
+        if platform.system() == "Windows":
+            filepath = os.path.join(os.getcwd(), 'uploads', filename)
+        else: 
+            filepath = os.path.join('/tmp', filename)
         file.save(filepath)
         try:
             df = pd.read_csv(filepath)
-            records = df.to_dict('records')  
-            for record in records:
-                record['datasetID'] = str(ObjectId())  
-                db.datasets.insert_one(record)
+            
+            data = {
+                'datasetID': str(ObjectId()),
+                'data': df.to_dict(orient='list'),
+                'filename': filename,
+                'filepath': filepath,
+            }
 
-            return jsonify({'message': 'CSV file processed successfully'}), 200
+            db.datasets.insert_one(data)
+
+            return jsonify({'message': 'CSV file processes successfully', 'dataset_id': data['datasetID']}), 200
         except Exception as e:
             return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
-    else:
-        return jsonify({'message': 'Unsupported file type'}), 400
+
+        else: 
+            return jsonify({'message': 'Unsupported file type'}), 400
 
 
-
-# Route to retrieve list of collaborators for a session
-@app.route('/api/user/<user_id>/collaborations', methods=['GET'])
-def get_user_collaborations(user_id):
-    # Find all sessions where the user is either the owner or a collaborator
-    sessions = Session.objects.filter(__raw__={'$or': [{'userID': user_id}, {'collaborators': user_id}]})
-    
-    # Prepare the list of sessions with session ID and collaborators
-    collaborations = [
-        {'sessionID': str(session.id), 'collaborators': session.collaborators} 
-        for session in sessions
+# Route to retrieve list of all datasets uploaded by any user --- would be used once login required tag added to csv upload
+@app.route('/api/datasets', methods=['GET'])
+def get_datasets():
+    datasets = db.datasets.find({})
+    datasets_list = [
+        {
+            'dataset_id': str(dataset['_id']),
+            'file_path': dataset.get('file_path', 'No file path available'),
+        }
+        for dataset in datasets
     ]
-    
-    return jsonify(collaborations), 200
+    return jsonify(datasets_list), 200
 
 
 # Start collaboration - need to fix the calculate_coefficient.py file
 @app.route('/api/start_collaboration', methods=['POST'])
+@auth.login_required
 def start_collaboration():
     data = request.json
-    user_ids = data.get('user_ids')  # Expecting a list of user IDs
+    initiator_id = g.user.id
+    user_ids = data.get('user_ids', [])
 
-    try:
-        dataframes = []
-        for user_id in user_ids:
-            dataset = db.datasets.find_one({'userID': user_id})
-            if dataset:
-                df = pd.read_csv(io.StringIO(dataset['csv_content']))
-                dataframes.append(df)
-            else:
-                return jsonify({'message': f"Dataset for user {user_id} not found"}), 404
+    for user_id in user_ids:
+        if not db.users.find_one({'_id': ObjectId(user_id)}):
+            return jsonify({'message': 'Invalid user ID: ' + user_id}), 404
+        
+    collaboration = {
+        '_id': ObjectId(),  
+        'initiator': ObjectId(initiator_id),  
+        'collaborators': [ObjectId(uid) for uid in user_ids],  
+        'status': 'in_progress'
+    }
 
-        merged_data = pd.concat(dataframes, axis=1, join='inner')
-        coeff_dict = compute_coefficients_dictionary(merged_data)
+    # add calculation here for background running
 
-        results_table = pd.DataFrame(list(coeff_dict.items()), columns=['Pair', 'Coefficient'])
+    db.collaborations.insert_one(collaboration)
+    collaboration_id = collaboration['_id']
 
-        return results_table.to_json(orient='records'), 200
-
-    except Exception as e:
-        return jsonify({'message': 'An error occurred while starting collaboration', 'error': str(e)}), 500
+    # Start the background computation
+    thread = Thread(target=background_computation, args=(collaboration_id, df))
+    thread.start()
     
+    return jsonify({'message': 'Collaboration started successfully', 'collaboration_id': str(collaboration['_id'])}), 201                        
 
 
-# fix issues with models first
-#@app.route('/api/collaborations/<session_id>', methods=['GET'])
-#def get_collaboration_details(session_id):
- #   try:
- #       session = Session.objects.get(sessionID=session_id)
-   #     metadata = session.metadataID  
-#
- #       # Response object
-  #      collaboration_details = {
-   #         "sessionID": session.sessionID,
-    #        "status": session.status,
-     #       "metadata": metadata,
-      #      "results": session.results  # create a results section???
-       # }
+# endpoint to get all details about a specific collaboration
+@app.route('/api/collaborations/<collaboration_id>', methods=['GET'])
+def get_collaboration(collaboration_id):
+    collaboration = db.collaborations.find_one({'_id': ObjectId(collaboration_id)})
+    if not collaboration:
+        return jsonify({'message': 'Collaboration not found'}), 404
+        
+    collaboration_data = {
+        'collaboration_id': str(collaboration['_id']),
+        'initiator': str(collaboration['initiator']),
+        'collaborators': [str(user_id) for user_id in collaboration['collaborators']],
+        'status': collaboration['status']
+        # add a line to get the results as well if the status is complete
+    }
+    return jsonify(collaboration_data), 200
 
-        #return jsonify(collaboration_details), 200
 
-    #except DoesNotExist:
-    #    return jsonify({'message': 'Collaboration not found'}), 404
 
+# endpoint to get the collaborations for a given user
+@app.route('/api/collaborations/<user_id>', methods=['GET'])
+def get_user_collaborations(user_id):
+    # This should return collaborations where the user is either the initiator or a collaborator
+    collaborations = db.collaborations.find({
+        '$or': [
+            {'initiator': ObjectId(user_id)},
+            {'collaborators': ObjectId(user_id)}
+        ]
+    })
+    collaborations_list = [
+        {
+            'collaboration_id': str(collab['_id']),
+            'status': collab.get('status', 'Status not set'),
+            'initiator': str(collab['initiator']),
+            'collaborators': [str(c) for c in collab.get('collaborators', [])]
+        }
+        for collab in collaborations
+    ]
+    return jsonify(collaborations_list), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
