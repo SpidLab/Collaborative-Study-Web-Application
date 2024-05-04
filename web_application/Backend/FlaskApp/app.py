@@ -139,8 +139,10 @@ def get_users():
     # Convert the list to JSON, `dumps` from `bson.json_util` handles MongoDB ObjectId
     return dumps(users_list), 200
 
-@app.route('/api/researchprojects/<user_id>', methods=['GET'])
-def get_research_projects(user_id):
+@app.route('/api/researchprojects', methods=['GET'])
+def get_research_projects():
+    data = request.get_json()
+    user_id = data['user_id']
     projects = db.research_projects.find({'user_id': ObjectId(user_id)})
     user = db.users.find_one({'_id': ObjectId(user_id)})
     projects_list = [{"project_name": project["project_name"], "_id": str(project["_id"])} for project in projects]
