@@ -161,6 +161,28 @@ def create_research_project():
 
     return jsonify({'message': 'Research project created successfully'}), 201
 
+@app.route('/api/invitations', methods=['GET'])
+def get_user_invitations():
+    data = request.get_json()
+    user_id = data['user_id']
+
+    invitations = db.invitations.find({
+        '$or': [
+            {'receiver_id': ObjectId(user_id)},
+            {'sender_id': ObjectId(user_id)}
+        ]
+    })
+
+    invitations_list = [{
+        "_id": str(invitation["_id"]),
+        "receiver_id": str(invitation["receiver_id"]),
+        "sender_id": str(invitation["sender_id"]),
+        "research_project_id": str(invitation["research_project_id"]),
+        "status": invitation["status"]
+    } for invitation in invitations]
+
+    return jsonify(invitations_list), 200
+
 @app.route('/api/sendinvitation', methods=['POST'])
 def send_invitation():
     data = request.get_json()
@@ -185,7 +207,6 @@ def accept_invitation():
     receiver_id = data['receiver_id']
     sender_id = data['sender_id']
     research_project_id = data['research_project_id']
-    status = data['status']
 
     invitation = db.invitations.find_one({
         'receiver_id': ObjectId(receiver_id),
@@ -196,9 +217,31 @@ def accept_invitation():
     if invitation:
         db.invitations.update_one(
             {'_id': invitation['_id']},
-            {'$set': {'status': status}}
+            {'$set': {'status': 'accepted'}}
         )
-        return jsonify({'message': 'Invitation status updated successfully'}), 200
+        return jsonify({'message': 'Invitation status updated successfully to accepted'}), 200
+    else:
+        return jsonify({'message': 'No matching invitation found'}), 404
+
+@app.route('/api/rejectinvitation', methods=['POST'])
+def reject_invitation():
+    data = request.get_json()
+    receiver_id = data['receiver_id']
+    sender_id = data['sender_id']
+    research_project_id = data['research_project_id']
+
+    invitation = db.invitations.find_one({
+        'receiver_id': ObjectId(receiver_id),
+        'sender_id': ObjectId(sender_id),
+        'research_project_id': ObjectId(research_project_id)
+    })
+
+    if invitation:
+        db.invitations.update_one(
+            {'_id': invitation['_id']},
+            {'$set': {'status': 'rejected'}}
+        )
+        return jsonify({'message': 'Invitation status updated successfully to rejected'}), 200
     else:
         return jsonify({'message': 'No matching invitation found'}), 404
 
