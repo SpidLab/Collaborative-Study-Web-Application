@@ -38,6 +38,8 @@ def get_database():
 
 db = get_database()
 
+blacklisted_tokens = []
+
 class User(UserMixin):
     def __init__(self, user_json):
         self.user_json = user_json
@@ -60,6 +62,9 @@ class User(UserMixin):
 
     @staticmethod
     def verify_auth_token(token):
+        if token in blacklisted_tokens:
+            return None
+
         try:
             data = jwt.decode(token, app.config['SECRET_KEY'],
                               algorithms=['HS256'])
@@ -124,6 +129,12 @@ def verify_password(email_or_token, password):
 @app.route('/api/logout', methods=['POST'])
 @auth.login_required
 def logout():
+    # Get the token from the request headers
+    token = request.headers.get('Authorization').split()[1]
+
+    # Add the token to the blacklist
+    blacklisted_tokens.append(token)
+
     logout_user()
     return jsonify({'message': 'Logout successful'})
 
