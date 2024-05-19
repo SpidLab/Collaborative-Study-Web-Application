@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { AppBar, Toolbar, Typography } from "@mui/material";
-import { Home, Upload, Search, Session, NewUser, Login } from "./components";
+import { Home, Upload, Search, Session, Login, NewUser } from "./components";
 import BrightnessHighIcon from '@mui/icons-material/BrightnessHigh';
 import LoggedIn from './components/Navigation/LoggedIn';
 import LoggedOut from './components/Navigation/LoggedOut';
@@ -14,18 +14,23 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    setIsLoggedIn(!!token); // Convert token to boolean
+    // Check if user is already logged in based on localStorage
+    const userLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+    setIsLoggedIn(userLoggedIn);
   }, []);
 
   const handleLogin = () => {
+    // Simulate login and set isLoggedIn to true
     setIsLoggedIn(true);
+    // Set isLoggedIn to true in localStorage
+    localStorage.setItem('isLoggedIn', 'true');
   };
 
   const handleLogout = () => {
+    // Simulate logout and set isLoggedIn to false
     setIsLoggedIn(false);
-    localStorage.removeItem('token');
-    return <Navigate to="/login" />;
+    // Set isLoggedIn to false in localStorage
+    localStorage.setItem('isLoggedIn', 'false');
   };
 
   return (
@@ -39,21 +44,30 @@ function App() {
           {isLoggedIn ? (
             <LoggedIn onLogout={handleLogout} />
           ) : (
-            <LoggedOut />
+            <LoggedOut onLogin={handleLogin} />
           )}
         </Toolbar>
       </AppBar>
 
       <Routes>
-        <Route path="/" element={isLoggedIn ? <Home /> : <Navigate to="/login" />} />
+        <Route path="/" element={<Home />} />
         <Route path="/register" element={<NewUser />} />
-        <Route path="/login" element={<Login onLogin={handleLogin} />} />
-        <Route path="/upload" element={isLoggedIn ? <Upload /> : <Navigate to="/login" />} />
-        <Route path="/search" element={isLoggedIn ? <Search /> : <Navigate to="/login" />} />
-        <Route path="/session" element={isLoggedIn ? <Session /> : <Navigate to="/login" />} />
-        <Route path="/collaboration" element={isLoggedIn ? <CollaborationsPage /> : <Navigate to="/login" />} />
-        <Route path="/collaboration/:id" element={isLoggedIn ? <CollaborationDetailsPage /> : <Navigate to="/login" />} />
+        {!isLoggedIn ? (
+          <Route path="/login" element={<Login onLogin={handleLogin} />} />
+        ) : (
+          <>
+            <Route path="/upload" element={<Upload />} />
+            <Route path="/search" element={<Search />} />
+            <Route path="/session" element={<Session />} />
+            <Route path="/collaboration" element={<CollaborationsPage />} />
+            <Route path="/collaboration/:id" element={<CollaborationDetailsPage />} />
+          </>
+        )}
+
+        {/* Route for Forgot Username page */}
         <Route path="/forgot/username" element={<ForgotUsername />} />
+
+        {/* Route for Forgot Password page */}
         <Route path="/forgot/password" element={<ForgotPassword />} />
       </Routes>
     </Router>
@@ -61,3 +75,4 @@ function App() {
 }
 
 export default App;
+

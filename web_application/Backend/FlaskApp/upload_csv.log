@@ -1,0 +1,51 @@
+2024-05-16 17:02:22,399 - INFO - Received request to upload CSV file
+2024-05-16 17:02:22,400 - INFO - Field1: 1, Field2: 2
+2024-05-16 17:02:22,401 - INFO - Uploaded file saved to: /tmp/test.csv
+2024-05-16 17:02:22,403 - INFO - Read 0 records from CSV file
+2024-05-16 17:02:22,403 - ERROR - An error occurred: documents must be a non-empty list
+2024-05-16 17:06:07,947 - INFO - Received request to upload CSV file
+2024-05-16 17:06:07,948 - INFO - Field1: test, Field2: 1
+2024-05-16 17:06:07,949 - INFO - Uploaded file saved to: /tmp/test.csv
+2024-05-16 17:06:07,951 - INFO - Read 0 records from CSV file
+2024-05-16 17:06:07,952 - ERROR - An error occurred: document must be an instance of dict, bson.son.SON, bson.raw_bson.RawBSONDocument, or a type that inherits from collections.MutableMapping
+2024-05-16 17:06:18,055 - INFO - Received request to upload CSV file
+2024-05-16 17:06:18,055 - INFO - Received request to upload CSV file
+2024-05-16 17:06:18,057 - INFO - Field1: test, Field2: 1
+2024-05-16 17:06:18,057 - INFO - Field1: test, Field2: 1
+2024-05-16 17:06:18,057 - INFO - Uploaded file saved to: /tmp/test.csv
+2024-05-16 17:06:18,057 - INFO - Uploaded file saved to: /tmp/test.csv
+2024-05-16 17:06:18,060 - INFO - Read 0 records from CSV file
+2024-05-16 17:06:18,060 - INFO - Read 0 records from CSV file
+2024-05-16 17:06:18,061 - ERROR - An error occurred: document must be an instance of dict, bson.son.SON, bson.raw_bson.RawBSONDocument, or a type that inherits from collections.MutableMapping
+2024-05-16 17:06:18,061 - ERROR - An error occurred: document must be an instance of dict, bson.son.SON, bson.raw_bson.RawBSONDocument, or a type that inherits from collections.MutableMapping
+2024-05-16 17:10:30,490 - INFO - Received request to upload CSV file
+2024-05-16 17:10:30,492 - INFO - Field1: test, Field2: 1
+2024-05-16 17:10:30,492 - INFO - Uploaded file saved to: /tmp/test.csv
+2024-05-16 17:10:30,494 - INFO - Read 0 records from CSV file
+2024-05-16 17:10:30,494 - ERROR - An error occurred: local variable 'record' referenced before assignment
+2024-05-16 17:11:32,425 - INFO - Received request to upload CSV file
+2024-05-16 17:11:32,426 - INFO - Field1: test, Field2: 1
+2024-05-16 17:11:32,426 - INFO - Uploaded file saved to: /tmp/test.csv
+2024-05-16 17:11:32,429 - INFO - Read 0 records from CSV file
+2024-05-16 17:11:32,429 - ERROR - An error occurred: local variable 'record' referenced before assignment
+2024-05-16 17:14:46,864 - INFO - Received request to upload CSV file
+2024-05-16 17:14:46,865 - INFO - Field1: 1, Field2: 1
+2024-05-16 17:14:46,866 - INFO - Uploaded file saved to: /tmp/test.csv
+2024-05-16 17:14:46,868 - WARNING - DataFrame is empty
+2024-05-16 17:14:46,868 - WARNING - No records to insert into MongoDB
+2024-05-16 17:16:19,592 - INFO - Received request to upload CSV file
+2024-05-16 17:16:19,592 - INFO - Received request to upload CSV file
+2024-05-16 17:16:19,593 - INFO - Field1: testing, Field2: 1
+2024-05-16 17:16:19,593 - INFO - Field1: testing, Field2: 1
+2024-05-16 17:16:19,593 - INFO - Uploaded file saved to: /tmp/Title_Keywords_Abstract_-_Sheet2_1.csv
+2024-05-16 17:16:19,593 - INFO - Uploaded file saved to: /tmp/Title_Keywords_Abstract_-_Sheet2_1.csv
+2024-05-16 17:16:20,714 - INFO - Records inserted into MongoDB successfully
+2024-05-16 17:16:20,714 - INFO - Records inserted into MongoDB successfully
+2024-05-16 17:27:20,666 - INFO - Received request to upload CSV file
+2024-05-16 17:27:20,668 - INFO - Field1: testingupload, Field2: 2
+2024-05-16 17:27:20,668 - INFO - Uploaded file saved to: /tmp/testingUpload_-_Sheet1.csv
+2024-05-16 17:27:20,718 - INFO - Records inserted into MongoDB successfully
+2024-05-19 14:06:38,279 - INFO - Received request to upload CSV file
+2024-05-19 14:06:38,283 - INFO - Field1: test, Field2: 1
+2024-05-19 14:06:38,284 - INFO - Uploaded file saved to: /tmp/testingUpload_-_Sheet1.csv
+2024-05-19 14:06:38,325 - INFO - Records inserted into MongoDB successfully

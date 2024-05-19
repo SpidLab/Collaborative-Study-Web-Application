@@ -13,6 +13,10 @@ import jwt
 import time
 from flask_httpauth import HTTPBasicAuth
 import json
+import pandas as pd
+import logging
+
+#Added Pandas
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -122,7 +126,6 @@ def verify_password(email_or_token, password):
     return True
 
 @app.route('/api/logout', methods=['POST'])
-@auth.login_required
 def logout():
     logout_user()
     return jsonify({'message': 'Logout successful'})
@@ -247,34 +250,56 @@ def reject_invitation():
     else:
         return jsonify({'message': 'No matching invitation found'}), 404
 
+
 @app.route('/api/upload_csv', methods=['POST'])
-@auth.login_required
 def upload_csv():
-    # Check if the post request has the file part
-    if 'file' not in request.files:
-       return jsonify({'message': 'No file part in the request'}), 400
-    file = request.files['file']
-    # If the user does not select a file, the browser submits an empty file w/o a filename
-    if file.filename == '':
-        return jsonify({'message': 'No selected file'}), 400
-    if file and file.filename.endswith('.csv'):
-        filename = secure_filename(file.filename)
-        filepath = os.path.join('/tmp', filename)
-        file.save(filepath)
-        try:
-            df = pd.read_csv(filepath)
-            records = df.to_dict('records')  
-            for record in records:
-                record['datasetID'] = str(ObjectId())  
-                db.datasets.insert_one(record)
+    try:
+        # Check if the post request has the file part
+        if 'file' not in request.files:
+            return jsonify({'message': 'No file part in the request'}), 400
+
+        # Get text fields from the request
+        field1 = request.form.get('field1')
+        field2 = request.form.get('field2')
+
+        file = request.files['file']
+        # If the user does not select a file, the browser submits an empty file w/o a filename
+        if file.filename == '':
+            return jsonify({'message': 'No selected file'}), 400
+        if file and file.filename.endswith('.csv'):
+            filename = secure_filename(file.filename)
+            filepath = os.path.join('/tmp', filename)
+            file.save(filepath)
+
+            # Initialize an empty list to store records
+            records = []
+
+            try:
+                df = pd.read_csv(filepath)
+                # Check if DataFrame is not empty
+                if not df.empty:
+                    # Iterate over DataFrame rows and construct records
+                    for index, row in df.iterrows():
+                        record = {}  # Initialize record as a dictionary
+                        record['datasetID'] = str(ObjectId())  
+                        record['field1'] = field1
+                        record['field2'] = field2
+                        # Populate record with row data
+                        for column, value in row.items():
+                            record[column] = value
+                        records.append(record)  # Append record to records list
+            except Exception as e:
+                return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+
+            # Insert records into MongoDB
+            if records:
+                db.fileUploads.insert_many(records)
 
             return jsonify({'message': 'CSV file processed successfully'}), 200
-        except Exception as e:
-            return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
-    else:
-        return jsonify({'message': 'Unsupported file type'}), 400
-
-
+        else:
+            return jsonify({'message': 'Unsupported file type'}), 400
+    except Exception as e:
+        return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
 # Route to retrieve list of collaborators for a session
 @app.route('/api/user/<user_id>/collaborations', methods=['GET'])
