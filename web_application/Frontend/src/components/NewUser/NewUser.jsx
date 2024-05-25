@@ -3,6 +3,7 @@ import { TextField, Button, Container, Typography, Box, CircularProgress, styled
 import axios from 'axios';
 import { Link as RouterLink } from 'react-router-dom';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
+import URL from '../../config';
 
 const WhiteButton = styled(Button)({
   background: '#fff',
@@ -42,7 +43,7 @@ const NewUser = () => {
 
     try {
       console.log('Sending request:', { username, password }); // Debugging
-      const response = await axios.post('https://ubiquitous-space-potato-q77r667x74qx29vvr-5000.app.github.dev/api/register', {
+      const response = await axios.post(`${URL}/api/register`, {
         email: username,
         password,
       });

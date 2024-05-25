@@ -3,6 +3,7 @@ import { Button, IconButton, Tooltip, Avatar, Menu, MenuItem } from "@mui/materi
 import { Link as RouterLink } from "react-router-dom";
 import PersonIcon from '@mui/icons-material/Person';
 import axios from 'axios';
+import URL from '../../config';
 
 export default function LoggedIn({ onLogout }) {
   const [anchorEl, setAnchorEl] = React.useState(null);
@@ -19,7 +20,7 @@ export default function LoggedIn({ onLogout }) {
   const handleLogout = async () => {
     try {
       // Call the logout API endpoint
-      await axios.post('https://ubiquitous-space-potato-q77r667x74qx29vvr-5000.app.github.dev/api/logout');
+      await axios.post(`${URL}/api/logout`);
       // Remove token from localStorage
       localStorage.removeItem('token');
       onLogout();
@@ -47,6 +48,9 @@ export default function LoggedIn({ onLogout }) {
       <Button color="inherit" component={RouterLink} to="/search">
         Search
       </Button>
+      <Button color="inherit" component={RouterLink} to="/collaboration">
+        Collaboration
+      </Button>
       <Button color="inherit" component={RouterLink} to="/session">
         Session
       </Button>
@@ -68,10 +72,13 @@ export default function LoggedIn({ onLogout }) {
         open={open}
         onClose={handleClose}
       >
-        <MenuItem onClick={handleLogout}>Logout</MenuItem>
-        <MenuItem component={RouterLink} to="/collaboration" onClick={handleClose}>
-          Collaboration
+        <MenuItem component={RouterLink} to="/" onClick={handleClose}>
+          Edit Profile
         </MenuItem>
+        <MenuItem component={RouterLink} to="/" onClick={handleClose}>
+          Change Password
+        </MenuItem>
+        <MenuItem onClick={handleLogout}>Logout</MenuItem>
       </Menu>
     </>
   );

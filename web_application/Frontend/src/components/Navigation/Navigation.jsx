@@ -31,9 +31,9 @@ const Navigation = () => {
 
         <ul className="navigation_left">
           <li>Home</li>
-          <li>Upload Dataset</li>
-          <li>Create Session</li>
-          <li>View Results</li>
+          <li>Upload</li>
+          <li>Search</li>
+          <li>Collaboration</li>
         </ul>
         <div className="navigation_right">
           <button className="sign_in">Sign in</button>
