@@ -55,7 +55,7 @@ class User(UserMixin):
         return self.user_json["email"]
 
     def verify_password(self, password):
-        return check_password_hash(self.password_hash, password, method='sha256')
+        return check_password_hash(self.password_hash, password)
 
     def generate_auth_token(self, expires_in=600):
         return jwt.encode(
@@ -91,7 +91,7 @@ def register():
     if user:
         return jsonify({'message': 'email already exists'}), 409
 
-    hashed_password = generate_password_hash(password, method='sha256')
+    hashed_password = generate_password_hash(password, method='scrypt', salt_length=16)
     db.users.insert_one({'email': email, 'password': hashed_password})
 
     return jsonify({'message': 'User created successfully'}), 201
@@ -103,7 +103,7 @@ def login():
     email = data['email']
     password = data['password']
     user = db.users.find_one({'email': email})
-
+    print(user['password'], password, generate_password_hash(password, method='scrypt', salt_length=16))
     if user and check_password_hash(user['password'], password):
         user_obj = User(user)
         login_user(user_obj)
@@ -120,6 +120,7 @@ def verify_password(email_or_token, password):
     if not user:
         # try to authenticate with username/password
         user = db.users.find_one({'email': email_or_token})
+
         if not user or not user.verify_password(password):
             return False
     g.user = user
@@ -268,37 +269,37 @@ def upload_csv():
             return jsonify({'message': 'No selected file'}), 400
         if file and file.filename.endswith('.csv'):
             filename = secure_filename(file.filename)
-            filepath = os.path.join('/tmp', filename)
+            filepath = os.path.join('./', filename)
             file.save(filepath)
 
             # Initialize an empty list to store records
-            records = []
-
+            record = {}  # Initialize record as a dictionary
             try:
                 df = pd.read_csv(filepath)
                 # Check if DataFrame is not empty
                 if not df.empty:
                     # Iterate over DataFrame rows and construct records
-                    for index, row in df.iterrows():
-                        record = {}  # Initialize record as a dictionary
-                        record['datasetID'] = str(ObjectId())  
-                        record['field1'] = field1
-                        record['field2'] = field2
-                        # Populate record with row data
-                        for column, value in row.items():
-                            record[column] = value
-                        records.append(record)  # Append record to records list
+                    record['datasetID'] = str(ObjectId())  
+                    record['phenotypes'] = str(field1)
+                    record['numberOfSamples'] = str(field2)
+                    record['columns'] = ','.join(df.columns.to_list())
+                    record['records'] = {}
+                    for i in range(df.shape[0]):
+                        record['records'][str(i)] = ','.join(str(item) for item in df.iloc[i].to_list())
+                    
             except Exception as e:
                 return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
             # Insert records into MongoDB
-            if records:
-                db.fileUploads.insert_many(records)
+            if record:
+                print(len(record.keys()))
+                db.fileUploads.insert_one(record)
 
             return jsonify({'message': 'CSV file processed successfully'}), 200
         else:
             return jsonify({'message': 'Unsupported file type'}), 400
     except Exception as e:
+        print(e)
         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
 # Route to retrieve list of collaborators for a session

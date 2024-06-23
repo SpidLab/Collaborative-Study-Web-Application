@@ -1,2 +1,2 @@
-const URL = 'https://ubiquitous-space-potato-q77r667x74qx29vvr-5000.app.github.dev';
+const URL = 'http://127.0.0.1:5000';
 export default URL;

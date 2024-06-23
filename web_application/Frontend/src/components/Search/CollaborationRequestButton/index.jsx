@@ -13,7 +13,7 @@ const CollaborationRequestButton = ({ receiverId, senderId }) => {
     };
 
     // Send POST request to the backend endpoint
-    fetch('https://ubiquitous-space-potato-q77r667x74qx29vvr-5000.app.github.dev/api/sendinvitation', {
+    fetch('http://127.0.0.1:5000/api/sendinvitation', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

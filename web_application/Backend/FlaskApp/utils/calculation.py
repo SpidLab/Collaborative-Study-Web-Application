@@ -3,6 +3,8 @@ import numpy as np
 import itertools
 from pymongo import MongoClient
 import io
+from flask import Flask, request, jsonify, g
+from calculate_coefficients import compute_coefficients_dictionary
 
 def get_user_dataset(client, user_id):
     db = client['your_database_name']
@@ -22,7 +24,7 @@ def start_collaboration():
     user2 = data['user2']
 
     # Connect to MongoDB
-    client = MongoClient('mongodb://localhost/your_database_name')
+    client = MongoClient(os.getenv("MONGO_URI"))
 
     try:
         # Get datasets for both users
