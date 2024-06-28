@@ -39,7 +39,7 @@ def compute_coefficients_dictionary(df):
 
 if __name__ == "__main__":
     #TODO Modify the code below to read from a list of csv files and merge them together
-
+    print("sad")
     # Read the first CSV file
     first_half_data = pd.read_csv("first_dataset.csv", index_col=0)
     # Read the second CSV file

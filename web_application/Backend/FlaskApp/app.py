@@ -14,6 +14,10 @@ import time
 from flask_httpauth import HTTPBasicAuth
 import json
 import pandas as pd
+import io
+from flask import Flask, request, jsonify, g
+from calculate_coefficients import compute_coefficients_dictionary
+
 # import logging
 
 #Added Pandas
@@ -41,6 +45,28 @@ def get_database():
     return client['test']
 
 db = get_database()
+
+def get_user_dataset(client, user_id):
+    db = get_database()
+    collection = db["fileUploads"]
+
+    # Querying for documents where phenotypes = "f1"
+    query = {"phenotypes": user_id}
+
+    # Executing the query
+    dataset_document = collection.find(query)
+    if dataset_document:
+        for result in dataset_document:
+            keys = result['records'].keys()
+            records = []
+            for key in keys:
+                records.append(result['records'][key].split(","))
+            df = pd.DataFrame(records, columns = result['columns'].split(","))
+            df.set_index(result['columns'].split(",")[0], inplace = True)
+            return df
+    else:
+        raise ValueError(f"Dataset for user {user_id} not found")
+
 
 class User(UserMixin):
     def __init__(self, user_json):
@@ -344,6 +370,39 @@ def start_collaboration():
         return jsonify({'message': 'An error occurred while starting collaboration', 'error': str(e)}), 500
     
 
+@app.route('/api/calculations', methods=['GET'])
+def calculate_cofficients():
+    data = request.json
+    user1 = data['user1']
+    user2 = data['user2']
+
+    
+
+    # Connect to MongoDB
+    client = MongoClient(os.getenv("MONGO_URI"))
+
+    try:
+        # Get datasets for both users
+        df_user1 = get_user_dataset(client, user1)
+        df_user2 = get_user_dataset(client, user2)
+
+        # Merge the datasets
+
+        merged_data = pd.concat([df_user1, df_user2], axis=1)
+  
+        # Compute coefficients
+        coeff_dict = compute_coefficients_dictionary(merged_data)
+
+        # Convert the results to a table format (DataFrame)
+        results_table = pd.DataFrame(list(coeff_dict.items()), columns=['Pair', 'Coefficient'])
+        
+        # Return the table as a JSON response
+        return results_table.to_json(orient='records'), 200
+
+    except ValueError as ve:
+        return jsonify({'message': str(ve)}), 404
+    except Exception as e:
+        return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
 # fix issues with models first
 #@app.route('/api/collaborations/<session_id>', methods=['GET'])

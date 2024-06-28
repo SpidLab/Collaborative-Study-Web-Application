@@ -4,7 +4,7 @@ import itertools
 from pymongo import MongoClient
 import io
 from flask import Flask, request, jsonify, g
-from calculate_coefficients import compute_coefficients_dictionary
+from web_application.Backend.FlaskApp.calculate_coefficients import compute_coefficients_dictionary
 
 def get_user_dataset(client, user_id):
     db = client['your_database_name']
@@ -16,12 +16,13 @@ def get_user_dataset(client, user_id):
 
 # Rest of the functions (calculate_phi and compute_coefficients_dictionary) remain unchanged
 
-# Flask endpoint to start a collaboration
-@app.route('/api/start_collaboration', methods=['POST'])
 def start_collaboration():
     data = request.json
     user1 = data['user1']
     user2 = data['user2']
+
+    user1 = pd.read_csv("../first_dataset.csv")
+    user2 = pd.read_csv("../second_dataset.csv")
 
     # Connect to MongoDB
     client = MongoClient(os.getenv("MONGO_URI"))
