@@ -29,9 +29,8 @@ function App() {
     return <Navigate to="/login" />;
   };
 
-//  Auto-logout feature : Here we need to implement conditional logic for LocalStorage
   let logoutTimer;
-    const logoutTime = 10 * 60 * 1000; //Currectly set to 10mins
+    const logoutTime = 10 * 60 * 1000;
 
     const logout = useCallback(() => {
       const token = localStorage.getItem('token');

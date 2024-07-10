@@ -1,27 +1,121 @@
-import React, { useState } from 'react';
-import { Container, Grid, TextField, Button, Typography, Card, CardContent, CardActions } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Container, Grid, TextField, Button, Typography, Card, CardContent, CardActions, Snackbar, Alert } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import axios from 'axios';
+import URL from '../../config'; 
 
 function SearchPage() {
   const [phenotype, setPhenotype] = useState('');
   const [minSamples, setMinSamples] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isRequestSent, setIsRequestSent] = useState({});
+  const [message, setMessage] = useState('');
+  const [open, setOpen] = useState(false);
 
-  const handleSendRequest = (id) => {
-    console.log(`Sending collaboration request to ${id}`);
-    setIsRequestSent((prev) => ({ ...prev, [id]: true }));
+  const getToken = () => {
+    return localStorage.getItem('token');
   };
 
-  const handleSearch = () => {
-    const dummyResults = [
-      { id: 1, name: 'Dr. John Doe', field: 'Lactose Intolerance', samples: 50 },
-      { id: 2, name: 'Prof. Jane Smith', field: 'Lactose Intolerance', samples: 70 },
-      { id: 3, name: 'Dr. Alice Johnson', field: 'Lactose Intolerance', samples: 90 },
-    ];
-    setSearchResults(dummyResults);
-    setIsRequestSent({});
+  const checkInvitationStatus = async (receiverId) => {
+    const token = getToken();
+    const senderId = localStorage.getItem('userId');
+
+    const requestData = {
+      receiver_id: receiverId,
+      sender_id: senderId,
+    };
+
+    try {
+      const response = await fetch(`${URL}/api/checkinvitationstatus`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+
+      const data = await response.json();
+      if (data.status) {
+        setIsRequestSent((prev) => ({ ...prev, [receiverId]: data.status }));
+      }
+    } catch (error) {
+      console.error('There was a problem checking the invitation status:', error);
+    }
+  };
+
+  const handleSendRequest = async (receiverId) => {
+    const token = getToken();
+    const senderId = localStorage.getItem('userId'); 
+
+    const requestData = {
+      receiver_id: receiverId,
+      sender_id: senderId,
+    };
+
+    try {
+      const response = await fetch(`${URL}/api/sendinvitation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+
+      const data = await response.json();
+      setMessage(data.message);
+      setOpen(true);
+      if (data.message === 'Invitation sent successfully' || data.message === 'Invitation already sent') {
+        setIsRequestSent((prev) => ({ ...prev, [receiverId]: 'pending' }));
+      }
+    } catch (error) {
+      setMessage('There was a problem sending the invitation');
+      setOpen(true);
+      console.error('There was a problem sending the invitation:', error);
+    }
+  };
+
+  const handleSearch = async () => {
+    try {
+      const token = getToken();
+      if (!token) {
+        return;
+      }
+
+      const config = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        params: {
+          phenotype: phenotype,
+          minSamples: minSamples,
+        },
+      };
+
+      const response = await axios.get(`${URL}/api/invite/users`, config);
+      const results = response.data;
+      setSearchResults(results);
+
+      // Check invitation status for each search result
+      results.forEach(result => {
+        checkInvitationStatus(result._id);
+      });
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+  };
+
+  const handleClose = () => {
+    setOpen(false);
   };
 
   return (
@@ -69,19 +163,13 @@ function SearchPage() {
             Search Results
           </Typography>
           <Grid container spacing={3}>
-            {searchResults.map(result => (
-              <Grid item xs={12} sm={6} md={4} key={result.id}>
+            {searchResults.map((result) => (
+              <Grid item xs={12} sm={6} md={4} key={result._id}>
                 <Card sx={{ borderRadius: 2, boxShadow: 'none', border: '1px solid #ddd' }}>
                   <CardContent>
                     <Typography variant="h6" component="div">
-                      {result.name}
+                      {result.email}
                     </Typography>
-                    <Typography variant="body2" color="textSecondary">
-                      Field: {result.field}
-                    </Typography>
-                    {/* <Typography variant="body2" color="textSecondary">
-                      Location: {result.location}
-                    </Typography> */}
                     <Typography variant="body2" color="textSecondary">
                       Samples: {result.samples}
                     </Typography>
@@ -90,11 +178,14 @@ function SearchPage() {
                     <Button
                       variant="contained"
                       color="primary"
-                      onClick={() => handleSendRequest(result.id)}
-                      disabled={isRequestSent[result.id]}
+                      
+                      onClick={() => handleSendRequest(result._id)}
+                      disabled={isRequestSent[result._id] === 'pending' || isRequestSent[result._id] === 'rejected'}
                       fullWidth
                     >
-                      {isRequestSent[result.id] ? 'Invitation Sent' : 'Send Collaboration Invite'}
+                      {isRequestSent[result._id] === 'pending' ? 'Invitation Sent' :
+                        isRequestSent[result._id] === 'accepted' ? 'Invitation Accepted' :
+                        isRequestSent[result._id] === 'rejected' ? 'Invitation Rejected' : 'Send Collaboration Invite'}
                     </Button>
                   </CardActions>
                 </Card>
@@ -103,6 +194,11 @@ function SearchPage() {
           </Grid>
         </Grid>
       </Grid>
+      <Snackbar open={open} autoHideDuration={6000} onClose={handleClose}>
+        <Alert onClose={handleClose} severity="success" sx={{ width: '100%' }}>
+          {message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

@@ -14,9 +14,7 @@ import time
 from flask_httpauth import HTTPBasicAuth
 import json
 import pandas as pd
-# import logging
-
-#Added Pandas
+import logging
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -166,79 +164,229 @@ def create_research_project():
 
     return jsonify({'message': 'Research project created successfully'}), 201
 
+# NEW ENDPOINT TO RETRIVE USERS FOR SEARCH PAGE:
+@app.route('/api/invite/users', methods=['GET'])
+def get_users_for_invitation():
+    try:
+        # Get token from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
+
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
+
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
+
+        # Extract search parameters
+        phenotype = request.args.get('phenotype', '')
+        min_samples = request.args.get('minSamples', '')
+
+        # Log the parameters
+        logging.debug(f"Search parameters: phenotype={phenotype}, min_samples={min_samples}")
+
+        # Basic query to exclude the current user
+        query = {'_id': {'$ne': ObjectId(current_user.get_id())}}
+        # Add additional filters if parameters are provided
+        if phenotype:
+            query['phenotype'] = {'$regex': phenotype, '$options': 'i'}
+        if min_samples:
+            query['samples'] = {'$gte': int(min_samples)}
+
+        users = db.users.find(query)
+        users_list = [{
+            "_id": str(user["_id"]),
+            "email": user["email"]
+        } for user in users]
+
+        return jsonify(users_list), 200
+
+    except Exception as e:
+        logging.error(f"Error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/invitations', methods=['GET'])
 def get_user_invitations():
-    data = request.get_json()
-    user_id = data['user_id']
+    try:
+        # Get token from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
 
-    invitations = db.invitations.find({
-        '$or': [
-            {'receiver_id': ObjectId(user_id)},
-            {'sender_id': ObjectId(user_id)}
-        ]
-    })
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
 
-    invitations_list = [{
-        "_id": str(invitation["_id"]),
-        "receiver_id": str(invitation["receiver_id"]),
-        "sender_id": str(invitation["sender_id"]),
-        "research_project_id": str(invitation["research_project_id"]),
-        "status": invitation["status"]
-    } for invitation in invitations]
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
 
-    return jsonify(invitations_list), 200
+        user_id = current_user.get_id()
+
+        invitations = db.invitations.find({
+            '$or': [
+                {'receiver_id': ObjectId(user_id)},
+                {'sender_id': ObjectId(user_id)}
+            ]
+        })
+
+        invitations_list = []
+        for invitation in invitations:
+            receiver_user = db.users.find_one({"_id": ObjectId(invitation["receiver_id"])})
+            receiver_email = receiver_user["email"] if receiver_user else "Unknown"
+
+            sender_user = db.users.find_one({"_id": ObjectId(invitation["sender_id"])})
+            sender_email = sender_user["email"] if sender_user else "Unknown"
+
+            invitations_list.append({
+                "_id": str(invitation["_id"]),
+                "receiver_id": str(invitation["receiver_id"]),
+                "sender_id": str(invitation["sender_id"]),
+                "receiver_email": receiver_email,
+                "sender_email": sender_email,
+                "status": invitation["status"]
+            })
+
+        return jsonify({"invitations": invitations_list, "user_id": user_id}), 200
+    except Exception as e:
+        logging.error(f"Error getting user invitations: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+
+# NEW ENDPOINT TO CHECK THE INVITATIONS
+@app.route('/api/checkinvitationstatus', methods=['POST'])
+def check_invitation_status():
+    try:
+        data = request.get_json()
+        receiver_id = data['receiver_id']
+        
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
+        
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
+        
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
+        
+        sender_id = current_user.get_id()  
+        
+        
+        receiver_id = ObjectId(receiver_id)
+        sender_id = ObjectId(sender_id)        
+        existing_invitation = db.invitations.find_one({
+            'receiver_id': receiver_id,
+            'sender_id': sender_id
+        })
+        
+        if existing_invitation:
+            return jsonify({'status': existing_invitation['status']}), 200
+        
+        app.logger.debug("No existing invitation found")
+        return jsonify({'status': 'none'}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/sendinvitation', methods=['POST'])
 def send_invitation():
-    data = request.get_json()
-    receiver_id = data['receiver_id']
-    sender_id = data['sender_id']
-    research_project_id = data['research_project_id']
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
 
-    invitation = {
-        'receiver_id': ObjectId(receiver_id),
-        'sender_id': ObjectId(sender_id),
-        'research_project_id': ObjectId(research_project_id),
-        'status': 'pending'  # Add status field
-    }
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
 
-    db.invitations.insert_one(invitation)
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
 
-    return jsonify({'message': 'Invitation sent successfully'}), 200
+        sender_id = current_user.id
+
+        data = request.get_json()
+        receiver_id = data.get('receiver_id')
+
+        if not receiver_id:
+            logging.error("Receiver ID missing in the request")
+            return jsonify({"error": "Receiver ID missing in the request"}), 400
+
+        logging.debug(f"Sender ID: {sender_id}, Receiver ID: {receiver_id}")
+
+        existing_invitation = db.invitations.find_one({
+            'receiver_id': ObjectId(receiver_id),
+            'sender_id': ObjectId(sender_id)
+        })
+
+        if existing_invitation:
+            logging.debug("Invitation already exists")
+            return jsonify({'message': 'Invitation already sent'}), 200
+
+        invitation = {
+            'receiver_id': ObjectId(receiver_id),
+            'sender_id': ObjectId(sender_id),
+            'status': 'pending'
+        }
+
+        db.invitations.insert_one(invitation)
+
+        return jsonify({'message': 'Invitation sent successfully'}), 200
+
+    except Exception as e:
+        logging.error(f"Error sending invitation: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/acceptinvitation', methods=['POST'])
 def accept_invitation():
     data = request.get_json()
-    receiver_id = data['receiver_id']
-    sender_id = data['sender_id']
-    research_project_id = data['research_project_id']
+    receiver_id = ObjectId(data.get('receiver_id'))
+    sender_id = ObjectId(data.get('sender_id'))
 
-    invitation = db.invitations.find_one({
-        'receiver_id': ObjectId(receiver_id),
-        'sender_id': ObjectId(sender_id),
-        'research_project_id': ObjectId(research_project_id)
-    })
+    try:
+        invitation = db.invitations.find_one({
+            'receiver_id': receiver_id,
+            'sender_id': sender_id,
+        })
 
-    if invitation:
-        db.invitations.update_one(
-            {'_id': invitation['_id']},
-            {'$set': {'status': 'accepted'}}
-        )
-        return jsonify({'message': 'Invitation status updated successfully to accepted'}), 200
-    else:
-        return jsonify({'message': 'No matching invitation found'}), 404
+        if invitation:
+            db.invitations.update_one(
+                {'_id': invitation['_id']},
+                {'$set': {'status': 'accepted'}}
+            )
+            app.logger.info('Invitation status updated successfully to accepted')
+            return jsonify({'message': 'Invitation status updated successfully to accepted'}), 200
+        else:
+            app.logger.warning('No matching invitation found')
+            return jsonify({'message': 'No matching invitation found'}), 404
+
+    except Exception as e:
+        app.logger.error(f'Error accepting invitation: {str(e)}')
+        return jsonify({'message': 'Internal server error'}), 500
+
+
 
 @app.route('/api/rejectinvitation', methods=['POST'])
 def reject_invitation():
     data = request.get_json()
+
+    # Ensure required fields are present in the JSON data
+    if 'receiver_id' not in data or 'sender_id' not in data:
+        return jsonify({'error': 'One or more required fields (receiver_id, sender_id) are missing'}), 400
+
     receiver_id = data['receiver_id']
     sender_id = data['sender_id']
-    research_project_id = data['research_project_id']
 
     invitation = db.invitations.find_one({
         'receiver_id': ObjectId(receiver_id),
         'sender_id': ObjectId(sender_id),
-        'research_project_id': ObjectId(research_project_id)
     })
 
     if invitation:
@@ -341,6 +489,7 @@ def start_collaboration():
 
     except Exception as e:
         return jsonify({'message': 'An error occurred while starting collaboration', 'error': str(e)}), 500
+
     
 
 
