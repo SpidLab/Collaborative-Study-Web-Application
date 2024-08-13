@@ -15,6 +15,9 @@ from flask_httpauth import HTTPBasicAuth
 import json
 import pandas as pd
 import logging
+from calculate_coefficients import compute_coefficients_dictionary
+from fuzzywuzzy import process
+
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -24,6 +27,7 @@ app.config["MONGO_URI"] = os.getenv("MONGO_URI")
 app.config["PORT"] = os.getenv("PORT")
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 CORS(app)  # Initialize CORS
+logging.basicConfig(level=logging.INFO)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -55,7 +59,7 @@ class User(UserMixin):
     def verify_password(self, password):
         return check_password_hash(self.password_hash, password, method='sha256')
 
-    def generate_auth_token(self, expires_in=600):
+    def generate_auth_token(self, expires_in=100000):
         return jwt.encode(
             {'id': self.id, 'exp': time.time() + expires_in},
             app.config['SECRET_KEY'], algorithm='HS256')
@@ -111,6 +115,60 @@ def login():
 
     return jsonify({'message': 'Invalid email or password'}), 401
 
+@app.route('/api/profile', methods=['GET'])
+def get_profile():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        logging.error("Authorization header missing")
+        return jsonify({"error": "Authorization header missing"}), 401
+    token = auth_header.split()[1]
+    get_user = User.verify_auth_token(token)
+    if not get_user:
+        return jsonify({"message": "Invalid token"}), 401
+    user_id = get_user.get_id()
+    user = db.users.find_one({"_id": ObjectId(user_id)}, {"email": 1})
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+    logging.info(f"User email: {user['email']}")
+    return jsonify({"email": user['email']})
+
+
+@app.route('/api/profile', methods=['PUT'])
+def update_profile():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        logging.error("Authorization header missing")
+        return jsonify({"error": "Authorization header missing"}), 401
+    token = auth_header.split()[1]
+    get_user = User.verify_auth_token(token)
+    if not get_user:
+        return jsonify({"message": "Invalid token"}), 401
+    user_id = get_user.get_id()
+    data = request.json
+    name = data.get('name')
+    current_password = data.get('currentPassword')
+    new_password = data.get('newPassword')
+    confirm_new_password = data.get('confirmNewPassword')
+
+    if new_password and new_password != confirm_new_password:
+        return jsonify({"message": "New passwords do not match"}), 400
+
+    user = db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+
+    if current_password and new_password:
+        if not user.verify_password(current_password):
+            return jsonify({"message": "Current password is incorrect"}), 400
+        hashed_password = generate_password_hash(new_password, method='sha256')
+        db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"password": hashed_password}})
+
+    if name:
+        db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"name": name}})
+
+    return jsonify({"message": "Profile updated successfully"})
+
+
 @auth.verify_password
 def verify_password(email_or_token, password):
     # first try to authenticate by token
@@ -127,6 +185,7 @@ def verify_password(email_or_token, password):
 def logout():
     logout_user()
     return jsonify({'message': 'Logout successful'})
+
 
 @app.route('/api/resource')
 @auth.login_required
@@ -164,11 +223,9 @@ def create_research_project():
 
     return jsonify({'message': 'Research project created successfully'}), 201
 
-# NEW ENDPOINT TO RETRIVE USERS FOR SEARCH PAGE:
 @app.route('/api/invite/users', methods=['GET'])
 def get_users_for_invitation():
     try:
-        # Get token from Authorization header
         auth_header = request.headers.get('Authorization')
         if not auth_header:
             logging.error("Authorization header missing")
@@ -176,33 +233,52 @@ def get_users_for_invitation():
 
         token = auth_header.split()[1]
         current_user = User.verify_auth_token(token)
-
         if not current_user:
             logging.error("Invalid token or user not found")
             return jsonify({"error": "Invalid token or user not found"}), 401
-
-        # Extract search parameters
-        phenotype = request.args.get('phenotype', '')
+        query = request.args.get('phenotype', '')
         min_samples = request.args.get('minSamples', '')
-
-        # Log the parameters
-        logging.debug(f"Search parameters: phenotype={phenotype}, min_samples={min_samples}")
-
-        # Basic query to exclude the current user
-        query = {'_id': {'$ne': ObjectId(current_user.get_id())}}
-        # Add additional filters if parameters are provided
-        if phenotype:
-            query['phenotype'] = {'$regex': phenotype, '$options': 'i'}
+        search_filter = {}
         if min_samples:
-            query['samples'] = {'$gte': int(min_samples)}
+            search_filter['$expr'] = {"$gte": [{"$toInt": "$numberOfSamples"}, int(min_samples)]}
+        file_uploads = list(db.fileUploads.find(search_filter))
+        matched_documents = []
+        if query:
+            for doc in file_uploads:
+                if 'phenotypes' in doc:
+                    # Check for exact matches first
+                    if query in doc['phenotypes']:
+                        matched_documents.append(doc)
+                    else:
+                        # Perform fuzzy matching if there's no exact match
+                        match_ratio = process.extractOne(query, [doc['phenotypes']])
+                        if match_ratio[1] >= 70:  # Adjusted threshold for better matching
+                            matched_documents.append(doc)
+        else:
+            matched_documents = file_uploads
 
-        users = db.users.find(query)
+        if not query and min_samples:
+            matched_documents = file_uploads  
+
+        if query and min_samples:
+            matched_documents = [doc for doc in matched_documents if int(doc.get('numberOfSamples', 0)) >= int(min_samples)]
+        owner_ids = {ObjectId(file_upload['owner']) for file_upload in matched_documents if 'phenotypes' in file_upload}
+        matched_users = list(db.users.find({"_id": {"$in": list(owner_ids)}}))
+        matched_users = [user for user in matched_users if user["_id"] != ObjectId(current_user.get_id())]
+
         users_list = [{
             "_id": str(user["_id"]),
-            "email": user["email"]
-        } for user in users]
+            "email": user.get("email", "No Email Provided"),
+            "phenotype": next((doc['phenotypes'] for doc in matched_documents if doc['owner'] == str(user["_id"])), "No Phenotype"),
+            "numberOfSamples": next((doc['numberOfSamples'] for doc in matched_documents if doc['owner'] == str(user["_id"])), "No Samples")
+
+        } for user in matched_users]
 
         return jsonify(users_list), 200
+
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
     except Exception as e:
         logging.error(f"Error: {str(e)}")
@@ -256,8 +332,6 @@ def get_user_invitations():
         return jsonify({"error": str(e)}), 500
 
 
-
-# NEW ENDPOINT TO CHECK THE INVITATIONS
 @app.route('/api/checkinvitationstatus', methods=['POST'])
 def check_invitation_status():
     try:
@@ -402,6 +476,20 @@ def reject_invitation():
 @app.route('/api/upload_csv', methods=['POST'])
 def upload_csv():
     try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
+
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
+
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
+
+        owner = current_user.id
+
         # Check if the post request has the file part
         if 'file' not in request.files:
             return jsonify({'message': 'No file part in the request'}), 400
@@ -416,37 +504,38 @@ def upload_csv():
             return jsonify({'message': 'No selected file'}), 400
         if file and file.filename.endswith('.csv'):
             filename = secure_filename(file.filename)
-            filepath = os.path.join('/tmp', filename)
+            filepath = os.path.join('./', filename)
             file.save(filepath)
 
             # Initialize an empty list to store records
-            records = []
-
+            record = {}  # Initialize record as a dictionary
             try:
                 df = pd.read_csv(filepath)
                 # Check if DataFrame is not empty
                 if not df.empty:
                     # Iterate over DataFrame rows and construct records
-                    for index, row in df.iterrows():
-                        record = {}  # Initialize record as a dictionary
-                        record['datasetID'] = str(ObjectId())  
-                        record['field1'] = field1
-                        record['field2'] = field2
-                        # Populate record with row data
-                        for column, value in row.items():
-                            record[column] = value
-                        records.append(record)  # Append record to records list
+                    record['datasetID'] = str(ObjectId())  
+                    record['phenotypes'] = str(field1)
+                    record['owner'] = str(owner)
+                    record['numberOfSamples'] = str(field2)
+                    record['columns'] = ','.join(df.columns.to_list())
+                    record['records'] = {}
+                    for i in range(df.shape[0]):
+                        record['records'][str(i)] = ','.join(str(item) for item in df.iloc[i].to_list())
+                    
             except Exception as e:
                 return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
             # Insert records into MongoDB
-            if records:
-                db.fileUploads.insert_many(records)
+            if record:
+                print(len(record.keys()))
+                db.fileUploads.insert_one(record)
 
             return jsonify({'message': 'CSV file processed successfully'}), 200
         else:
             return jsonify({'message': 'Unsupported file type'}), 400
     except Exception as e:
+        print(e)
         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
 # Route to retrieve list of collaborators for a session
@@ -491,7 +580,39 @@ def start_collaboration():
         return jsonify({'message': 'An error occurred while starting collaboration', 'error': str(e)}), 500
 
     
+@app.route('/api/calculations', methods=['GET'])
+def calculate_cofficients():
+    data = request.json
+    user1 = data['user1']
+    user2 = data['user2']
 
+    
+
+    # Connect to MongoDB
+    client = MongoClient(os.getenv("MONGO_URI"))
+
+    try:
+        # Get datasets for both users
+        df_user1 = get_user_dataset(client, user1)
+        df_user2 = get_user_dataset(client, user2)
+
+        # Merge the datasets
+
+        merged_data = pd.concat([df_user1, df_user2], axis=1)
+  
+        # Compute coefficients
+        coeff_dict = compute_coefficients_dictionary(merged_data)
+
+        # Convert the results to a table format (DataFrame)
+        results_table = pd.DataFrame(list(coeff_dict.items()), columns=['Pair', 'Coefficient'])
+        
+        # Return the table as a JSON response
+        return results_table.to_json(orient='records'), 200
+
+    except ValueError as ve:
+        return jsonify({'message': str(ve)}), 404
+    except Exception as e:
+        return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
 # fix issues with models first
 #@app.route('/api/collaborations/<session_id>', methods=['GET'])

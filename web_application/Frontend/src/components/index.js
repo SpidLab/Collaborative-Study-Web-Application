@@ -10,5 +10,6 @@ import LoggedOut from "./Navigation/LoggedOut";
 import NewUser from "./NewUser/NewUser";
 import ForgotPassword from "./Forgot/ForgotPassword";
 import ForgotUsername from "./Forgot/ForgotUsername";
+import Profile from "./Profile/Profile";
 
-export { Navigation, Search, Upload, Session, Home, Login, LoggedIn, LoggedOut, NewUser, ForgotPassword, ForgotUsername};
+export { Navigation, Search, Upload, Session, Home, Login, LoggedIn, LoggedOut, NewUser, ForgotPassword, ForgotUsername, Profile};

@@ -10,6 +10,7 @@ import ForgotPassword from './components/Forgot/ForgotPassword';
 import CollaborationsPage from './components/Collabrations/CollabrationsPage';
 import CollaborationDetailsPage from './components/Collabrations/Details';
 import SessionsResults from "./components/Session/SessionsResults";
+import Profile from "./components/Profile/Profile";
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -90,9 +91,10 @@ function App() {
         <Route path="/upload" element={isLoggedIn ? <Upload /> : <Navigate to="/login" />} />
         <Route path="/search" element={isLoggedIn ? <Search /> : <Navigate to="/login" />} />
         <Route path="/session" element={isLoggedIn ? <Session /> : <Navigate to="/login" />} />
+        <Route path="/profile" element={isLoggedIn ? <Profile /> : <Navigate to="/login" />} />
         <Route path="/session/viewresults" element={ <SessionsResults />} />
         <Route path="/collaboration" element={isLoggedIn ? <CollaborationsPage /> : <Navigate to="/login" />} />
-        <Route path="/collaboration/:id" element={isLoggedIn ? <CollaborationDetailsPage /> : <Navigate to="/login" />} />
+        <Route path="/collaboration/:id" element={isLoggedIn ? <CollaborationDetailsPage /> : <Navigate to="/login" />} /> 
         <Route path="/forgot/username" element={<ForgotUsername />} />
         <Route path="/forgot/password" element={<ForgotPassword />} />
       </Routes>

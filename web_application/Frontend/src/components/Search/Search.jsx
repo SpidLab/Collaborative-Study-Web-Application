@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Container, Grid, TextField, Button, Typography, Card, CardContent, CardActions, Snackbar, Alert } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import axios from 'axios';
-import URL from '../../config'; 
+import URL from '../../config';
 
 function SearchPage() {
   const [phenotype, setPhenotype] = useState('');
@@ -50,7 +50,7 @@ function SearchPage() {
 
   const handleSendRequest = async (receiverId) => {
     const token = getToken();
-    const senderId = localStorage.getItem('userId'); 
+    const senderId = localStorage.getItem('userId');
 
     const requestData = {
       receiver_id: receiverId,
@@ -171,21 +171,24 @@ function SearchPage() {
                       {result.email}
                     </Typography>
                     <Typography variant="body2" color="textSecondary">
-                      Samples: {result.samples}
+                      Phenotype: {result.phenotype}
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Number of samples: {result.numberOfSamples}
                     </Typography>
                   </CardContent>
                   <CardActions>
                     <Button
                       variant="contained"
                       color="primary"
-                      
+
                       onClick={() => handleSendRequest(result._id)}
                       disabled={isRequestSent[result._id] === 'pending' || isRequestSent[result._id] === 'rejected'}
                       fullWidth
                     >
                       {isRequestSent[result._id] === 'pending' ? 'Invitation Sent' :
                         isRequestSent[result._id] === 'accepted' ? 'Invitation Accepted' :
-                        isRequestSent[result._id] === 'rejected' ? 'Invitation Rejected' : 'Send Collaboration Invite'}
+                          isRequestSent[result._id] === 'rejected' ? 'Invitation Rejected' : 'Send Collaboration Invite'}
                     </Button>
                   </CardActions>
                 </Card>

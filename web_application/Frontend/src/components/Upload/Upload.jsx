@@ -3,12 +3,18 @@ import { TextField, Button, Container, Typography, Box, Paper, IconButton } from
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import axios from 'axios';
 import URL from '../../config';
+import { CircularProgress } from '@mui/material';
 
 const UploadForm = () => {
     const [field1, setField1] = useState('');
     const [field2, setField2] = useState('');
     const [csvFile, setCSVFile] = useState(null);
     const [fileName, setFileName] = useState('');
+    const getToken = () => {
+        return localStorage.getItem('token');
+    };
+
+    const [loading, setLoading] = useState(false);
 
     const handleField1Change = (event) => {
         setField1(event.target.value);
@@ -34,9 +40,11 @@ const UploadForm = () => {
     const handleDragOver = (event) => {
         event.preventDefault();
     };
-
+    const token = getToken();
+            
     const handleSubmit = async (event) => {
         event.preventDefault();
+        setLoading(true);
 
         try {
             const formData = new FormData();
@@ -51,6 +59,7 @@ const UploadForm = () => {
             const response = await axios.post(`${URL}/api/upload_csv`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
+                    'Authorization': `Bearer ${token}`
                 },
             });
 
@@ -66,6 +75,8 @@ const UploadForm = () => {
         } catch (error) {
             alert('Error uploading dataset.');
             console.error('Error:', error);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -128,15 +139,23 @@ const UploadForm = () => {
                         </Typography>
                     </label>
                 </Box>
-                <Button
-                    type="submit"
-                    variant="contained"
-                    color="primary"
-                    fullWidth
-                    sx={{ marginTop: 2, padding: 2, fontSize: '1rem' }}
-                >
-                    Upload Dataset
-                </Button>
+                {loading ? (
+                    <Box display="flex" justifyContent="center" alignItems="center" mt={2} sx={{
+                        backgroundColor: '#fafafa',
+                    }}>
+                        <CircularProgress />
+                    </Box>
+                ) : (
+                    <Button
+                        type="submit"
+                        variant="contained"
+                        color="primary"
+                        fullWidth
+                        sx={{ marginTop: 2, padding: 2, fontSize: '1rem' }}
+                    >
+                        Upload Dataset
+                    </Button>
+                )}
             </form>
         </Container>
     );

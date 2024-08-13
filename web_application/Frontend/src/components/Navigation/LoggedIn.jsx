@@ -96,7 +96,7 @@ export default function LoggedIn({ onLogout }) {
         open={open}
         onClose={handleClose}
       >
-        <MenuItem component={RouterLink} to="/" onClick={handleClose}>
+        <MenuItem component={RouterLink} to="/profile" onClick={handleClose}>
           Edit Profile
         </MenuItem>
         <MenuItem component={RouterLink} to="/" onClick={handleClose}>
