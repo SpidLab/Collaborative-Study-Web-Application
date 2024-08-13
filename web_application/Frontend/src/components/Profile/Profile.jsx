@@ -26,6 +26,7 @@ const Profile = () => {
         setUser(prevState => ({
           ...prevState,
           email: response.data.email,
+          name: response.data.name
         }));
       })
       .catch(error => {
@@ -49,15 +50,24 @@ const Profile = () => {
       }
     })
       .then(response => {
-        alert('Profile updated successfully!');
+        if (response.status === 200) {
+          alert('Profile updated successfully!');
+          setUser({
+            currentPassword: '',
+            newPassword: '',
+            confirmNewPassword: '',
+          });
+        }
       })
       .catch(error => {
         console.error('There was an error updating the profile!', error);
+        alert(error.response.data.message);
       });
   };
 
+
   return (
-    <Container maxWidth="sm">
+    <Container maxWidth="sm" sx={{ marginTop: 5 }}>
       <Typography variant="h4" component="h1" gutterBottom>
         Edit Profile
       </Typography>

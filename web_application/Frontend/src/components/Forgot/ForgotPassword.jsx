@@ -21,7 +21,7 @@ const ForgotPassword = () => {
   };
 
   return (
-    <Container maxWidth="sm">
+    <Container maxWidth="xs">
       <Box sx={{ marginTop: 3, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <Box sx={{ border: '1px dashed #ccc', borderRadius: 5, padding: 3, width: '100%', boxSizing: 'border-box' }}>
           <Typography variant="h5" gutterBottom align="center">

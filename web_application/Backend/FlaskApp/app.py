@@ -126,11 +126,12 @@ def get_profile():
     if not get_user:
         return jsonify({"message": "Invalid token"}), 401
     user_id = get_user.get_id()
-    user = db.users.find_one({"_id": ObjectId(user_id)}, {"email": 1})
+    user = db.users.find_one({"_id": ObjectId(user_id)}, {"email": 1, "name": 1})
     if not user:
         return jsonify({"message": "User not found"}), 404
-    logging.info(f"User email: {user['email']}")
-    return jsonify({"email": user['email']})
+    logging.info(f"User email: {user['email']}, User name: {user['name']}")
+    return jsonify({"email": user['email'], "name": user['name']})
+
 
 
 @app.route('/api/profile', methods=['PUT'])
@@ -157,12 +158,19 @@ def update_profile():
     if not user:
         return jsonify({"message": "User not found"}), 404
 
-    if current_password and new_password:
-        if not user.verify_password(current_password):
-            return jsonify({"message": "Current password is incorrect"}), 400
+    if name and not current_password:
+        return jsonify({"message": "Current password is required to update the name"}), 400
+
+    # Check if current password is correct
+    if current_password and not check_password_hash(user['password'], current_password):
+        return jsonify({"message": "Current password is incorrect"}), 400
+
+    # Update password if new password is provided
+    if new_password:
         hashed_password = generate_password_hash(new_password, method='sha256')
         db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"password": hashed_password}})
 
+    # Update name if provided
     if name:
         db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"name": name}})
 
@@ -287,7 +295,6 @@ def get_users_for_invitation():
 @app.route('/api/invitations', methods=['GET'])
 def get_user_invitations():
     try:
-        # Get token from Authorization header
         auth_header = request.headers.get('Authorization')
         if not auth_header:
             logging.error("Authorization header missing")
