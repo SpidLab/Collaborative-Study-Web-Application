@@ -13,6 +13,11 @@ import jwt
 import time
 from flask_httpauth import HTTPBasicAuth
 import json
+import pandas as pd
+import logging
+from calculate_coefficients import compute_coefficients_dictionary
+from fuzzywuzzy import process
+
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -22,6 +27,7 @@ app.config["MONGO_URI"] = os.getenv("MONGO_URI")
 app.config["PORT"] = os.getenv("PORT")
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 CORS(app)  # Initialize CORS
+logging.basicConfig(level=logging.INFO)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -55,7 +61,7 @@ class User(UserMixin):
     def verify_password(self, password):
         return check_password_hash(self.password_hash, password, method='sha256')
 
-    def generate_auth_token(self, expires_in=600):
+    def generate_auth_token(self, expires_in=100000):
         return jwt.encode(
             {'id': self.id, 'exp': time.time() + expires_in},
             app.config['SECRET_KEY'], algorithm='HS256')
@@ -114,6 +120,68 @@ def login():
 
     return jsonify({'message': 'Invalid email or password'}), 401
 
+@app.route('/api/profile', methods=['GET'])
+def get_profile():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        logging.error("Authorization header missing")
+        return jsonify({"error": "Authorization header missing"}), 401
+    token = auth_header.split()[1]
+    get_user = User.verify_auth_token(token)
+    if not get_user:
+        return jsonify({"message": "Invalid token"}), 401
+    user_id = get_user.get_id()
+    user = db.users.find_one({"_id": ObjectId(user_id)}, {"email": 1, "name": 1})
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+    logging.info(f"User email: {user['email']}, User name: {user['name']}")
+    return jsonify({"email": user['email'], "name": user['name']})
+
+
+
+@app.route('/api/profile', methods=['PUT'])
+def update_profile():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        logging.error("Authorization header missing")
+        return jsonify({"error": "Authorization header missing"}), 401
+    token = auth_header.split()[1]
+    get_user = User.verify_auth_token(token)
+    if not get_user:
+        return jsonify({"message": "Invalid token"}), 401
+    user_id = get_user.get_id()
+    data = request.json
+    name = data.get('name')
+    current_password = data.get('currentPassword')
+    new_password = data.get('newPassword')
+    confirm_new_password = data.get('confirmNewPassword')
+
+    if new_password and new_password != confirm_new_password:
+        return jsonify({"message": "New passwords do not match"}), 400
+
+    user = db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+
+    if name and not current_password:
+        return jsonify({"message": "Current password is required to update the name"}), 400
+
+    # Check if current password is correct
+    if current_password and not check_password_hash(user['password'], current_password):
+        return jsonify({"message": "Current password is incorrect"}), 400
+
+    # Update password if new password is provided
+    if new_password:
+        hashed_password = generate_password_hash(new_password, method='sha256')
+        db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"password": hashed_password}})
+
+    # Update name if provided
+    if name:
+        db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"name": name}})
+
+    return jsonify({"message": "Profile updated successfully"})
+
+
 @auth.verify_password
 def verify_password(email_or_token, password):
     # first try to authenticate by token
@@ -127,7 +195,6 @@ def verify_password(email_or_token, password):
     return True
 
 @app.route('/api/logout', methods=['POST'])
-@auth.login_required
 def logout():
     # Get the token from the request headers
     token = request.headers.get('Authorization').split()[1]
@@ -137,6 +204,7 @@ def logout():
 
     logout_user()
     return jsonify({'message': 'Logout successful'})
+
 
 @app.route('/api/resource')
 @auth.login_required
@@ -174,79 +242,243 @@ def create_research_project():
 
     return jsonify({'message': 'Research project created successfully'}), 201
 
+@app.route('/api/invite/users', methods=['GET'])
+def get_users_for_invitation():
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
+
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
+        query = request.args.get('phenotype', '')
+        min_samples = request.args.get('minSamples', '')
+        search_filter = {}
+        if min_samples:
+            search_filter['$expr'] = {"$gte": [{"$toInt": "$numberOfSamples"}, int(min_samples)]}
+        file_uploads = list(db.fileUploads.find(search_filter))
+        matched_documents = []
+        if query:
+            for doc in file_uploads:
+                if 'phenotypes' in doc:
+                    # Check for exact matches first
+                    if query in doc['phenotypes']:
+                        matched_documents.append(doc)
+                    else:
+                        # Perform fuzzy matching if there's no exact match
+                        match_ratio = process.extractOne(query, [doc['phenotypes']])
+                        if match_ratio[1] >= 70:  # Adjusted threshold for better matching
+                            matched_documents.append(doc)
+        else:
+            matched_documents = file_uploads
+
+        if not query and min_samples:
+            matched_documents = file_uploads  
+
+        if query and min_samples:
+            matched_documents = [doc for doc in matched_documents if int(doc.get('numberOfSamples', 0)) >= int(min_samples)]
+        owner_ids = {ObjectId(file_upload['owner']) for file_upload in matched_documents if 'phenotypes' in file_upload}
+        matched_users = list(db.users.find({"_id": {"$in": list(owner_ids)}}))
+        matched_users = [user for user in matched_users if user["_id"] != ObjectId(current_user.get_id())]
+
+        users_list = [{
+            "_id": str(user["_id"]),
+            "email": user.get("email", "No Email Provided"),
+            "phenotype": next((doc['phenotypes'] for doc in matched_documents if doc['owner'] == str(user["_id"])), "No Phenotype"),
+            "numberOfSamples": next((doc['numberOfSamples'] for doc in matched_documents if doc['owner'] == str(user["_id"])), "No Samples")
+
+        } for user in matched_users]
+
+        return jsonify(users_list), 200
+
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+    except Exception as e:
+        logging.error(f"Error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/invitations', methods=['GET'])
 def get_user_invitations():
-    data = request.get_json()
-    user_id = data['user_id']
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
 
-    invitations = db.invitations.find({
-        '$or': [
-            {'receiver_id': ObjectId(user_id)},
-            {'sender_id': ObjectId(user_id)}
-        ]
-    })
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
 
-    invitations_list = [{
-        "_id": str(invitation["_id"]),
-        "receiver_id": str(invitation["receiver_id"]),
-        "sender_id": str(invitation["sender_id"]),
-        "research_project_id": str(invitation["research_project_id"]),
-        "status": invitation["status"]
-    } for invitation in invitations]
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
 
-    return jsonify(invitations_list), 200
+        user_id = current_user.get_id()
+
+        invitations = db.invitations.find({
+            '$or': [
+                {'receiver_id': ObjectId(user_id)},
+                {'sender_id': ObjectId(user_id)}
+            ]
+        })
+
+        invitations_list = []
+        for invitation in invitations:
+            receiver_user = db.users.find_one({"_id": ObjectId(invitation["receiver_id"])})
+            receiver_email = receiver_user["email"] if receiver_user else "Unknown"
+
+            sender_user = db.users.find_one({"_id": ObjectId(invitation["sender_id"])})
+            sender_email = sender_user["email"] if sender_user else "Unknown"
+
+            invitations_list.append({
+                "_id": str(invitation["_id"]),
+                "receiver_id": str(invitation["receiver_id"]),
+                "sender_id": str(invitation["sender_id"]),
+                "receiver_email": receiver_email,
+                "sender_email": sender_email,
+                "status": invitation["status"]
+            })
+
+        return jsonify({"invitations": invitations_list, "user_id": user_id}), 200
+    except Exception as e:
+        logging.error(f"Error getting user invitations: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/checkinvitationstatus', methods=['POST'])
+def check_invitation_status():
+    try:
+        data = request.get_json()
+        receiver_id = data['receiver_id']
+        
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
+        
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
+        
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
+        
+        sender_id = current_user.get_id()  
+        
+        
+        receiver_id = ObjectId(receiver_id)
+        sender_id = ObjectId(sender_id)        
+        existing_invitation = db.invitations.find_one({
+            'receiver_id': receiver_id,
+            'sender_id': sender_id
+        })
+        
+        if existing_invitation:
+            return jsonify({'status': existing_invitation['status']}), 200
+        
+        app.logger.debug("No existing invitation found")
+        return jsonify({'status': 'none'}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/sendinvitation', methods=['POST'])
 def send_invitation():
-    data = request.get_json()
-    receiver_id = data['receiver_id']
-    sender_id = data['sender_id']
-    research_project_id = data['research_project_id']
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
 
-    invitation = {
-        'receiver_id': ObjectId(receiver_id),
-        'sender_id': ObjectId(sender_id),
-        'research_project_id': ObjectId(research_project_id),
-        'status': 'pending'  # Add status field
-    }
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
 
-    db.invitations.insert_one(invitation)
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
 
-    return jsonify({'message': 'Invitation sent successfully'}), 200
+        sender_id = current_user.id
+
+        data = request.get_json()
+        receiver_id = data.get('receiver_id')
+
+        if not receiver_id:
+            logging.error("Receiver ID missing in the request")
+            return jsonify({"error": "Receiver ID missing in the request"}), 400
+
+        logging.debug(f"Sender ID: {sender_id}, Receiver ID: {receiver_id}")
+
+        existing_invitation = db.invitations.find_one({
+            'receiver_id': ObjectId(receiver_id),
+            'sender_id': ObjectId(sender_id)
+        })
+
+        if existing_invitation:
+            logging.debug("Invitation already exists")
+            return jsonify({'message': 'Invitation already sent'}), 200
+
+        invitation = {
+            'receiver_id': ObjectId(receiver_id),
+            'sender_id': ObjectId(sender_id),
+            'status': 'pending'
+        }
+
+        db.invitations.insert_one(invitation)
+
+        return jsonify({'message': 'Invitation sent successfully'}), 200
+
+    except Exception as e:
+        logging.error(f"Error sending invitation: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/acceptinvitation', methods=['POST'])
 def accept_invitation():
     data = request.get_json()
-    receiver_id = data['receiver_id']
-    sender_id = data['sender_id']
-    research_project_id = data['research_project_id']
+    receiver_id = ObjectId(data.get('receiver_id'))
+    sender_id = ObjectId(data.get('sender_id'))
 
-    invitation = db.invitations.find_one({
-        'receiver_id': ObjectId(receiver_id),
-        'sender_id': ObjectId(sender_id),
-        'research_project_id': ObjectId(research_project_id)
-    })
+    try:
+        invitation = db.invitations.find_one({
+            'receiver_id': receiver_id,
+            'sender_id': sender_id,
+        })
 
-    if invitation:
-        db.invitations.update_one(
-            {'_id': invitation['_id']},
-            {'$set': {'status': 'accepted'}}
-        )
-        return jsonify({'message': 'Invitation status updated successfully to accepted'}), 200
-    else:
-        return jsonify({'message': 'No matching invitation found'}), 404
+        if invitation:
+            db.invitations.update_one(
+                {'_id': invitation['_id']},
+                {'$set': {'status': 'accepted'}}
+            )
+            app.logger.info('Invitation status updated successfully to accepted')
+            return jsonify({'message': 'Invitation status updated successfully to accepted'}), 200
+        else:
+            app.logger.warning('No matching invitation found')
+            return jsonify({'message': 'No matching invitation found'}), 404
+
+    except Exception as e:
+        app.logger.error(f'Error accepting invitation: {str(e)}')
+        return jsonify({'message': 'Internal server error'}), 500
+
+
 
 @app.route('/api/rejectinvitation', methods=['POST'])
 def reject_invitation():
     data = request.get_json()
+
+    # Ensure required fields are present in the JSON data
+    if 'receiver_id' not in data or 'sender_id' not in data:
+        return jsonify({'error': 'One or more required fields (receiver_id, sender_id) are missing'}), 400
+
     receiver_id = data['receiver_id']
     sender_id = data['sender_id']
-    research_project_id = data['research_project_id']
 
     invitation = db.invitations.find_one({
         'receiver_id': ObjectId(receiver_id),
         'sender_id': ObjectId(sender_id),
-        'research_project_id': ObjectId(research_project_id)
     })
 
     if invitation:
@@ -258,34 +490,71 @@ def reject_invitation():
     else:
         return jsonify({'message': 'No matching invitation found'}), 404
 
+
 @app.route('/api/upload_csv', methods=['POST'])
-@auth.login_required
 def upload_csv():
-    # Check if the post request has the file part
-    if 'file' not in request.files:
-       return jsonify({'message': 'No file part in the request'}), 400
-    file = request.files['file']
-    # If the user does not select a file, the browser submits an empty file w/o a filename
-    if file.filename == '':
-        return jsonify({'message': 'No selected file'}), 400
-    if file and file.filename.endswith('.csv'):
-        filename = secure_filename(file.filename)
-        filepath = os.path.join('/tmp', filename)
-        file.save(filepath)
-        try:
-            df = pd.read_csv(filepath)
-            records = df.to_dict('records')  
-            for record in records:
-                record['datasetID'] = str(ObjectId())  
-                db.datasets.insert_one(record)
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
+
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
+
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
+
+        owner = current_user.id
+
+        # Check if the post request has the file part
+        if 'file' not in request.files:
+            return jsonify({'message': 'No file part in the request'}), 400
+
+        # Get text fields from the request
+        field1 = request.form.get('field1')
+        field2 = request.form.get('field2')
+
+        file = request.files['file']
+        # If the user does not select a file, the browser submits an empty file w/o a filename
+        if file.filename == '':
+            return jsonify({'message': 'No selected file'}), 400
+        if file and file.filename.endswith('.csv'):
+            filename = secure_filename(file.filename)
+            filepath = os.path.join('./', filename)
+            file.save(filepath)
+
+            # Initialize an empty list to store records
+            record = {}  # Initialize record as a dictionary
+            try:
+                df = pd.read_csv(filepath)
+                # Check if DataFrame is not empty
+                if not df.empty:
+                    # Iterate over DataFrame rows and construct records
+                    record['datasetID'] = str(ObjectId())  
+                    record['phenotypes'] = str(field1)
+                    record['owner'] = str(owner)
+                    record['numberOfSamples'] = str(field2)
+                    record['columns'] = ','.join(df.columns.to_list())
+                    record['records'] = {}
+                    for i in range(df.shape[0]):
+                        record['records'][str(i)] = ','.join(str(item) for item in df.iloc[i].to_list())
+                    
+            except Exception as e:
+                return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+
+            # Insert records into MongoDB
+            if record:
+                print(len(record.keys()))
+                db.fileUploads.insert_one(record)
 
             return jsonify({'message': 'CSV file processed successfully'}), 200
-        except Exception as e:
-            return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
-    else:
-        return jsonify({'message': 'Unsupported file type'}), 400
-
-
+        else:
+            return jsonify({'message': 'Unsupported file type'}), 400
+    except Exception as e:
+        print(e)
+        return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
 # Route to retrieve list of collaborators for a session
 @app.route('/api/user/<user_id>/collaborations', methods=['GET'])
@@ -327,8 +596,41 @@ def start_collaboration():
 
     except Exception as e:
         return jsonify({'message': 'An error occurred while starting collaboration', 'error': str(e)}), 500
+
+    
+@app.route('/api/calculations', methods=['GET'])
+def calculate_cofficients():
+    data = request.json
+    user1 = data['user1']
+    user2 = data['user2']
+
     
 
+    # Connect to MongoDB
+    client = MongoClient(os.getenv("MONGO_URI"))
+
+    try:
+        # Get datasets for both users
+        df_user1 = get_user_dataset(client, user1)
+        df_user2 = get_user_dataset(client, user2)
+
+        # Merge the datasets
+
+        merged_data = pd.concat([df_user1, df_user2], axis=1)
+  
+        # Compute coefficients
+        coeff_dict = compute_coefficients_dictionary(merged_data)
+
+        # Convert the results to a table format (DataFrame)
+        results_table = pd.DataFrame(list(coeff_dict.items()), columns=['Pair', 'Coefficient'])
+        
+        # Return the table as a JSON response
+        return results_table.to_json(orient='records'), 200
+
+    except ValueError as ve:
+        return jsonify({'message': str(ve)}), 404
+    except Exception as e:
+        return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
 # fix issues with models first
 #@app.route('/api/collaborations/<session_id>', methods=['GET'])
