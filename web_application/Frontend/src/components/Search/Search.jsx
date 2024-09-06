@@ -48,14 +48,17 @@ function SearchPage() {
     }
   };
 
-  const handleSendRequest = async (receiverId) => {
+  const handleSendRequest = async (receiverId, phenotypeData) => {
     const token = getToken();
     const senderId = localStorage.getItem('userId');
 
     const requestData = {
       receiver_id: receiverId,
       sender_id: senderId,
+      phenotype: phenotypeData, 
     };
+
+    console.log('Sending request data:', requestData); 
 
     try {
       const response = await fetch(`${URL}/api/sendinvitation`, {
@@ -122,7 +125,7 @@ function SearchPage() {
     <Container component="div" maxWidth="lg" sx={{ padding: 4, borderRadius: 2 }}>
       <Grid container spacing={3} alignItems="center" justifyContent="center">
         <Grid item xs={12}>
-          <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'bold' }}>
+          <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'light' }}>
             Search Collaborators
           </Typography>
         </Grid>
@@ -159,16 +162,13 @@ function SearchPage() {
           </Button>
         </Grid>
         <Grid item xs={12}>
-          <Typography variant="h6" align="center" gutterBottom sx={{ marginTop: 4 }}>
-            Search Results
-          </Typography>
           <Grid container spacing={3}>
             {searchResults.map((result) => (
               <Grid item xs={12} sm={6} md={4} key={result._id}>
                 <Card sx={{ borderRadius: 2, boxShadow: 'none', border: '1px solid #ddd' }}>
                   <CardContent>
                     <Typography variant="h6" component="div">
-                      {result.email}
+                      {result.name}
                     </Typography>
                     <Typography variant="body2" color="textSecondary">
                       Phenotype: {result.phenotype}
@@ -181,9 +181,8 @@ function SearchPage() {
                     <Button
                       variant="contained"
                       color="primary"
-
-                      onClick={() => handleSendRequest(result._id)}
-                      disabled={isRequestSent[result._id] === 'pending' || isRequestSent[result._id] === 'rejected'}
+                      onClick={() => handleSendRequest(result._id, result.phenotype)} // Pass phenotype data here
+                      disabled={isRequestSent[result._id] === 'pending' || isRequestSent[result._id] === 'rejected' || isRequestSent[result._id] === 'accepted'}
                       fullWidth
                     >
                       {isRequestSent[result._id] === 'pending' ? 'Invitation Sent' :

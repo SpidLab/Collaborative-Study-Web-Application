@@ -17,6 +17,7 @@ import pandas as pd
 import logging
 from calculate_coefficients import compute_coefficients_dictionary
 from fuzzywuzzy import process
+import uuid
 
 
 app = Flask(__name__)
@@ -88,18 +89,48 @@ def load_user(user_id):
         return None
     return User(u)
 
+def get_current_user():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        logging.error("Authorization header missing")
+        return None, jsonify({"error": "Authorization header missing"}), 401
+
+    try:
+        token = auth_header.split()[1]
+    except IndexError:
+        logging.error("Invalid Authorization header format")
+        return None, jsonify({"error": "Invalid Authorization header format"}), 401
+
+    current_user = User.verify_auth_token(token)
+    if not current_user:
+        logging.error("Invalid or expired token")
+        return None, jsonify({"error": "Invalid or expired token"}), 401
+
+    return current_user, None
+
+
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()
-    email = data['email']
-    password = data['password']
+    name = data.get('name')
+    email = data.get('email')
+    password = data.get('password')
+
+    if not name or not email or not password:
+        logging.error("Missing required fields")
+        return jsonify({'message': 'Name, email, and password are required'}), 400
+
     user = db.users.find_one({'email': email})
 
     if user:
-        return jsonify({'message': 'email already exists'}), 409
+        return jsonify({'message': 'Email already exists'}), 409
 
     hashed_password = generate_password_hash(password, method='sha256')
-    db.users.insert_one({'email': email, 'password': hashed_password})
+    db.users.insert_one({
+        'name': name,
+        'email': email,
+        'password': hashed_password
+    })
 
     return jsonify({'message': 'User created successfully'}), 201
 
@@ -122,34 +153,22 @@ def login():
 
 @app.route('/api/profile', methods=['GET'])
 def get_profile():
-    auth_header = request.headers.get('Authorization')
-    if not auth_header:
-        logging.error("Authorization header missing")
-        return jsonify({"error": "Authorization header missing"}), 401
-    token = auth_header.split()[1]
-    get_user = User.verify_auth_token(token)
-    if not get_user:
-        return jsonify({"message": "Invalid token"}), 401
-    user_id = get_user.get_id()
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    user_id = current_user.get_id()
     user = db.users.find_one({"_id": ObjectId(user_id)}, {"email": 1, "name": 1})
     if not user:
         return jsonify({"message": "User not found"}), 404
     logging.info(f"User email: {user['email']}, User name: {user['name']}")
     return jsonify({"email": user['email'], "name": user['name']})
 
-
-
 @app.route('/api/profile', methods=['PUT'])
 def update_profile():
-    auth_header = request.headers.get('Authorization')
-    if not auth_header:
-        logging.error("Authorization header missing")
-        return jsonify({"error": "Authorization header missing"}), 401
-    token = auth_header.split()[1]
-    get_user = User.verify_auth_token(token)
-    if not get_user:
-        return jsonify({"message": "Invalid token"}), 401
-    user_id = get_user.get_id()
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    user_id = current_user.get_id()
     data = request.json
     name = data.get('name')
     current_password = data.get('currentPassword')
@@ -194,16 +213,43 @@ def verify_password(email_or_token, password):
     g.user = user
     return True
 
+# @app.route('/api/logout', methods=['POST'])
+# def logout():
+#     auth_header = request.headers.get('Authorization')
+#     if not auth_header:
+#         logging.error("Authorization header missing")
+#         return jsonify({"error": "Authorization header missing"}), 401
+#     token = auth_header.split()[1]
+
+#     # Add the token to the blacklist
+#     blacklisted_tokens.append(token)
+
+#     logout_user()
+#     return jsonify({'message': 'Logout successful'})
+
 @app.route('/api/logout', methods=['POST'])
 def logout():
-    # Get the token from the request headers
-    token = request.headers.get('Authorization').split()[1]
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header:
+        logging.error("Authorization header missing")
+        return jsonify({"error": "Authorization header missing"}), 401
+
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0] != 'Bearer':
+        logging.error("Invalid Authorization header format")
+        return jsonify({"error": "Invalid Authorization header format"}), 401
+
+    token = parts[1]
 
     # Add the token to the blacklist
     blacklisted_tokens.append(token)
 
     logout_user()
     return jsonify({'message': 'Logout successful'})
+
+
+
 
 
 @app.route('/api/resource')
@@ -245,16 +291,9 @@ def create_research_project():
 @app.route('/api/invite/users', methods=['GET'])
 def get_users_for_invitation():
     try:
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            logging.error("Authorization header missing")
-            return jsonify({"error": "Authorization header missing"}), 401
-
-        token = auth_header.split()[1]
-        current_user = User.verify_auth_token(token)
-        if not current_user:
-            logging.error("Invalid token or user not found")
-            return jsonify({"error": "Invalid token or user not found"}), 401
+        current_user, error_response = get_current_user()
+        if error_response:
+            return error_response
         query = request.args.get('phenotype', '')
         min_samples = request.args.get('minSamples', '')
         search_filter = {}
@@ -287,7 +326,7 @@ def get_users_for_invitation():
 
         users_list = [{
             "_id": str(user["_id"]),
-            "email": user.get("email", "No Email Provided"),
+            "name": user.get("name", "No Name Provided"),
             "phenotype": next((doc['phenotypes'] for doc in matched_documents if doc['owner'] == str(user["_id"])), "No Phenotype"),
             "numberOfSamples": next((doc['numberOfSamples'] for doc in matched_documents if doc['owner'] == str(user["_id"])), "No Samples")
 
@@ -306,42 +345,40 @@ def get_users_for_invitation():
 @app.route('/api/invitations', methods=['GET'])
 def get_user_invitations():
     try:
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            logging.error("Authorization header missing")
-            return jsonify({"error": "Authorization header missing"}), 401
-
-        token = auth_header.split()[1]
-        current_user = User.verify_auth_token(token)
-
-        if not current_user:
-            logging.error("Invalid token or user not found")
-            return jsonify({"error": "Invalid token or user not found"}), 401
-
+        current_user, error_response = get_current_user()
+        if error_response:
+            return error_response
         user_id = current_user.get_id()
-
         invitations = db.invitations.find({
             '$or': [
                 {'receiver_id': ObjectId(user_id)},
                 {'sender_id': ObjectId(user_id)}
             ]
         })
-
         invitations_list = []
         for invitation in invitations:
             receiver_user = db.users.find_one({"_id": ObjectId(invitation["receiver_id"])})
             receiver_email = receiver_user["email"] if receiver_user else "Unknown"
+            receiver_name = receiver_user["name"] if receiver_user else "Unknown"
 
             sender_user = db.users.find_one({"_id": ObjectId(invitation["sender_id"])})
             sender_email = sender_user["email"] if sender_user else "Unknown"
+            sender_name = sender_user["name"] if sender_user else "Unknown"
+
+            storedUuid = invitation.get("uuid","No uuid")
+
 
             invitations_list.append({
                 "_id": str(invitation["_id"]),
+                "uuid": storedUuid,
                 "receiver_id": str(invitation["receiver_id"]),
                 "sender_id": str(invitation["sender_id"]),
                 "receiver_email": receiver_email,
+                "receiver_name": receiver_name,
                 "sender_email": sender_email,
-                "status": invitation["status"]
+                "sender_name": sender_name,
+                "status": invitation["status"],
+                "phenotype": invitation.get("phenotype", "Not provided")
             })
 
         return jsonify({"invitations": invitations_list, "user_id": user_id}), 200
@@ -355,57 +392,45 @@ def check_invitation_status():
     try:
         data = request.get_json()
         receiver_id = data['receiver_id']
-        
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            logging.error("Authorization header missing")
-            return jsonify({"error": "Authorization header missing"}), 401
-        
-        token = auth_header.split()[1]
-        current_user = User.verify_auth_token(token)
-        
-        if not current_user:
-            logging.error("Invalid token or user not found")
-            return jsonify({"error": "Invalid token or user not found"}), 401
-        
-        sender_id = current_user.get_id()  
-        
-        
+        current_user, error_response = get_current_user()
+        if error_response:
+            return error_response
+        sender_id = current_user.get_id()
         receiver_id = ObjectId(receiver_id)
         sender_id = ObjectId(sender_id)        
         existing_invitation = db.invitations.find_one({
             'receiver_id': receiver_id,
-            'sender_id': sender_id
+            'sender_id': sender_id,
+            'status':{'$ne': 'withdrawn'}
         })
         
-        if existing_invitation:
-            return jsonify({'status': existing_invitation['status']}), 200
-        
-        app.logger.debug("No existing invitation found")
-        return jsonify({'status': 'none'}), 200
-    
+        if not existing_invitation:
+            withdraw_invitation = db.invitations.find_one({
+            'receiver_id': receiver_id,
+            'sender_id': sender_id,
+            'status': 'withdrawn'
+            })
+            if withdraw_invitation:
+                return jsonify ({'status': 'withdrawn'}), 200
+            else:
+                return jsonify({'status': 'none'}), 200
+            
+        return jsonify({'status': existing_invitation['status']}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}),500
+
 
 @app.route('/api/sendinvitation', methods=['POST'])
 def send_invitation():
     try:
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            logging.error("Authorization header missing")
-            return jsonify({"error": "Authorization header missing"}), 401
-
-        token = auth_header.split()[1]
-        current_user = User.verify_auth_token(token)
-
-        if not current_user:
-            logging.error("Invalid token or user not found")
-            return jsonify({"error": "Invalid token or user not found"}), 401
-
+        current_user, error_response = get_current_user()
+        if error_response:
+            return error_response
         sender_id = current_user.id
 
         data = request.get_json()
         receiver_id = data.get('receiver_id')
+        phenotype = data.get('phenotype')
 
         if not receiver_id:
             logging.error("Receiver ID missing in the request")
@@ -415,17 +440,21 @@ def send_invitation():
 
         existing_invitation = db.invitations.find_one({
             'receiver_id': ObjectId(receiver_id),
-            'sender_id': ObjectId(sender_id)
+            'sender_id': ObjectId(sender_id),
+            'status' : {'$ne' : 'withdrawn'}
         })
 
         if existing_invitation:
             logging.debug("Invitation already exists")
             return jsonify({'message': 'Invitation already sent'}), 200
 
+
         invitation = {
+            'uuid': str(uuid.uuid4()),
             'receiver_id': ObjectId(receiver_id),
             'sender_id': ObjectId(sender_id),
-            'status': 'pending'
+            'status': 'pending',
+            'phenotype': phenotype
         }
 
         db.invitations.insert_one(invitation)
@@ -439,47 +468,64 @@ def send_invitation():
 @app.route('/api/acceptinvitation', methods=['POST'])
 def accept_invitation():
     data = request.get_json()
-    receiver_id = ObjectId(data.get('receiver_id'))
-    sender_id = ObjectId(data.get('sender_id'))
+    if 'uuid' not in data:
+        return jsonify({'error': 'UUID is missing'}), 400
 
     try:
-        invitation = db.invitations.find_one({
-            'receiver_id': receiver_id,
-            'sender_id': sender_id,
-        })
-
-        if invitation:
-            db.invitations.update_one(
-                {'_id': invitation['_id']},
-                {'$set': {'status': 'accepted'}}
-            )
-            app.logger.info('Invitation status updated successfully to accepted')
-            return jsonify({'message': 'Invitation status updated successfully to accepted'}), 200
-        else:
-            app.logger.warning('No matching invitation found')
-            return jsonify({'message': 'No matching invitation found'}), 404
-
+        uuid = str(data['uuid'])
     except Exception as e:
-        app.logger.error(f'Error accepting invitation: {str(e)}')
-        return jsonify({'message': 'Internal server error'}), 500
+        return jsonify({'error': 'Invalid UUID format'}), 400
 
+    invitation = db.invitations.find_one({'uuid': uuid})
+
+    if invitation:
+        db.invitations.update_one(
+            {'_id': invitation['_id']},
+            {'$set': {'status': 'accepted'}}
+        )
+        app.logger.info('Invitation status updated successfully to accepted')
+        return jsonify({'message': 'Invitation status updated successfully to accepted'}), 200
+    else:
+        app.logger.warning('No matching invitation found')
+        return jsonify({'message': 'No matching invitation found'}), 404
+
+
+
+@app.route('/api/withdrawinvitation', methods=['POST'])
+def withdraw_invitation():
+    data = request.get_json()
+    if 'uuid' not in data:
+        return jsonify({'error': 'UUID is missing'}), 400
+
+    try:
+        uuid = str(data['uuid'])
+    except Exception as e:
+        return jsonify({'error': 'Invalid UUID format'}), 400
+
+    invitation = db.invitations.find_one({'uuid': uuid})
+
+    if invitation:
+        db.invitations.update_one(
+            {'_id': invitation['_id']},
+            {'$set': {'status': 'withdrawn'}}
+        )
+        return jsonify({'message': 'Invitation status updated successfully to withdrawn'}), 200
+    else:
+        return jsonify({'message': 'No matching invitation found'}), 404
 
 
 @app.route('/api/rejectinvitation', methods=['POST'])
 def reject_invitation():
     data = request.get_json()
+    if 'uuid' not in data:
+        return jsonify({'error': 'UUID is missing'}), 400
 
-    # Ensure required fields are present in the JSON data
-    if 'receiver_id' not in data or 'sender_id' not in data:
-        return jsonify({'error': 'One or more required fields (receiver_id, sender_id) are missing'}), 400
+    try:
+        uuid = str(data['uuid'])
+    except Exception as e:
+        return jsonify({'error': 'Invalid UUID format'}), 400
 
-    receiver_id = data['receiver_id']
-    sender_id = data['sender_id']
-
-    invitation = db.invitations.find_one({
-        'receiver_id': ObjectId(receiver_id),
-        'sender_id': ObjectId(sender_id),
-    })
+    invitation = db.invitations.find_one({'uuid': uuid})
 
     if invitation:
         db.invitations.update_one(
@@ -489,7 +535,6 @@ def reject_invitation():
         return jsonify({'message': 'Invitation status updated successfully to rejected'}), 200
     else:
         return jsonify({'message': 'No matching invitation found'}), 404
-
 
 @app.route('/api/upload_csv', methods=['POST'])
 def upload_csv():

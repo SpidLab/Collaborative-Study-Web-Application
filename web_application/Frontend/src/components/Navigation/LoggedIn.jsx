@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button, IconButton, Tooltip, Avatar, Menu, MenuItem, Badge } from "@mui/material";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import PersonIcon from '@mui/icons-material/Person';
 import axios from 'axios';
 import URL from '../../config';
@@ -9,6 +9,7 @@ export default function LoggedIn({ onLogout }) {
   const [anchorEl, setAnchorEl] = React.useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const open = Boolean(anchorEl);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchPendingCount = async () => {
@@ -42,14 +43,26 @@ export default function LoggedIn({ onLogout }) {
   };
 
   const handleLogout = async () => {
+  
     try {
-      // Call the logout API endpoint
-      await axios.post(`${URL}/api/logout`);
+      // Retrieve the token from localStorage
+      const token = localStorage.getItem('token');
+  
+      // Call the logout API endpoint with the token in the Authorization header
+      await axios.post(`${URL}/api/logout`, {}, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+  
       // Remove token from localStorage
       localStorage.removeItem('token');
+  
+      // Call onLogout callback if provided
       onLogout();
-      return <Navigate to="/login" />;
+  
       // Redirect to login page after successful logout
+      navigate('/login');
     } catch (error) {
       // Handle any errors
       console.error('Logout error:', error);
@@ -57,7 +70,8 @@ export default function LoggedIn({ onLogout }) {
       // Close the menu
       handleClose();
     }
-  };  
+  };
+  
 
   return (
     <>

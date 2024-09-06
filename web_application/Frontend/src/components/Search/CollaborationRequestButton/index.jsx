@@ -1,6 +1,8 @@
 import React from 'react';
 import { Button } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
+import URL from '../../config';
+
 
 
 const CollaborationRequestButton = ({ receiverId, senderId }) => {
@@ -13,7 +15,7 @@ const CollaborationRequestButton = ({ receiverId, senderId }) => {
     };
 
     // Send POST request to the backend endpoint
-    fetch('https://ubiquitous-space-potato-q77r667x74qx29vvr-5000.app.github.dev/api/sendinvitation', {
+    fetch(`${URL}/api/sendinvitation`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

@@ -82,7 +82,7 @@ const UploadForm = () => {
 
     return (
         <Container component="div" maxWidth="sm" sx={{ padding: 4, borderRadius: 2 }}>
-            <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'bold' }}>
+            <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'light' }}>
                 Dataset Metadata Upload
             </Typography>
             <form onSubmit={handleSubmit}>

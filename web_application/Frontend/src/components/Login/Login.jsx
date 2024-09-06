@@ -5,6 +5,8 @@ import { GoogleLogin } from '@react-oauth/google';
 import axios from 'axios';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import './Login.css';
+import URL from '../../config';
+
 
 const WhiteButton = styled(Button)({
   background: '#fff',
@@ -37,7 +39,7 @@ const Login = ({ onLogin }) => {
     setLoading(true);
 
     try {
-      const response = await axios.post('https://ubiquitous-space-potato-q77r667x74qx29vvr-5000.app.github.dev/api/login', {
+      const response = await axios.post(`${URL}/api/login`, {
         email: username,
         password,
       });
@@ -69,7 +71,7 @@ const Login = ({ onLogin }) => {
               required
               fullWidth
               id="username"
-              label="Username"
+              label="Email"
               name="username"
               autoComplete="username"
               autoFocus

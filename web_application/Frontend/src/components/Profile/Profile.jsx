@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Container, TextField, Button, Typography, Box } from '@mui/material';
+import URL from '../../config';
 
-const getToken = () => {
-  return localStorage.getItem('token');
-};
-const token = getToken();
+
 
 const Profile = () => {
+  const getToken = () => {
+    return localStorage.getItem('token');
+  };
+  const token = getToken();
+  
   const [user, setUser] = useState({
     name: '',
     email: '',
@@ -17,7 +20,7 @@ const Profile = () => {
   });
 
   useEffect(() => {
-    axios.get('https://ubiquitous-space-potato-q77r667x74qx29vvr-5000.app.github.dev/api/profile', {
+    axios.get(`${URL}/api/profile`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -44,7 +47,7 @@ const Profile = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    axios.put('https://ubiquitous-space-potato-q77r667x74qx29vvr-5000.app.github.dev/api/profile', user, {
+    axios.put(`${URL}/api/profile`, user, {
       headers: {
         'Authorization': `Bearer ${token}`
       }

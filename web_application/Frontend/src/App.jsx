@@ -74,7 +74,7 @@ function App() {
         <Toolbar>
           <BrightnessHighIcon sx={{ display: { xs: 'none', md: 'flex' }, mr: 1 }} />
           <Typography variant="h6" style={{ flexGrow: 1 }}>
-            Collaborative Web Application
+            Collaborative Study Web Application
           </Typography>
           {isLoggedIn ? (
             <LoggedIn onLogout={handleLogout} />

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TextField, Button, Container, Typography, Box, CircularProgress, styled, Link as MuiLink, Divider, InputAdornment, IconButton } from '@mui/material';
+import { TextField, Button, Container, Typography, Box, CircularProgress, styled, Divider, InputAdornment, IconButton } from '@mui/material';
 import axios from 'axios';
 import { Link as RouterLink } from 'react-router-dom';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
@@ -26,34 +26,45 @@ const StyledTextField = styled(TextField)({
 
 const NewUser = () => {
   const [username, setUsername] = useState('');
+  const [name, setName] = useState(''); // Added state for name
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState(''); // Added state for success message
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-  
 
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       return;
     }
 
+    setLoading(true);
     try {
-      console.log('Sending request:', { username, password }); // Debugging
       const response = await axios.post(`${URL}/api/register`, {
+        name,  // Include name in the request
         email: username,
         password,
       });
 
       console.log('Response:', response.data); // Debugging
       setError('');
+      setSuccess('User created successfully'); // Set success message
+      // Clear form fields
+      setUsername('');
+      setName(''); // Clear name field
+      setPassword('');
+      setConfirmPassword('');
     } catch (err) {
       console.error('Error:', err.response?.data?.message || 'An error occurred');
       console.error('Error headers:', err.response?.headers); // Debugging
       setError(err.response?.data?.message || 'An error occurred');
+      setSuccess(''); // Clear success message on error
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -70,6 +81,15 @@ const NewUser = () => {
       <Box sx={{ border: '1px dashed #ccc', borderRadius: 5, padding: 3, width: '100%', boxSizing: 'border-box', marginTop: 3 }}>
         <Typography variant="h5" align="center" gutterBottom>Registration</Typography>
         <form onSubmit={handleSubmit}>
+          <StyledTextField
+            fullWidth
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)} // Handle name input
+            id="name"
+            label="Name"
+            margin="normal"
+          />
           <StyledTextField
             fullWidth
             required
@@ -109,6 +129,7 @@ const NewUser = () => {
             margin="normal"
           />
           {error && <Typography variant="body2" color="error" sx={{ mt: 1, mb: 1 }}>{error}</Typography>}
+          {success && <Typography variant="body2" color="success" sx={{ mt: 1, mb: 1 }}>{success}</Typography>}
           <Button
             type="submit"
             fullWidth
