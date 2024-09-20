@@ -8,7 +8,7 @@ const getToken = () => {
   return localStorage.getItem('token');
 };
 
-const UserInvitation = ({ invitation, onAccept, onReject, currentUserId, onWithdraw }) => {
+const UserInvitation = ({ invitation, onAccept, onReject, currentUserId, onWithdraw, onCancel }) => {
   const [status, setStatus] = useState(invitation.status);
 
   const handleAccept = () => {
@@ -23,6 +23,10 @@ const UserInvitation = ({ invitation, onAccept, onReject, currentUserId, onWithd
   const handleWithdraw = () => {
     onWithdraw(invitation._id, invitation.receiver_id, invitation.sender_id, invitation.uuid);
     setStatus('withdrawn');
+  };
+  const handleCancel = () => {
+    onCancel(invitation._id, invitation.receiver_id, invitation.sender_id, invitation.uuid);
+    setStatus('cancelled');
   };
 
   const displayEmail = () => {
@@ -48,11 +52,11 @@ const UserInvitation = ({ invitation, onAccept, onReject, currentUserId, onWithd
         </ListItemSecondaryAction>
       )}
       {invitation.sender_id === currentUserId && invitation.receiver_id !== currentUserId && (
-                <ListItemSecondaryAction>
-                    <Button variant="contained" color="secondary" size="small" onClick={handleWithdraw}>
-                        Withdraw
-                    </Button>
-                </ListItemSecondaryAction>
+        <ListItemSecondaryAction>
+          <Button variant="contained" color="secondary" size="small" onClick={handleWithdraw}>
+            Withdraw
+          </Button>
+        </ListItemSecondaryAction>
       )}
     </ListItem>
   );
@@ -72,36 +76,36 @@ const CollaborationsPage = () => {
   useEffect(() => {
     const fetchInvitations = async () => {
       const token = getToken();
-  
+
       try {
         const response = await axios.get(`${URL}/api/invitations`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         });
-  
+
         const { user_id, invitations } = response.data;
         const pending = invitations
           .filter(invitation => invitation.status === 'pending')
           .map(invitation => ({
             ...invitation,
-            uuid: invitation.uuid 
+            uuid: invitation.uuid
           }));
-  
+
         const accepted = invitations
           .filter(invitation => invitation.status === 'accepted')
           .map(invitation => ({
             ...invitation,
-            uuid: invitation.uuid 
+            uuid: invitation.uuid
           }));
-  
+
         const sent = invitations
           .filter(invitation => invitation.status === 'sent')
           .map(invitation => ({
             ...invitation,
-            uuid: invitation.uuid 
+            uuid: invitation.uuid
           }));
-  
+
         setCurrentUserId(user_id);
         setPendingInvitations(pending);
         setAcceptedInvitations(accepted);
@@ -111,35 +115,31 @@ const CollaborationsPage = () => {
         setError('Failed to fetch invitations');
       }
     };
-  
+
     fetchInvitations();
   }, []);
-  
+
 
   const handleWithdraw = async (invitationId, receiverId, senderId, uuid) => {
     const token = getToken();
     try {
-        const response = await axios.post(`${URL}/api/withdrawinvitation`, {
-            uuid: uuid,
-        }, {
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
-        });
-
-        if (response.status === 200) {
-            setMessage('Request Withdrawn');
-            setOpenSnackbar(true);
-            setPendingInvitations(prev => prev.filter(invitation => invitation._id !== invitationId));
-            // const acceptedInvitation = pendingInvitations.find(inv => inv._id === invitationId);
-            // setSentInvitations(prev => [...prev, { ...acceptedInvitation, status: 'withdrawn' }]);
+      const response = await axios.post(`${URL}/api/withdrawinvitation`, {
+        uuid: uuid,
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`
         }
+      });
+
+      if (response.status === 200) {
+        setMessage('Request Withdrawn');
+        setOpenSnackbar(true);
+        setPendingInvitations(prev => prev.filter(invitation => invitation._id !== invitationId));
+      }
     } catch (error) {
-        console.error('Error withdrawing invitation:', error.response ? error.response.data.message : error.message);
+      console.error('Error withdrawing invitation:', error.response ? error.response.data.message : error.message);
     }
   };
-
-
 
   const handleAccept = async (invitationId, receiverId, senderId, uuid) => {
     const token = getToken();
@@ -194,6 +194,30 @@ const CollaborationsPage = () => {
     }
   };
 
+  const handleCancel = async (invitationId, uuid) => {
+    const token = getToken();
+    console.log('UUID:', uuid);
+    try {
+      const response = await axios.post(`${URL}/api/cancelinvitation`, {
+        uuid: uuid,
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.status === 200) {
+        setMessage('Invitation Cancelled');
+        setOpenSnackbar(true);
+        setPendingInvitations(prev => prev.filter(invitation => invitation._id !== invitationId));
+      }
+    } catch (error) {
+      console.error('Error cancelling invitation:', error);
+      setMessage('Failed to cancel request');
+      setOpenSnackbar(true);
+    }
+  };
+
   const handleCloseSnackbar = () => {
     setOpenSnackbar(false);
   };
@@ -209,7 +233,7 @@ const CollaborationsPage = () => {
       </Typography>
       <List>
         {pendingInvitations.map((invitation) => (
-          <UserInvitation key={invitation._id} invitation={invitation} onAccept={handleAccept} onReject={handleReject} onWithdraw={handleWithdraw} currentUserId={currentUserId} />
+          <UserInvitation key={invitation._id} invitation={invitation} onAccept={handleAccept} onReject={handleReject} onWithdraw={handleWithdraw} onCancel={handleCancel} currentUserId={currentUserId} />
         ))}
       </List>
 
@@ -239,6 +263,15 @@ const CollaborationsPage = () => {
                     onClick={() => navigate('/session')}
                   >
                     Create a Session
+                  </Button>
+                )} {invitation.receiver_id === currentUserId && (
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    size="small"
+                    onClick={() => handleCancel(invitation._id, invitation.uuid)}
+                  >
+                    Revoke Invitation
                   </Button>
                 )}
               </ListItem>
