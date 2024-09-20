@@ -697,6 +697,15 @@ def calculate_cofficients():
     #except DoesNotExist:
     #    return jsonify({'message': 'Collaboration not found'}), 404
 
+def quality_control_service(collaboration_id, qc_threshold):
+    metadata_ids = get_metadata_ids(collabortaion_id) # retrieves from collaboration store
+    metadata = get_metadata(metadata_ids) #retrieves from metadata store
+
+    quality_control_result = quality_control_algorithm(qc_threshold, metadata) # computes the quality control result
+    set_quality_control_result(quality_control_result) # puts result into QC store
+
+    return quality_control_result # for the frontend
+
 
 if __name__ == '__main__':
     app.run(debug=True)
