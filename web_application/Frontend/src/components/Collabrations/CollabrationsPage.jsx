@@ -8,7 +8,7 @@ const getToken = () => {
   return localStorage.getItem('token');
 };
 
-const UserInvitation = ({ invitation, onAccept, onReject, currentUserId, onWithdraw, onCancel }) => {
+const UserInvitation = ({ invitation, onAccept, onReject, currentUserId, onWithdraw, onRevoke }) => {
   const [status, setStatus] = useState(invitation.status);
 
   const handleAccept = () => {
@@ -24,9 +24,9 @@ const UserInvitation = ({ invitation, onAccept, onReject, currentUserId, onWithd
     onWithdraw(invitation._id, invitation.receiver_id, invitation.sender_id, invitation.uuid);
     setStatus('withdrawn');
   };
-  const handleCancel = () => {
-    onCancel(invitation._id, invitation.receiver_id, invitation.sender_id, invitation.uuid);
-    setStatus('cancelled');
+  const handleRevoke = () => {
+    onRevoke(invitation._id, invitation.receiver_id, invitation.sender_id, invitation.uuid);
+    setStatus('revoked');
   };
 
   const displayEmail = () => {
@@ -171,7 +171,7 @@ const CollaborationsPage = () => {
     }
   };
 
-  const handleReject = async (invitationId, receiverId, senderId, uuid) => {
+  const handleReject = async (invitationId, uuid) => {
     const token = getToken();
     try {
       const response = await axios.post(`${URL}/api/rejectinvitation`, {
@@ -194,11 +194,11 @@ const CollaborationsPage = () => {
     }
   };
 
-  const handleCancel = async (invitationId, uuid) => {
+  const handleRevoke = async (invitationId, uuid) => {
     const token = getToken();
     console.log('UUID:', uuid);
     try {
-      const response = await axios.post(`${URL}/api/cancelinvitation`, {
+      const response = await axios.post(`${URL}/api/revoke_invitation`, {
         uuid: uuid,
       }, {
         headers: {
@@ -207,13 +207,13 @@ const CollaborationsPage = () => {
       });
 
       if (response.status === 200) {
-        setMessage('Invitation Cancelled');
+        setMessage('Invitation Revoked');
         setOpenSnackbar(true);
         setPendingInvitations(prev => prev.filter(invitation => invitation._id !== invitationId));
       }
     } catch (error) {
-      console.error('Error cancelling invitation:', error);
-      setMessage('Failed to cancel request');
+      console.error('Error revoking invitation:', error);
+      setMessage('Failed to revoke request');
       setOpenSnackbar(true);
     }
   };
@@ -233,7 +233,7 @@ const CollaborationsPage = () => {
       </Typography>
       <List>
         {pendingInvitations.map((invitation) => (
-          <UserInvitation key={invitation._id} invitation={invitation} onAccept={handleAccept} onReject={handleReject} onWithdraw={handleWithdraw} onCancel={handleCancel} currentUserId={currentUserId} />
+          <UserInvitation key={invitation._id} invitation={invitation} onAccept={handleAccept} onReject={handleReject} onWithdraw={handleWithdraw} onRevoke={handleRevoke} currentUserId={currentUserId} />
         ))}
       </List>
 
@@ -269,7 +269,7 @@ const CollaborationsPage = () => {
                     variant="outlined"
                     color="primary"
                     size="small"
-                    onClick={() => handleCancel(invitation._id, invitation.uuid)}
+                    onClick={() => handleRevoke(invitation._id, invitation.uuid)}
                   >
                     Revoke Invitation
                   </Button>

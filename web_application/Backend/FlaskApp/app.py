@@ -430,28 +430,28 @@ def send_invitation():
         data = request.get_json()
         receiver_id = data.get('receiver_id')
         phenotype = data.get('phenotype')
-        collaboration_uuid = data.get('collaboration_uuid')
+        collaboration_id = data.get('collaboration_id')
 
         if not receiver_id:
             logging.error("Receiver ID missing in the request")
             return jsonify({"error": "Receiver ID missing in the request"}), 400
 
-        if not collaboration_uuid:
+        if not collaboration_id:
             logging.error("Collaboration UUID missing in the request")
             return jsonify({"error": "Collaboration UUID missing in the request"}), 400
 
-        logging.debug(f"Sender ID: {sender_id}, Receiver ID: {receiver_id}, Collaboration UUID: {collaboration_uuid}")
+        logging.debug(f"Sender ID: {sender_id}, Receiver ID: {receiver_id}, Collaboration UUID: {collaboration_id}")
 
         # Check if the collaboration exists
-        collaboration = db.collaborations.find_one({'uuid': collaboration_uuid})
+        collaboration = db.collaborations.find_one({'uuid': collaboration_id})
         if not collaboration:
-            logging.error(f"Collaboration with UUID {collaboration_uuid} not found")
+            logging.error(f"Collaboration with UUID {collaboration_id} not found")
             return jsonify({"error": "Collaboration not found"}), 404
 
         existing_invitation = db.invitations.find_one({
             'receiver_id': ObjectId(receiver_id),
             'sender_id': ObjectId(sender_id),
-            'collaboration_uuid': collaboration_uuid,
+            'collaboration_id': collaboration_id,
             'status': {'$ne': 'withdrawn'}
         })
 
@@ -465,13 +465,13 @@ def send_invitation():
             'sender_id': ObjectId(sender_id),
             'status': 'pending',
             'phenotype': phenotype,
-            'collaboration_uuid': collaboration_uuid,
+            'collaboration_id': collaboration_id,
         }
 
         db.invitations.insert_one(invitation)
 
         db.collaborations.update_one(
-            {'uuid': collaboration_uuid},
+            {'uuid': collaboration_id},
             {'$addToSet': {'invited_users': {
                 'user_id': ObjectId(receiver_id),
                 'status': 'pending',
@@ -503,12 +503,12 @@ def accept_invitation():
             {'_id': invitation['_id']},
             {'$set': {'status': 'accepted'}}
         )
-        collaboration_uuid = invitation.get('collaboration_uuid')
+        collaboration_id = invitation.get('collaboration_id')
         receiver_id = invitation.get('receiver_id')
 
-        if collaboration_uuid and receiver_id:
+        if collaboration_id and receiver_id:
             db.collaborations.update_one(
-                {'uuid': collaboration_uuid, 'invited_users.user_id': receiver_id},
+                {'uuid': collaboration_id, 'invited_users.user_id': receiver_id},
                 {'$set': {'invited_users.$.status': 'accepted'}}
             )
 
@@ -536,12 +536,12 @@ def withdraw_invitation():
             {'$set': {'status': 'withdrawn'}}
         )
 
-        collaboration_uuid = invitation.get('collaboration_uuid')
+        collaboration_id = invitation.get('collaboration_id')
         receiver_id = invitation.get('receiver_id')
 
-        if collaboration_uuid and receiver_id:
+        if collaboration_id and receiver_id:
             db.collaborations.update_one(
-                {'uuid': collaboration_uuid, 'invited_users.user_id': receiver_id},
+                {'uuid': collaboration_id, 'invited_users.user_id': receiver_id},
                 {'$set': {'invited_users.$.status': 'withdrawn'}}
             )
 
@@ -549,7 +549,7 @@ def withdraw_invitation():
     else:
         return jsonify({'message': 'No matching invitation found'}), 404
     
-@app.route('/api/cancelinvitation', methods=['POST'])
+@app.route('/api/revoke_invitation', methods=['POST'])
 def cancel_invitation():
     data = request.get_json()
     if 'uuid' not in data:
@@ -566,9 +566,9 @@ def cancel_invitation():
     if invitation:
         db.invitations.update_one(
             {'_id': invitation['_id']},
-            {'$set': {'status': 'cancelled'}}
+            {'$set': {'status': 'revoked'}}
         )
-        return jsonify({'message': 'Invitation status updated successfully to cancelled'}), 200
+        return jsonify({'message': 'Invitation status updated successfully to revoked'}), 200
     else:
         return jsonify({'message': 'No matching invitation found'}), 404
 
@@ -591,12 +591,12 @@ def reject_invitation():
             {'_id': invitation['_id']},
             {'$set': {'status': 'rejected'}}
         )
-        collaboration_uuid = invitation.get('collaboration_uuid')
+        collaboration_id = invitation.get('collaboration_id')
         receiver_id = invitation.get('receiver_id')
 
-        if collaboration_uuid and receiver_id:
+        if collaboration_id and receiver_id:
             db.collaborations.update_one(
-                {'uuid': collaboration_uuid, 'invited_users.user_id': receiver_id},
+                {'uuid': collaboration_id, 'invited_users.user_id': receiver_id},
                 {'$set': {'invited_users.$.status': 'rejected'}}
             )
 
@@ -646,7 +646,7 @@ def start_collaboration():
         return jsonify({
             'message': 'Collaboration created successfully',
             'collaboration_id': str(result.inserted_id),
-            'collaboration_uuid': collaboration['uuid']
+            'collaboration_id': collaboration['uuid']
         }), 201
 
     except Exception as e:
@@ -703,7 +703,7 @@ def start_collaboration():
 #                     pass
 #                 if 'invitation_status' in data:
 #                     db.invitations.update_one(
-#                         {'collaboration_uuid': uuid, 'receiver_id': user_id},
+#                         {'collaboration_id': uuid, 'receiver_id': user_id},
 #                         {'$set': {'status': data['invitation_status']}}
 #                     )
 

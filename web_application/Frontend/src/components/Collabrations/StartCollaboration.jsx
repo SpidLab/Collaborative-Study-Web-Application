@@ -62,13 +62,13 @@ const StartCollaboration = () => {
         }
       });
 
-      const { collaboration_uuid } = createCollabResponse.data;
+      const { collaboration_id } = createCollabResponse.data;
 
       const invitationPromises = selectedUsers.map(user =>
         axios.post(`${URL}/api/sendinvitation`, {
           receiver_id: user._id,
           phenotype: user.phenotype,
-          collaboration_uuid: collaboration_uuid
+          collaboration_id: collaboration_id
         }, {
           headers: {
             'Content-Type': 'application/json',
