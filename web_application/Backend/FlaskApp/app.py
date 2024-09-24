@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, g
 from flask_login import LoginManager, login_user, logout_user, UserMixin
 from flask_cors import CORS
+from importlib_metadata import metadata
 from itsdangerous import Serializer, SignatureExpired, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
@@ -697,8 +698,21 @@ def calculate_cofficients():
     #except DoesNotExist:
     #    return jsonify({'message': 'Collaboration not found'}), 404
 
-def quality_control_service(collaboration_id, qc_threshold):
-    metadata_ids = get_metadata_ids(collabortaion_id) # retrieves from collaboration store
+def get_metadata_ids(collaboration_id: int):
+    raise NotImplementedError()
+
+def get_metadata(metadata_ids: list[int]):
+    raise NotImplementedError()
+
+def quality_control_algorithm(qc_threshold: float, metadata: json):
+    raise NotImplementedError()
+
+# will adjust result type when making function depending on decisions made
+def set_quality_control_result(quality_control_result: any):
+    raise NotImplementedError()
+
+def quality_control_service(collaboration_id: int, qc_threshold: float):
+    metadata_ids = get_metadata_ids(collaboration_id) # retrieves from collaboration store
     metadata = get_metadata(metadata_ids) #retrieves from metadata store
 
     quality_control_result = quality_control_algorithm(qc_threshold, metadata) # computes the quality control result
