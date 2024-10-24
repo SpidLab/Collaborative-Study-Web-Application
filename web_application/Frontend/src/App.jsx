@@ -8,9 +8,10 @@ import LoggedOut from './components/Navigation/LoggedOut';
 import ForgotUsername from './components/Forgot/ForgotUsername'; 
 import ForgotPassword from './components/Forgot/ForgotPassword'; 
 import CollaborationsPage from './components/Collabrations/CollabrationsPage';
-import CollaborationDetailsPage from './components/Collabrations/Details';
+import CollaborationDetails from './components/Collabrations/CollaborationDetails';
 import SessionsResults from "./components/Session/SessionsResults";
 import Profile from "./components/Profile/Profile";
+import StartCollaboration from "./components/Collabrations/StartCollaboration";
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -94,7 +95,8 @@ function App() {
         <Route path="/profile" element={isLoggedIn ? <Profile /> : <Navigate to="/login" />} />
         <Route path="/session/viewresults" element={ <SessionsResults />} />
         <Route path="/collaboration" element={isLoggedIn ? <CollaborationsPage /> : <Navigate to="/login" />} />
-        <Route path="/collaboration/:id" element={isLoggedIn ? <CollaborationDetailsPage /> : <Navigate to="/login" />} /> 
+        <Route path="/start-collaboration" element={isLoggedIn ? <StartCollaboration /> : <Navigate to="/login" />} />
+        <Route path="/collaboration/:uuid" element={isLoggedIn ? <CollaborationDetails /> : <Navigate to="/login" />} /> 
         <Route path="/forgot/username" element={<ForgotUsername />} />
         <Route path="/forgot/password" element={<ForgotPassword />} />
       </Routes>
