@@ -1,6 +1,13 @@
+import traceback
+
+from pandas import DataFrame
+
+from calculate_coefficients import compute_coefficients_dictionary
+import numpy as np
 from flask import Flask, request, jsonify, g
 from flask_login import LoginManager, login_user, logout_user, UserMixin
 from flask_cors import CORS
+from importlib_metadata import metadata
 from itsdangerous import Serializer, SignatureExpired, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
@@ -727,55 +734,134 @@ def upload_csv():
             logging.error("Invalid token or user not found")
             return jsonify({"error": "Invalid token or user not found"}), 401
 
-        owner = current_user.id
+        user_id = current_user.id
 
         # Check if the post request has the file part
         if 'file' not in request.files:
+            logging.error('No file part in the request')
             return jsonify({'message': 'No file part in the request'}), 400
-
-        # Get text fields from the request
-        field1 = request.form.get('field1')
-        field2 = request.form.get('field2')
 
         file = request.files['file']
         # If the user does not select a file, the browser submits an empty file w/o a filename
         if file.filename == '':
+            logging.error('No selected file')
             return jsonify({'message': 'No selected file'}), 400
         if file and file.filename.endswith('.csv'):
             filename = secure_filename(file.filename)
             filepath = os.path.join('./', filename)
             file.save(filepath)
 
-            # Initialize an empty list to store records
-            record = {}  # Initialize record as a dictionary
+            phenotype = request.form.get('field1')
+            number_of_samples = request.form.get('field2')
+
             try:
                 df = pd.read_csv(filepath)
+
                 # Check if DataFrame is not empty
                 if not df.empty:
-                    # Iterate over DataFrame rows and construct records
-                    record['datasetID'] = str(ObjectId())  
-                    record['phenotypes'] = str(field1)
-                    record['owner'] = str(owner)
-                    record['numberOfSamples'] = str(field2)
-                    record['columns'] = ','.join(df.columns.to_list())
-                    record['records'] = {}
-                    for i in range(df.shape[0]):
-                        record['records'][str(i)] = ','.join(str(item) for item in df.iloc[i].to_list())
-                    
-            except Exception as e:
-                return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+                    data = {}
 
-            # Insert records into MongoDB
-            if record:
-                print(len(record.keys()))
-                db.fileUploads.insert_one(record)
+                    for index, row in df.iterrows():
+                        row_id = str(row.name)  # Convert row index to string
+                        data[row_id] = {}
+                        for col in df.columns:
+                            value = row[col]
+                            # Convert numpy types to standard Python types
+                            if isinstance(value, np.number):  # Check if value is a NumPy number
+                                data[row_id][col] = value.item()  # Convert to standard Python int or float
+                            else:
+                                data[row_id][col] = value  # Keep the original value if it's not a numpy type
+
+                    # Insert records into the datasets collection
+                    db['datasets'].insert_one({
+                        "user_id": str(user_id),
+                        "phenotype": str(phenotype),
+                        "number_of_samples": str(number_of_samples),
+                        "data": data
+                    })
+                else:
+                    logging.error('CSV file is empty')
+                    return jsonify({'message': 'CSV file is empty'}), 400
+
+            except Exception as e:
+                logging.error(f'Error reading CSV or inserting into DB: {str(e)}')
+                logging.error(traceback.format_exc())
+                return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
             return jsonify({'message': 'CSV file processed successfully'}), 200
         else:
+            logging.error('Unsupported file type')
             return jsonify({'message': 'Unsupported file type'}), 400
     except Exception as e:
-        print(e)
+        logging.error(f'Unexpected error: {str(e)}')
+        logging.error(traceback.format_exc())
         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+
+
+# @app.route('/api/upload_csv', methods=['POST'])
+# def upload_csv():
+#     try:
+#         auth_header = request.headers.get('Authorization')
+#         if not auth_header:
+#             logging.error("Authorization header missing")
+#             return jsonify({"error": "Authorization header missing"}), 401
+#
+#         token = auth_header.split()[1]
+#         current_user = User.verify_auth_token(token)
+#
+#         if not current_user:
+#             logging.error("Invalid token or user not found")
+#             return jsonify({"error": "Invalid token or user not found"}), 401
+#
+#         owner = current_user.id
+#
+#         # Check if the post request has the file part
+#         if 'file' not in request.files:
+#             return jsonify({'message': 'No file part in the request'}), 400
+#
+#         # Get text fields from the request
+#         field1 = request.form.get('field1')
+#         field2 = request.form.get('field2')
+#
+#         file = request.files['file']
+#         # If the user does not select a file, the browser submits an empty file w/o a filename
+#         if file.filename == '':
+#             return jsonify({'message': 'No selected file'}), 400
+#         if file and file.filename.endswith('.csv'):
+#             filename = secure_filename(file.filename)
+#             filepath = os.path.join('./', filename)
+#             file.save(filepath)
+#
+#             # Initialize an empty list to store records
+#             record = {}  # Initialize record as a dictionary
+#             try:
+#                 df = pd.read_csv(filepath)
+#                 # Check if DataFrame is not empty
+#                 if not df.empty:
+#                     # Iterate over DataFrame rows and construct records
+#                     record['datasetID'] = str(ObjectId())
+#                     record['phenotypes'] = str(field1)
+#                     record['owner'] = str(owner)
+#                     record['numberOfSamples'] = str(field2)
+#                     record['columns'] = ','.join(df.columns.to_list())
+#                     record['records'] = {}
+#                     for i in range(df.shape[0]):
+#                         record['records'][str(i)] = ','.join(str(item) for item in df.iloc[i].to_list())
+#
+#             except Exception as e:
+#                 return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+#
+#             # Insert records into MongoDB
+#             if record:
+#                 print(len(record.keys()))
+#                 db.fileUploads.insert_one(record)
+#
+#             return jsonify({'message': 'CSV file processed successfully'}), 200
+#         else:
+#             return jsonify({'message': 'Unsupported file type'}), 400
+#     except Exception as e:
+#         print(e)
+#         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
 # Route to retrieve list of collaborators for a session
 @app.route('/api/user/<user_id>/collaborations', methods=['GET'])
@@ -872,14 +958,132 @@ def calculate_cofficients():
     #except DoesNotExist:
     #    return jsonify({'message': 'Collaboration not found'}), 404
 
-def quality_control_service(collaboration_id, qc_threshold):
-    metadata_ids = get_metadata_ids(collabortaion_id) # retrieves from collaboration store
-    metadata = get_metadata(metadata_ids) #retrieves from metadata store
+def fetch_collaboration_data(uuid):
+    try:
+        collaboration_collection = db["collaborations"]
+        collaboration_data = collaboration_collection.find_one({"uuid": uuid})
 
-    quality_control_result = quality_control_algorithm(qc_threshold, metadata) # computes the quality control result
-    set_quality_control_result(quality_control_result) # puts result into QC store
+        if collaboration_data is None:
+            print("Collaboration not found.")
+            return None  # Collaboration not found
+        return collaboration_data
 
-    return quality_control_result # for the frontend
+    except Exception as e:
+        print(f"Error fetching collaboration data for UUID {uuid}: {str(e)}")
+        raise  # Re-raise the exception for higher-level handling
+
+
+def fetch_datasets_by_ids(dataset_ids):
+    dataset_collection = db["datasets"]
+    datasets = []
+
+    for dataset_id in dataset_ids:
+        dataset = dataset_collection.find_one({"_id": ObjectId(dataset_id)})
+        if dataset:
+            datasets.append(dataset)
+        else:
+            print(f"Dataset ID {dataset_id} not found.")
+
+    return datasets
+
+
+def combine_datasets(dataset_ids, fetch_dataset):
+    combined_data = []
+
+    for dataset_id in dataset_ids:
+        dataset = fetch_dataset(dataset_id)  # Function to fetch dataset by ID
+
+        if 'data' in dataset:
+            df = pd.DataFrame.from_dict(dataset['data'], orient='index')
+            combined_data.append(df)
+        else:
+            print(f"Dataset ID {dataset_id} does not contain 'data' key. Skipping.")
+
+    if combined_data:
+        combined_df = pd.concat(combined_data, ignore_index=True)
+        return combined_df
+    else:
+        raise ValueError("No valid datasets to combine.")
+
+
+def combine_datasets_to_dataframe(datasets_data):
+    if datasets_data:
+        dfs = []
+        all_columns = set()
+
+        for dataset in datasets_data:
+            if 'data' in dataset:
+                sample_data = dataset['data']
+                samples = [sample for sample in sample_data.values()]
+
+                for sample in samples:
+                    all_columns.update(sample.keys())
+
+                df = pd.DataFrame(samples)
+                df = df.reindex(columns=all_columns)
+
+                if "Unnamed: 0" in df.columns:
+                    df.rename(columns={"Unnamed: 0": "sample"}, inplace=True)
+
+                dfs.append(df)
+
+        if dfs:
+            combined_df = pd.concat(dfs, ignore_index=True)
+            combined_df = combined_df[sorted(combined_df.columns)]
+            return combined_df
+
+    return pd.DataFrame()  # Return an empty DataFrame if no datasets
+
+
+def get_combined_datasets(collab_uuid: str):
+    try:
+        collaboration_data = fetch_collaboration_data(collab_uuid)
+
+        if not collaboration_data:
+            return jsonify({"error": "Collaboration not found for the provided UUID."}), 404
+
+        invited_user_ids = collaboration_data.get("invited_users_datasets", [])
+        creator_dataset_id = collaboration_data.get("creator_dataset_id")
+
+        all_dataset_ids = invited_user_ids
+
+        if creator_dataset_id:
+            all_dataset_ids.append(creator_dataset_id)
+
+        datasets_data = fetch_datasets_by_ids(all_dataset_ids)
+
+        if not datasets_data:
+            return jsonify({"error": "No datasets found for the provided IDs."}), 404
+
+        combined_df = combine_datasets_to_dataframe(datasets_data)
+
+        return combined_df  # Return only the DataFrame
+
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        return jsonify({"error": str(e)}), 500  # Internal Server Error
+
+
+@app.route('/datasets/<uuid>', methods=['GET'])
+def qc(collab_uuid: str):
+    try:
+        df = get_combined_datasets(collab_uuid)
+
+        if isinstance(df, dict):  # Check for an error response
+            return df  # This is already a JSON response
+
+        print("Got datasets")
+        results = compute_coefficients_dictionary(df)
+
+        if results:
+            print(results)
+            return jsonify(results), 200  # Return results as JSON response
+        else:
+            return jsonify({"error": "No results returned from compute_coefficients_dictionary."}), 404
+
+    except Exception as e:
+        print(f"An error occurred in qc: {str(e)}")
+        return jsonify({"error": str(e)}), 500  # Return an error response
 
 
 if __name__ == '__main__':

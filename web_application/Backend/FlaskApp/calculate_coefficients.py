@@ -17,25 +17,26 @@ def calculate_phi(df, user1, user2):
 
     return phi
 
+
 def compute_coefficients_dictionary(df):
-    threshold = 0.08  # used as a lower limit for second-degree related individuals
+    threshold = 0.08  # Used as a lower limit for second-degree related individuals
     userList = df.columns.to_list()
     coeff_dict = {}
-    # the general dictionary that has the following stucture
-    # {('10', '100000'): 0.25, ...}
 
-    # Generate all possible pairs of column names
-    column_pairs = list(itertools.permutations(userList, 2))
-    cnt = 0
+    # Generate all possible pairs of column names, excluding 'sample'
+    column_pairs = itertools.permutations([col for col in userList if col != 'sample'], 2)
+
     # Compute coefficients for each column pair and add to dictionary if above threshold
     for first_user, second_user in column_pairs:
         phi_val_left = calculate_phi(df, str(first_user), str(second_user))
         phi_val_right = calculate_phi(df, str(second_user), str(first_user))
-        phi_val = max(phi_val_left, phi_val_right)  # keeping the largest phi
-        cnt+=1
+        phi_val = max(phi_val_left, phi_val_right)  # Keeping the largest phi
+
         if phi_val > threshold:
-            coeff_dict[(first_user, second_user)] = phi_val
+            coeff_dict[f"{first_user}-{second_user}"] = phi_val  # Convert tuple to string key
+
     return coeff_dict
+
 
 if __name__ == "__main__":
     #TODO Modify the code below to read from a list of csv files and merge them together
