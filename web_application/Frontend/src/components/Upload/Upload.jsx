@@ -135,7 +135,7 @@ const UploadForm = () => {
                             <CloudUploadIcon sx={{ fontSize: 40 }} />
                         </IconButton>
                         <Typography variant="body1">
-                            {fileName || 'Drag and drop a CSV file here, or click to select a file'}
+                            {fileName || 'Upload Noisy Dataset'}
                         </Typography>
                     </label>
                 </Box>
@@ -151,7 +151,7 @@ const UploadForm = () => {
                         variant="contained"
                         color="primary"
                         fullWidth
-                        sx={{ marginTop: 2, padding: 2, fontSize: '1rem' }}
+                        sx={{ marginTop: 2, padding: 2, fontSize: '1rem', borderRadius: 100 }}
                     >
                         Upload Dataset
                     </Button>
