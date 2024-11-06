@@ -18,24 +18,26 @@ def calculate_phi(df, user1, user2):
     return phi
 
 
-def compute_coefficients_dictionary(df):
-    threshold = 0.08  # Used as a lower limit for second-degree related individuals
-    userList = df.columns.to_list()
-    coeff_dict = {}
+def compute_coefficients_array(df, threshold=0.08):
+    user_list = df.columns.to_list()
+    coeff_array = []
 
     # Generate all possible pairs of column names, excluding 'sample'
-    column_pairs = itertools.permutations([col for col in userList if col != 'sample'], 2)
+    column_pairs = itertools.permutations([col for col in user_list if col != 'sample'], 2)
 
-    # Compute coefficients for each column pair and add to dictionary if above threshold
+    # Compute coefficients for each column pair and add to array if above threshold
     for first_user, second_user in column_pairs:
         phi_val_left = calculate_phi(df, str(first_user), str(second_user))
         phi_val_right = calculate_phi(df, str(second_user), str(first_user))
         phi_val = max(phi_val_left, phi_val_right)  # Keeping the largest phi
 
+        # If the coefficient is above the threshold, add the pair and value to the array
         if phi_val > threshold:
-            coeff_dict[f"{first_user}-{second_user}"] = phi_val  # Convert tuple to string key
+            coeff_array.append([first_user, second_user, phi_val])  # Store as [SNP1, SNP2, coefficient]
 
-    return coeff_dict
+    return coeff_array
+
+
 
 
 if __name__ == "__main__":
