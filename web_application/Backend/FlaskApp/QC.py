@@ -1,5 +1,6 @@
 from app import app
 from app import qc
+from app import get_filtered_qc_results
 
 def main():
 
@@ -11,6 +12,13 @@ def main():
             print("Collaboration data retrieved:", collaboration_data)
         else:
             print("Collaboration not found.")
+
+        filtered_results = get_filtered_qc_results(uuid)
+
+        if filtered_results:
+            print("Filtered results retrieved:", filtered_results)
+        else:
+            print("Filtered Results not found.")
 
 if __name__ == "__main__":
     main()

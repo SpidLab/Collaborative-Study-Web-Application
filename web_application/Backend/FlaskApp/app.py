@@ -1120,6 +1120,33 @@ def qc(collab_uuid: str):
         print(f"An error occurred in qc: {str(e)}")
         return jsonify({"error": str(e)}), 500  # Return an error response
 
+def get_filtered_qc_results(collab_uuid):
+    try:
+        # Get the collaboration data from the database
+        collaboration_collection = db["collaborations"]
+        collaboration_data = collaboration_collection.find_one({"uuid": collab_uuid})
+
+        if collaboration_data is None:
+            print("Collaboration not found.")
+            return None
+
+        # If the threshold isn't provided, retrieve it from the collaboration data
+        threshold = collaboration_data.get("threshold", .08)
+
+        # Get the stored QC results from the database
+        qc_results = collaboration_data.get("qc_results", [])
+
+        # Filter the results by the threshold
+        filtered_results = [result for result in qc_results if result[2] > threshold]
+
+        return filtered_results
+
+    except Exception as e:
+        print(f"Error retrieving and filtering QC results: {str(e)}")
+        return None
+
+
+
 if __name__ == '__main__':
     app.run(debug=True)
 
