@@ -2,7 +2,7 @@ import traceback
 
 from pandas import DataFrame
 
-from calculate_coefficients import compute_coefficients_dictionary
+from calculate_coefficients import compute_coefficients_array
 import numpy as np
 from flask import Flask, request, jsonify, g
 from flask_login import LoginManager, login_user, logout_user, UserMixin
@@ -23,7 +23,7 @@ from flask_httpauth import HTTPBasicAuth
 import json
 import pandas as pd
 import logging
-from calculate_coefficients import compute_coefficients_dictionary
+from calculate_coefficients import compute_coefficients_array
 from fuzzywuzzy import process
 import uuid
 
@@ -895,9 +895,9 @@ def start_session():
                 return jsonify({'message': f"Dataset for user {user_id} not found"}), 404
 
         merged_data = pd.concat(dataframes, axis=1, join='inner')
-        coeff_dict = compute_coefficients_dictionary(merged_data)
+        coeff_arr = compute_coefficients_array(merged_data)
 
-        results_table = pd.DataFrame(list(coeff_dict.items()), columns=['Pair', 'Coefficient'])
+        results_table = pd.DataFrame(list(coeff_arr.items()), columns=['Pair', 'Coefficient'])
 
         return results_table.to_json(orient='records'), 200
 
@@ -925,10 +925,10 @@ def calculate_cofficients():
         merged_data = pd.concat([df_user1, df_user2], axis=1)
   
         # Compute coefficients
-        coeff_dict = compute_coefficients_dictionary(merged_data)
+        coeff_arr = compute_coefficients_array(merged_data)
 
         # Convert the results to a table format (DataFrame)
-        results_table = pd.DataFrame(list(coeff_dict.items()), columns=['Pair', 'Coefficient'])
+        results_table = pd.DataFrame(list(coeff_arr.items()), columns=['Pair', 'Coefficient'])
         
         # Return the table as a JSON response
         return results_table.to_json(orient='records'), 200
@@ -1037,54 +1037,88 @@ def combine_datasets_to_dataframe(datasets_data):
 
 def get_combined_datasets(collab_uuid: str):
     try:
+        # Fetch collaboration data from the database
         collaboration_data = fetch_collaboration_data(collab_uuid)
 
         if not collaboration_data:
             return jsonify({"error": "Collaboration not found for the provided UUID."}), 404
 
+        # Get the threshold value from the collaboration data (use default if not present)
+        threshold = collaboration_data.get("threshold", 0.08)  # Default threshold is 0.08
+
+        # Get the list of dataset IDs from the collaboration data
         invited_user_ids = collaboration_data.get("invited_users_datasets", [])
         creator_dataset_id = collaboration_data.get("creator_dataset_id")
 
+        # Collect all dataset IDs, including the creator's dataset ID
         all_dataset_ids = invited_user_ids
-
         if creator_dataset_id:
             all_dataset_ids.append(creator_dataset_id)
 
+        # Fetch datasets from the database by their IDs
         datasets_data = fetch_datasets_by_ids(all_dataset_ids)
 
         if not datasets_data:
             return jsonify({"error": "No datasets found for the provided IDs."}), 404
 
+        # Combine the datasets into a single DataFrame
         combined_df = combine_datasets_to_dataframe(datasets_data)
 
-        return combined_df  # Return only the DataFrame
+        # Return the combined DataFrame and the threshold value
+        return combined_df, threshold  # Pass the threshold along with the DataFrame
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return jsonify({"error": str(e)}), 500  # Internal Server Error
 
+def store_qc_results_in_mongo(collab_uuid, results_array):
+    try:
+        # Get the collaboration data
+        collaboration_collection = db["collaborations"]
+        collaboration_data = collaboration_collection.find_one({"uuid": collab_uuid})
+
+        if collaboration_data is None:
+            print("Collaboration not found.")
+            return None
+
+        # Add the results to the document
+        collaboration_collection.update_one(
+            {"uuid": collab_uuid},
+            {"$set": {"qc_results": results_array}}
+        )
+        print("Results stored successfully.")
+
+    except Exception as e:
+        print(f"Error storing results: {str(e)}")
 
 @app.route('/datasets/<uuid>', methods=['GET'])
 def qc(collab_uuid: str):
     try:
-        df = get_combined_datasets(collab_uuid)
+        # Get the combined datasets and threshold from the collaboration data
+        df, threshold = get_combined_datasets(collab_uuid)
 
-        if isinstance(df, dict):  # Check for an error response
+        if isinstance(df, dict):  # Check for an error response (dict could be an error message)
             return df  # This is already a JSON response
 
         print("Got datasets")
-        results = compute_coefficients_dictionary(df)
+
+        # Compute the coefficients using the fetched threshold
+        results = compute_coefficients_array(df, threshold)
 
         if results:
-            print(results)
+            print("Results computed successfully.")
+
+            # Store the computed results in MongoDB
+            store_qc_results_in_mongo(collab_uuid, results)
+
+            # Return the results as a JSON response
             return jsonify(results), 200  # Return results as JSON response
         else:
-            return jsonify({"error": "No results returned from compute_coefficients_dictionary."}), 404
+            return jsonify({"error": "No results returned from compute_coefficients_array."}), 404
 
     except Exception as e:
         print(f"An error occurred in qc: {str(e)}")
         return jsonify({"error": str(e)}), 500  # Return an error response
-
 
 if __name__ == '__main__':
     app.run(debug=True)
