@@ -1354,11 +1354,11 @@ def get_combined_datasets(collab_uuid: str):
         threshold = collaboration_data.get("threshold", 0.08)  # Default threshold is 0.08
 
         # Get the list of dataset IDs from the collaboration data
-        invited_user_ids = collaboration_data.get("invited_users_datasets", [])
+        invited_users = collaboration_data.get("invited_users", [])  # List of invited users
         creator_dataset_id = collaboration_data.get("creator_dataset_id")
 
         # Collect all dataset IDs, including the creator's dataset ID
-        all_dataset_ids = invited_user_ids
+        all_dataset_ids = [user["user_dataset_id"] for user in invited_users if "user_dataset_id" in user]
         if creator_dataset_id:
             all_dataset_ids.append(creator_dataset_id)
 
@@ -1378,7 +1378,11 @@ def get_combined_datasets(collab_uuid: str):
         print(f"An error occurred: {str(e)}")
         return jsonify({"error": str(e)}), 500  # Internal Server Error
 
-def store_qc_results_in_mongo(collab_uuid, results_array):
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        return jsonify({"error": str(e)}), 500  # Internal Server Error
+
+def store_qc_results_in_mongo(collab_uuid: uuid, results_array, key: str):
     try:
         # Get the collaboration data
         collaboration_collection = db["collaborations"]
@@ -1391,15 +1395,15 @@ def store_qc_results_in_mongo(collab_uuid, results_array):
         # Add the results to the document
         collaboration_collection.update_one(
             {"uuid": collab_uuid},
-            {"$set": {"qc_results": results_array}}
+            {"$set": {key: results_array}}
         )
         print("Results stored successfully.")
 
     except Exception as e:
         print(f"Error storing results: {str(e)}")
 
-@app.route('/datasets/<uuid>', methods=['GET'])
-def qc(collab_uuid: str):
+@app.route('/datasets/<uuid:collab_uuid>', methods=['POST'])
+def initiate_qc(collab_uuid: uuid):
     try:
         # Get the combined datasets and threshold from the collaboration data
         df, threshold = get_combined_datasets(collab_uuid)
@@ -1410,13 +1414,13 @@ def qc(collab_uuid: str):
         print("Got datasets")
 
         # Compute the coefficients using the fetched threshold
-        results = compute_coefficients_array(df, threshold)
+        results = compute_coefficients_array(df)
 
         if results:
             print("Results computed successfully.")
 
             # Store the computed results in MongoDB
-            store_qc_results_in_mongo(collab_uuid, results)
+            store_qc_results_in_mongo(collab_uuid, results, "full_qc")
 
             # Return the results as a JSON response
             return jsonify(results), 200  # Return results as JSON response
@@ -1424,8 +1428,39 @@ def qc(collab_uuid: str):
             return jsonify({"error": "No results returned from compute_coefficients_array."}), 404
 
     except Exception as e:
-        print(f"An error occurred in qc: {str(e)}")
+        print(f"An error occurred in initiate_qc: {str(e)}")
         return jsonify({"error": str(e)}), 500  # Return an error response
+
+
+@app.route('/datasets/<uuid:collab_uuid>/qc-results', methods=['GET'])
+def get_filtered_qc_results(collab_uuid: uuid):
+    try:
+        # Get the collaboration data from the database
+        collaboration_collection = db["collaborations"]
+        collaboration_data = collaboration_collection.find_one({"uuid": collab_uuid})
+
+        if collaboration_data is None:
+            print("Collaboration not found.")
+            return jsonify({"error": "Collaboration not found."}), 404
+
+        # If the threshold isn't provided, retrieve it from the collaboration data
+        threshold = collaboration_data.get("threshold", .08)
+
+        # Get the stored QC results from the database
+        initiate_qc_results = collaboration_data.get("full_qc", [])
+
+        # Filter the results by the threshold
+        filtered_results = [result for result in initiate_qc_results if result[2] > threshold]
+
+        store_qc_results_in_mongo(collab_uuid, filtered_results, "filtered_qc")
+
+        return jsonify(filtered_results), 200
+
+    except Exception as e:
+        print(f"Error retrieving and filtering QC results: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
