@@ -5,6 +5,7 @@ import SearchPage from '../Search/Search';
 import CollaborationsPage from '../Collabrations/CollabrationsPage';
 import axios from 'axios';
 import URL from '../../config';
+import { ForkLeft } from '@mui/icons-material';
 
 const HomePage = () => {
   const [message, setMessage] = useState('');
@@ -50,7 +51,7 @@ const HomePage = () => {
   if (error) return <div>{error}</div>;
 
   return (
-    <Box sx={{ textAlign: 'center', mt: 4 }}>
+    <Box sx={{ mt: 4 }}>
       <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', color: '#333' }}>
         Welcome Back, {userName}
       </Typography>

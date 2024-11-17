@@ -902,13 +902,133 @@ def post_start_collaboration():
         logging.error(f"Error creating collaboration: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
 
-@app.route('/api/collaboration/<uuid>', methods=['GET', 'POST'])
-def collaboration_details(uuid):
-    try:
-        collaboration = db.collaborations.find_one({'uuid': uuid})
-        # print(f"Fetching collaboration for UUID: {uuid}")
-        # print(f"Collaboration fetched from DB: {collaboration}")
+# @app.route('/api/collaboration/<uuid>', methods=['GET', 'POST'])
+# def collaboration_details(uuid):
+#     try:
+#         collaboration = db.collaborations.find_one({'uuid': uuid})
+#         # print(f"Fetching collaboration for UUID: {uuid}")
+#         # print(f"Collaboration fetched from DB: {collaboration}")
 
+#         if not collaboration:
+#             return jsonify({'error': 'Collaboration not found'}), 404
+
+#         current_user, error_response = get_current_user()
+#         if error_response:
+#             return error_response
+
+#         user_id = str(current_user.id) 
+#         is_sender = collaboration['creator_id'] == ObjectId(user_id)
+#         sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
+#         sender_name = sender_user["name"] if sender_user else "Unknown"
+
+#         invited_users_details = []
+#         is_receiver = any(user['user_id'] == ObjectId(user_id) for user in collaboration['invited_users'])
+#         for invited_user in collaboration.get('invited_users', []):
+#                 receiver_user = db.users.find_one({"_id": ObjectId(invited_user["user_id"])})
+#                 receiver_name = receiver_user["name"] if receiver_user else "Unknown"
+#                 phenotype = invited_user["phenotype"]
+#                 status = invited_user["status"]
+
+#                 invited_users_details.append({
+#                     'user_id': str(invited_user["user_id"]),  
+#                     'name': receiver_name,
+#                     'phenotype': phenotype,
+#                     'status':  status
+#     })
+
+#         if request.method == 'GET':
+#             dataset = db.datasets.find_one(
+#                 {'_id': ObjectId(collaboration["creator_dataset_id"])},
+#                 {'phenotype': 1, 'number_of_samples': 1}
+#             )
+
+#             # Initialize default values in case fields are missing
+#             phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
+#             number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
+
+#             # Ensure values are strings
+#             if not isinstance(phenotype, str):
+#                 phenotype = str(phenotype)
+#             if not isinstance(number_of_samples, str):
+#                 number_of_samples = str(number_of_samples)
+
+
+#             creator_dataset  = {
+#                 'phenotype': phenotype,
+#                 'samples': number_of_samples
+#             }
+
+#             collaboration_details = {
+#                 'uuid': collaboration['uuid'],
+#                 'name': collaboration['name'],
+#                 'experiments': collaboration.get('experiments', []),
+#                 'phenotype': collaboration.get('phenotype', None),
+#                 'samples': collaboration.get('samples', None),
+#                 # 'raw_data': collaboration.get('raw_data', None),
+#                 'sender_id': is_sender,
+#                 'sender_name': sender_name,
+#                 'invited_users': invited_users_details,
+#                 'datasets': creator_dataset 
+#             }
+#             return jsonify(collaboration_details), 200
+
+#         if request.method == 'POST':
+#             data = request.get_json()
+#             print(f"Data received from frontend: {data}")
+
+#             if not data:  # Check if data is None or empty
+#                 return jsonify({'error': 'No data provided'}), 400
+
+#             if is_sender:
+#                 if 'experiments' in data:
+#                     db.collaborations.update_one(
+#                         {'uuid': uuid},
+#                         {'$set': {'experiments': data['experiments']}}
+#                     )
+
+#                 if 'add_people' in data:
+#                     for person in data['add_people']:
+#                         # Validate person format before adding
+#                         if 'user_id' in person:
+#                             db.collaborations.update_one(
+#                                 {'uuid': uuid},
+#                                 {'$addToSet': {'invited_users': person}}
+#                             )
+#                         else:
+#                             return jsonify({'error': 'Invalid person format'}), 400
+
+#                 if 'remove_people' in data:
+#                     for person_id in data['remove_people']:
+#                         # Validate person_id format
+#                         if isinstance(person_id, str):
+#                             db.collaborations.update_one(
+#                                 {'uuid': uuid},
+#                                 {'$pull': {'invited_users': {'user_id': person_id}}}
+#                             )
+#                         else:
+#                             return jsonify({'error': 'Invalid person_id format'}), 400
+
+#             elif is_receiver:
+#                 if 'meta_data' in data:
+#                     pass
+#                 if 'raw_data' in data:
+#                     pass
+#                 if 'invitation_status' in data:
+#                     db.invitations.update_one(
+#                         {'collaboration_id': uuid, 'receiver_id': user_id},
+#                         {'$set': {'status': data['invitation_status']}}
+#                     )
+
+#             return jsonify({'message': 'Collaboration updated successfully'}), 200
+
+#     except Exception as e:
+#         print(f"Error occurred: {str(e)}")
+#         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/collaboration/<uuid>', methods=['GET'])
+def get_collaboration_details(uuid):
+    try:
+        collaboration = db['collaborations'].find_one({'uuid': uuid})
         if not collaboration:
             return jsonify({'error': 'Collaboration not found'}), 404
 
@@ -916,114 +1036,122 @@ def collaboration_details(uuid):
         if error_response:
             return error_response
 
-        user_id = str(current_user.id) 
+        user_id = str(current_user.id)
+
         is_sender = collaboration['creator_id'] == ObjectId(user_id)
-        sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
+        sender_user = db['users'].find_one({"_id": ObjectId(collaboration["creator_id"])})
         sender_name = sender_user["name"] if sender_user else "Unknown"
 
         invited_users_details = []
-        is_receiver = any(user['user_id'] == ObjectId(user_id) for user in collaboration['invited_users'])
         for invited_user in collaboration.get('invited_users', []):
-                receiver_user = db.users.find_one({"_id": ObjectId(invited_user["user_id"])})
-                receiver_name = receiver_user["name"] if receiver_user else "Unknown"
-                phenotype = invited_user["phenotype"]
-                status = invited_user["status"]
+            receiver_user = db['users'].find_one({"_id": ObjectId(invited_user["user_id"])})
+            receiver_name = receiver_user["name"] if receiver_user else "Unknown"
+            phenotype = invited_user["phenotype"]
+            status = invited_user["status"]
 
-                invited_users_details.append({
-                    'user_id': str(invited_user["user_id"]),  
-                    'name': receiver_name,
-                    'phenotype': phenotype,
-                    'status':  status
-    })
-
-        if request.method == 'GET':
-            dataset = db.datasets.find_one(
-                {'_id': ObjectId(collaboration["creator_dataset_id"])},
-                {'phenotype': 1, 'number_of_samples': 1}
-            )
-
-            # Initialize default values in case fields are missing
-            phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
-            number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
-
-            # Ensure values are strings
-            if not isinstance(phenotype, str):
-                phenotype = str(phenotype)
-            if not isinstance(number_of_samples, str):
-                number_of_samples = str(number_of_samples)
-
-
-            creator_dataset  = {
+            invited_users_details.append({
+                'user_id': str(invited_user["user_id"]),
+                'name': receiver_name,
                 'phenotype': phenotype,
-                'samples': number_of_samples
-            }
+                'status': status
+            })
 
-            collaboration_details = {
-                'uuid': collaboration['uuid'],
-                'name': collaboration['name'],
-                'experiments': collaboration.get('experiments', []),
-                'phenotype': collaboration.get('phenotype', None),
-                'samples': collaboration.get('samples', None),
-                # 'raw_data': collaboration.get('raw_data', None),
-                'sender_id': is_sender,
-                'sender_name': sender_name,
-                'invited_users': invited_users_details,
-                'datasets': creator_dataset 
-            }
-            return jsonify(collaboration_details), 200
+        dataset = db['datasets'].find_one(
+            {'_id': ObjectId(collaboration["creator_dataset_id"])},
+            {'phenotype': 1, 'number_of_samples': 1}
+        )
 
-        if request.method == 'POST':
-            data = request.get_json()
-            print(f"Data received from frontend: {data}")
+        phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
+        number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
 
-            if not data:  # Check if data is None or empty
-                return jsonify({'error': 'No data provided'}), 400
+        creator_dataset = {
+            'phenotype': phenotype,
+            'samples': number_of_samples
+        }
 
-            if is_sender:
-                if 'experiments' in data:
-                    db.collaborations.update_one(
-                        {'uuid': uuid},
-                        {'$set': {'experiments': data['experiments']}}
-                    )
+        collaboration_details = {
+            'uuid': collaboration['uuid'],
+            'name': collaboration['name'],
+            'experiments': collaboration.get('experiments', []),
+            'phenotype': collaboration.get('phenotype', None),
+            'samples': collaboration.get('samples', None),
+            'sender_id': is_sender,
+            'sender_name': sender_name,
+            'invited_users': invited_users_details,
+            'datasets': creator_dataset
+        }
 
-                if 'add_people' in data:
-                    for person in data['add_people']:
-                        # Validate person format before adding
-                        if 'user_id' in person:
-                            db.collaborations.update_one(
-                                {'uuid': uuid},
-                                {'$addToSet': {'invited_users': person}}
-                            )
-                        else:
-                            return jsonify({'error': 'Invalid person format'}), 400
-
-                if 'remove_people' in data:
-                    for person_id in data['remove_people']:
-                        # Validate person_id format
-                        if isinstance(person_id, str):
-                            db.collaborations.update_one(
-                                {'uuid': uuid},
-                                {'$pull': {'invited_users': {'user_id': person_id}}}
-                            )
-                        else:
-                            return jsonify({'error': 'Invalid person_id format'}), 400
-
-            elif is_receiver:
-                if 'meta_data' in data:
-                    pass
-                if 'raw_data' in data:
-                    pass
-                if 'invitation_status' in data:
-                    db.invitations.update_one(
-                        {'collaboration_id': uuid, 'receiver_id': user_id},
-                        {'$set': {'status': data['invitation_status']}}
-                    )
-
-            return jsonify({'message': 'Collaboration updated successfully'}), 200
+        return jsonify(collaboration_details), 200
 
     except Exception as e:
         print(f"Error occurred: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/collaboration/<uuid>', methods=['PUT'])
+def update_collaboration_details(uuid):
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        current_user, error_response = get_current_user()
+        if error_response:
+            return error_response
+
+        user_id = str(current_user.id)
+
+        collaboration = db['collaborations'].find_one({'uuid': uuid})
+        if not collaboration:
+            return jsonify({'error': 'Collaboration not found'}), 404
+
+        is_sender = collaboration['creator_id'] == ObjectId(user_id)
+        is_receiver = any(user['user_id'] == ObjectId(user_id) for user in collaboration['invited_users'])
+
+        if is_sender:
+            if 'experiments' in data:
+                db['collaborations'].update_one(
+                    {'uuid': uuid},
+                    {'$set': {'experiments': data['experiments']}}
+                )
+
+            if 'add_people' in data:
+                for person in data['add_people']:
+                    if 'user_id' in person:
+                        db['collaborations'].update_one(
+                            {'uuid': uuid},
+                            {'$addToSet': {'invited_users': person}}
+                        )
+                    else:
+                        return jsonify({'error': 'Invalid person format'}), 400
+
+            if 'remove_people' in data:
+                for person_id in data['remove_people']:
+                    if isinstance(person_id, str):
+                        db['collaborations'].update_one(
+                            {'uuid': uuid},
+                            {'$pull': {'invited_users': {'user_id': ObjectId(person_id)}}}
+                        )
+                    else:
+                        return jsonify({'error': 'Invalid person_id format'}), 400
+
+        elif is_receiver:
+            if 'meta_data' in data:
+                db['collaborations'].update_one(
+                    {'uuid': uuid},
+                    {'$set': {'meta_data': data['meta_data']}}
+                )
+            if 'invitation_status' in data:
+                db['collaborations'].update_one(
+                    {'uuid': uuid},
+                    {'$set': {'invitation_status': data['invitation_status']}}
+                )
+
+        return jsonify({'message': 'Collaboration updated successfully'}), 200
+
+    except Exception as e:
+        print(f"Error occurred: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 
 
 @app.route('/api/upload_csv', methods=['POST'])

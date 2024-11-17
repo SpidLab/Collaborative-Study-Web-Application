@@ -15,7 +15,7 @@ const CollaborationDetails = () => {
   const [experimentList, setExperimentList] = useState([]);
   const [phenoType, setPhenotype] = useState('');
   const [samples, setSamples] = useState('');
-  const [rawData, setRawData] = useState(null);
+  // const [rawData, setRawData] = useState(null);
   const [role, setRole] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -58,7 +58,7 @@ const CollaborationDetails = () => {
         setExperimentList(response.data.experiments || []);
         setPhenotype(response.data.datasets.phenotype || []);
         setSamples(response.data.datasets.samples || '');
-        setRawData(response.data.raw_data);
+        // setRawData(response.data.raw_data);
         setCollaborationUuid(response.data.uuid);
         setSenderInfo({ id: response.data.sender_id, name: response.data.sender_name });
         setInvitedUsers(response.data.invited_users || []);
@@ -90,9 +90,9 @@ const CollaborationDetails = () => {
     setExperimentList(updatedList);
   };
 
-  const handleFileUpload = (e) => {
-    setRawData(e.target.files[0]);
-  };
+  // const handleFileUpload = (e) => {
+  //   setRawData(e.target.files[0]);
+  // };
 
   const handleUpdateCollaboration = async () => {
     setIsLoading(true);
@@ -106,7 +106,7 @@ const CollaborationDetails = () => {
       if (role === 'receiver') {
         updateData.raw_data = rawData ? rawData.name : null;
       }
-      await axios.post(`${URL}/api/collaboration/${uuid}`, updateData, {
+      await axios.put(`${URL}/api/collaboration/${uuid}`, updateData, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       setSnackbar({

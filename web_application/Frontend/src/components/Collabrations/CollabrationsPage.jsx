@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
-import { Container, Typography, Button, Box, Snackbar, Paper, Alert, Card, CardContent, Avatar, Tabs, Tab, Tooltip, Grid,
+import {
+  Container, Typography, Button, Box, Snackbar, Paper, Alert, Card, CardContent, Avatar, Tabs, Tab, Tooltip, Grid,
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
@@ -165,7 +166,6 @@ const UserInvitation = ({
   );
 };
 
-// Main CollaborationsPage Component
 const CollaborationsPage = () => {
   const [pendingInvitations, setPendingInvitations] = useState([]);
   const [sentInvitations, setSentInvitations] = useState([]);
@@ -177,7 +177,6 @@ const CollaborationsPage = () => {
   const navigate = useNavigate();
   const [tabValue, setTabValue] = useState(0);
 
-  // Fetch invitations from the backend
   useEffect(() => {
     const fetchInvitations = async () => {
       const token = getToken();
@@ -351,7 +350,7 @@ const CollaborationsPage = () => {
         Collaborations
       </Typography>
 
-      <Paper sx={{ mb: 4, border: '1px solid #dddddd', boxShadow: 'none'}}>
+      <Paper sx={{ mb: 4, border: '1px solid #dddddd', boxShadow: 'none' }}>
         <Tabs
           value={tabValue}
           onChange={handleTabChange}
@@ -365,10 +364,29 @@ const CollaborationsPage = () => {
         </Tabs>
       </Paper>
 
-      {/* Pending Invitations Tab */}
       <TabPanel value={tabValue} index={0}>
         {pendingInvitations.length === 0 ? (
-          <Typography variant="body1">No pending invitations.</Typography>
+          <Typography variant="body1">
+            No pending invitations.{' '}
+            <Box component="span">
+              <RouterLink
+                to="/start-collaboration"
+                style={{ textDecoration: 'none', color: '#1976d2', fontWeight: 'bold' }}
+              >
+                Start new collaboration
+              </RouterLink>
+            </Box>{' '}
+            or{' '}
+            <Box component="span">
+              <RouterLink
+                to="#accepted-tab"
+                onClick={() => setTabValue(1)}
+                style={{ textDecoration: 'none', color: '#1976d2', fontWeight: 'bold' }}
+              >
+                check existing
+              </RouterLink>
+            </Box>.
+          </Typography>
         ) : (
           pendingInvitations.map((invitation) => (
             <UserInvitation
@@ -376,7 +394,7 @@ const CollaborationsPage = () => {
               invitation={invitation}
               onAccept={handleAccept}
               onReject={handleReject}
-              onWithdraw={handleWithdraw} 
+              onWithdraw={handleWithdraw}
               onRevoke={handleRevoke}
               currentUserId={currentUserId}
               type="pending"
@@ -384,6 +402,7 @@ const CollaborationsPage = () => {
           ))
         )}
       </TabPanel>
+
 
       <TabPanel value={tabValue} index={1}>
         {acceptedInvitations.length === 0 ? (
@@ -399,7 +418,9 @@ const CollaborationsPage = () => {
                       <Avatar sx={{ mr: 2 }}>
                         {invitation.sender_name.charAt(0).toUpperCase()}
                       </Avatar>
+                      
                       <Box>
+                      <Tooltip title={`${invitation.collab_name} initiated by ${invitation.sender_name}`} placement='right'>
                         <Typography
                           variant="h6"
                           component={RouterLink}
@@ -408,10 +429,12 @@ const CollaborationsPage = () => {
                         >
                           {invitation.collab_name}
                         </Typography>
+                        </Tooltip>
                         <Typography variant="body2" color="textSecondary">
                           Collaboration between {invitation.sender_name} & {invitation.receiver_name}
                         </Typography>
                       </Box>
+                      
                     </Box>
                   </Grid>
 
@@ -450,17 +473,27 @@ const CollaborationsPage = () => {
         )}
       </TabPanel>
 
-      {/* Sent Invitations Tab */}
       <TabPanel value={tabValue} index={2}>
         {sentInvitations.length === 0 ? (
-          <Typography variant="body1">No sent invitations.</Typography>
+          <Typography variant="body1">
+          No invitations sent.{' '}
+          <Box component="span">
+            <RouterLink
+              to="/start-collaboration"
+              style={{ textDecoration: 'none', color: '#1976d2', fontWeight: 'bold' }}
+            >
+              Start new collaboration
+            </RouterLink>
+          </Box>{' '}
+          ?
+        </Typography>
         ) : (
           sentInvitations.map((invitation) => (
             <UserInvitation
               key={invitation._id}
               invitation={invitation}
-              onAccept={handleAccept} 
-              onReject={handleReject} 
+              onAccept={handleAccept}
+              onReject={handleReject}
               onWithdraw={handleWithdraw}
               onRevoke={handleRevoke}
               currentUserId={currentUserId}
