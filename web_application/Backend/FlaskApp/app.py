@@ -1028,7 +1028,7 @@ def post_start_collaboration():
 @app.route('/api/collaboration/<uuid>', methods=['GET'])
 def get_collaboration_details(uuid):
     try:
-        collaboration = db['collaborations'].find_one({'uuid': uuid})
+        collaboration = db.collaborations.find_one({'uuid': uuid})
         if not collaboration:
             return jsonify({'error': 'Collaboration not found'}), 404
 
@@ -1039,12 +1039,12 @@ def get_collaboration_details(uuid):
         user_id = str(current_user.id)
 
         is_sender = collaboration['creator_id'] == ObjectId(user_id)
-        sender_user = db['users'].find_one({"_id": ObjectId(collaboration["creator_id"])})
+        sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
         sender_name = sender_user["name"] if sender_user else "Unknown"
 
         invited_users_details = []
         for invited_user in collaboration.get('invited_users', []):
-            receiver_user = db['users'].find_one({"_id": ObjectId(invited_user["user_id"])})
+            receiver_user = db.users.find_one({"_id": ObjectId(invited_user["user_id"])})
             receiver_name = receiver_user["name"] if receiver_user else "Unknown"
             phenotype = invited_user["phenotype"]
             status = invited_user["status"]
@@ -1056,7 +1056,7 @@ def get_collaboration_details(uuid):
                 'status': status
             })
 
-        dataset = db['datasets'].find_one(
+        dataset = db.datasets.find_one(
             {'_id': ObjectId(collaboration["creator_dataset_id"])},
             {'phenotype': 1, 'number_of_samples': 1}
         )
@@ -1100,7 +1100,7 @@ def update_collaboration_details(uuid):
 
         user_id = str(current_user.id)
 
-        collaboration = db['collaborations'].find_one({'uuid': uuid})
+        collaboration = db.collaborations.find_one({'uuid': uuid})
         if not collaboration:
             return jsonify({'error': 'Collaboration not found'}), 404
 
@@ -1109,7 +1109,7 @@ def update_collaboration_details(uuid):
 
         if is_sender:
             if 'experiments' in data:
-                db['collaborations'].update_one(
+                db.collaborations.update_one(
                     {'uuid': uuid},
                     {'$set': {'experiments': data['experiments']}}
                 )
@@ -1117,7 +1117,7 @@ def update_collaboration_details(uuid):
             if 'add_people' in data:
                 for person in data['add_people']:
                     if 'user_id' in person:
-                        db['collaborations'].update_one(
+                        db.collaborations.update_one(
                             {'uuid': uuid},
                             {'$addToSet': {'invited_users': person}}
                         )
@@ -1127,7 +1127,7 @@ def update_collaboration_details(uuid):
             if 'remove_people' in data:
                 for person_id in data['remove_people']:
                     if isinstance(person_id, str):
-                        db['collaborations'].update_one(
+                        db.collaborations.update_one(
                             {'uuid': uuid},
                             {'$pull': {'invited_users': {'user_id': ObjectId(person_id)}}}
                         )
@@ -1136,12 +1136,12 @@ def update_collaboration_details(uuid):
 
         elif is_receiver:
             if 'meta_data' in data:
-                db['collaborations'].update_one(
+                db.collaborations.update_one(
                     {'uuid': uuid},
                     {'$set': {'meta_data': data['meta_data']}}
                 )
             if 'invitation_status' in data:
-                db['collaborations'].update_one(
+                db.collaborations.update_one(
                     {'uuid': uuid},
                     {'$set': {'invitation_status': data['invitation_status']}}
                 )
