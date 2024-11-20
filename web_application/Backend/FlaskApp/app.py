@@ -1422,16 +1422,24 @@ def combine_datasets(dataset_ids, fetch_dataset):
     combined_data = []
 
     for dataset_id in dataset_ids:
-        dataset = fetch_dataset(dataset_id)  # Function to fetch dataset by ID
+        dataset = fetch_dataset(dataset_id)  # Fetch dataset by ID
 
         if 'data' in dataset:
             df = pd.DataFrame.from_dict(dataset['data'], orient='index')
+
+            # Add 'user_id' and rename 'Unnamed: 0' to 'sample_number'
+            df['user_id'] = dataset.get('user_id')
+            if "Unnamed: 0" in df.columns:
+                df.rename(columns={"Unnamed: 0": "sample_number"}, inplace=True)
+
+            # Set the multi-index
+            df.set_index(['sample_number', 'user_id'], inplace=True)
             combined_data.append(df)
         else:
             print(f"Dataset ID {dataset_id} does not contain 'data' key. Skipping.")
 
     if combined_data:
-        combined_df = pd.concat(combined_data, ignore_index=True)
+        combined_df = pd.concat(combined_data, ignore_index=False)
         return combined_df
     else:
         raise ValueError("No valid datasets to combine.")
@@ -1444,22 +1452,35 @@ def combine_datasets_to_dataframe(datasets_data):
 
         for dataset in datasets_data:
             if 'data' in dataset:
+                user_id = dataset.get('user_id')  # Extract user_id
                 sample_data = dataset['data']
                 samples = [sample for sample in sample_data.values()]
 
                 for sample in samples:
+                    # Add user_id to each sample
+                    sample['user_id'] = user_id
                     all_columns.update(sample.keys())
 
+                # Convert samples into a DataFrame
                 df = pd.DataFrame(samples)
+
+                # Reindex to ensure all expected columns exist
                 df = df.reindex(columns=all_columns)
 
+                # Rename 'Unnamed: 0' to 'sample_number' for clarity
                 if "Unnamed: 0" in df.columns:
-                    df.rename(columns={"Unnamed: 0": "sample"}, inplace=True)
+                    df.rename(columns={"Unnamed: 0": "sample_number"}, inplace=True)
+
+                # Set multi-index with 'sample_number' and 'user_id'
+                df.set_index(['sample_number', 'user_id'], inplace=True)
 
                 dfs.append(df)
 
         if dfs:
-            combined_df = pd.concat(dfs, ignore_index=True)
+            # Combine all DataFrames into one
+            combined_df = pd.concat(dfs)
+
+            # Ensure consistent column order
             combined_df = combined_df[sorted(combined_df.columns)]
             return combined_df
 
@@ -1468,43 +1489,35 @@ def combine_datasets_to_dataframe(datasets_data):
 
 def get_combined_datasets(collab_uuid):
     try:
-        # Fetch collaboration data from the database
+        # Fetch collaboration data
         collaboration_data = fetch_collaboration_data(collab_uuid)
-
         if not collaboration_data:
             return jsonify({"error": "Collaboration not found for the provided UUID."}), 404
 
-        # Get the threshold value from the collaboration data (use default if not present)
-        threshold = collaboration_data.get("threshold", 0.08)  # Default threshold is 0.08
-
-        # Get the list of dataset IDs from the collaboration data
-        invited_users = collaboration_data.get("invited_users", [])  # List of invited users
+        # Get threshold and dataset IDs
+        threshold = collaboration_data.get("threshold", 0.08)
+        invited_users = collaboration_data.get("invited_users", [])
         creator_dataset_id = collaboration_data.get("creator_dataset_id")
 
-        # Collect all dataset IDs, including the creator's dataset ID
         all_dataset_ids = [user["user_dataset_id"] for user in invited_users if "user_dataset_id" in user]
         if creator_dataset_id:
             all_dataset_ids.append(creator_dataset_id)
 
-        # Fetch datasets from the database by their IDs
+        # Fetch datasets and combine
         datasets_data = fetch_datasets_by_ids(all_dataset_ids)
-
         if not datasets_data:
             return jsonify({"error": "No datasets found for the provided IDs."}), 404
 
-        # Combine the datasets into a single DataFrame
         combined_df = combine_datasets_to_dataframe(datasets_data)
 
-        # Return the combined DataFrame and the threshold value
-        return combined_df, threshold  # Pass the threshold along with the DataFrame
+        print(combined_df.head(3))
+
+        # Return the combined DataFrame and threshold
+        return combined_df, threshold
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
-        return jsonify({"error": str(e)}), 500  # Internal Server Error
-
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        return jsonify({"error": str(e)}), 500  # Internal Server Error
+        return jsonify({"error": str(e)}), 500
 
 def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
     try:
@@ -1559,23 +1572,37 @@ def initiate_qc(collab_uuid):
 @app.route('/datasets/<uuid:collab_uuid>/qc-results', methods=['GET'])
 def get_filtered_qc_results(collab_uuid):
     try:
-        # Get the collaboration data from the database
-        collaboration_collection = db["collaborations"]
-        collaboration_data = collaboration_collection.find_one({"uuid": collab_uuid})
-
-        if collaboration_data is None:
-            print("Collaboration not found.")
+        # Fetch collaboration data
+        collaboration_data = fetch_collaboration_data(collab_uuid)
+        if not collaboration_data:
             return jsonify({"error": "Collaboration not found."}), 404
 
-        # If the threshold isn't provided, retrieve it from the collaboration data
-        threshold = collaboration_data.get("threshold", .08)
+        # Get threshold and QC results
+        threshold = collaboration_data.get("threshold", 0.08)
+        full_qc_results = collaboration_data.get("full_qc", [])
 
-        # Get the stored QC results from the database
-        initiate_qc_results = collaboration_data.get("full_qc", [])
+        filtered_results = {}
 
-        # Filter the results by the threshold
-        filtered_results = [result for result in initiate_qc_results if result[2] > threshold]
+        # Filter results based on phi value and multi-index
+        for result in full_qc_results:
+            if result["phi_value"] > threshold:
+                user1, sample1 = result["user1"], result["sample1"]
+                user2, sample2 = result["user2"], result["sample2"]
 
+                # Add samples to filtered results
+                if user1 not in filtered_results:
+                    filtered_results[user1] = set()
+                filtered_results[user1].add(sample1)
+
+                if user2 not in filtered_results:
+                    filtered_results[user2] = set()
+                filtered_results[user2].add(sample2)
+
+        # Convert sets to lists for JSON serialization
+        for user_id in filtered_results:
+            filtered_results[user_id] = list(filtered_results[user_id])
+
+        # Store the filtered results
         store_qc_results_in_mongo(collab_uuid, filtered_results, "filtered_qc")
 
         return jsonify(filtered_results), 200
@@ -1583,8 +1610,6 @@ def get_filtered_qc_results(collab_uuid):
     except Exception as e:
         print(f"Error retrieving and filtering QC results: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
-
 
 if __name__ == '__main__':
     app.run(debug=True)
