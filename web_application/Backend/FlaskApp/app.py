@@ -1152,8 +1152,6 @@ def update_collaboration_details(uuid):
         print(f"Error occurred: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-
-
 @app.route('/api/upload_csv', methods=['POST'])
 def upload_csv():
     try:
@@ -1177,20 +1175,19 @@ def upload_csv():
             return jsonify({'message': 'No file part in the request'}), 400
 
         file = request.files['file']
+
         # If the user does not select a file, the browser submits an empty file w/o a filename
         if file.filename == '':
             logging.error('No selected file')
             return jsonify({'message': 'No selected file'}), 400
-        if file and file.filename.endswith('.csv'):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join('./', filename)
-            file.save(filepath)
 
+        if file and file.filename.endswith('.csv'):
             phenotype = request.form.get('field1')
             number_of_samples = request.form.get('field2')
 
             try:
-                df = pd.read_csv(filepath)
+                # Read the file directly into a DataFrame (in memory)
+                df = pd.read_csv(file)
 
                 # Check if DataFrame is not empty
                 if not df.empty:
@@ -1231,7 +1228,6 @@ def upload_csv():
         logging.error(f'Unexpected error: {str(e)}')
         logging.error(traceback.format_exc())
         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
-
 
 # @app.route('/api/upload_csv', methods=['POST'])
 # def upload_csv():
@@ -1470,7 +1466,7 @@ def combine_datasets_to_dataframe(datasets_data):
     return pd.DataFrame()  # Return an empty DataFrame if no datasets
 
 
-def get_combined_datasets(collab_uuid: str):
+def get_combined_datasets(collab_uuid):
     try:
         # Fetch collaboration data from the database
         collaboration_data = fetch_collaboration_data(collab_uuid)
@@ -1510,7 +1506,7 @@ def get_combined_datasets(collab_uuid: str):
         print(f"An error occurred: {str(e)}")
         return jsonify({"error": str(e)}), 500  # Internal Server Error
 
-def store_qc_results_in_mongo(collab_uuid: uuid, results_array, key: str):
+def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
     try:
         # Get the collaboration data
         collaboration_collection = db["collaborations"]
@@ -1531,7 +1527,7 @@ def store_qc_results_in_mongo(collab_uuid: uuid, results_array, key: str):
         print(f"Error storing results: {str(e)}")
 
 @app.route('/datasets/<uuid:collab_uuid>', methods=['POST'])
-def initiate_qc(collab_uuid: uuid):
+def initiate_qc(collab_uuid):
     try:
         # Get the combined datasets and threshold from the collaboration data
         df, threshold = get_combined_datasets(collab_uuid)
@@ -1561,7 +1557,7 @@ def initiate_qc(collab_uuid: uuid):
 
 
 @app.route('/datasets/<uuid:collab_uuid>/qc-results', methods=['GET'])
-def get_filtered_qc_results(collab_uuid: uuid):
+def get_filtered_qc_results(collab_uuid):
     try:
         # Get the collaboration data from the database
         collaboration_collection = db["collaborations"]
