@@ -1568,6 +1568,27 @@ def initiate_qc(collab_uuid):
         print(f"An error occurred in initiate_qc: {str(e)}")
         return jsonify({"error": str(e)}), 500  # Return an error response
 
+@app.route('/datasets/<collab_uuid>/qc-results', methods=['GET'])
+def get_initial_qc_matrix(collab_uuid):
+    try:
+        # Fetch collaboration data
+        collaboration_data = fetch_collaboration_data(collab_uuid)
+        if not collaboration_data:
+            return jsonify({"error": "Collaboration not found."}), 404
+
+        # Get the QC results matrix from the collaboration data
+        full_qc_results = collaboration_data.get("full_qc", [])
+
+        if not full_qc_results:
+            return jsonify({"message": "No QC results available for this collaboration."}), 200
+
+        # Return the full QC results matrix as a JSON response
+        return jsonify(full_qc_results), 200
+
+    except Exception as e:
+        print(f"Error retrieving QC results matrix: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/datasets/<uuid:collab_uuid>/qc-results', methods=['GET'])
 def get_filtered_qc_results(collab_uuid):
