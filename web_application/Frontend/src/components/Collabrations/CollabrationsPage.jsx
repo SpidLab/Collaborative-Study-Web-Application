@@ -197,7 +197,7 @@ const CollaborationsPage = () => {
           (invitation) => invitation.sender_id === user_id
         );
         const accepted = invitations.filter(
-          (invitation) => invitation.status === 'accepted' && invitation.sender_id === user_id
+          (invitation) => invitation.status === 'accepted' && invitation.sender_id === user_id || invitation.receiver_id === user_id
         );
 
         setCurrentUserId(user_id);
