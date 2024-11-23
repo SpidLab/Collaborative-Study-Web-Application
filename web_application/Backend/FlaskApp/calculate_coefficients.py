@@ -3,13 +3,14 @@ import numpy as np
 import pandas as pd
 import itertools
 
-def calculate_phi(df, user1, user2):
-    # Accessing the rows (people) by index
-    n11 = np.logical_and(df.loc[user1] == 1, df.loc[user2] == 1).sum()
-    n02 = np.logical_and(df.loc[user1] == 0, df.loc[user2] == 2).sum()
-    n20 = np.logical_and(df.loc[user1] == 2, df.loc[user2] == 0).sum()
-    n1_ = (df.loc[user1] == 1).sum()
-    n_1 = (df.loc[user2] == 1).sum()
+
+def calculate_phi(row1, row2):
+    # Logical operations to compute n11, n02, n20
+    n11 = np.logical_and(row1 == 1, row2 == 1).sum()
+    n02 = np.logical_and(row1 == 0, row2 == 2).sum()
+    n20 = np.logical_and(row1 == 2, row2 == 0).sum()
+    n1_ = (row1 == 1).sum()
+    n_1 = (row2 == 1).sum()
 
     # Avoid division by zero
     if n1_ != 0:
@@ -21,23 +22,34 @@ def calculate_phi(df, user1, user2):
 
 
 def compute_coefficients_array(df):
-    # Get the list of row indices (people)
-    people_list = df.index.to_list()
-
     coeff_array = []
 
-    # Generate all possible pairs of people (rows)
-    row_pairs = itertools.permutations(people_list, 2)
+    # Ensure the DataFrame has a multi-index
+    if not isinstance(df.index, pd.MultiIndex):
+        raise ValueError("The DataFrame must have a multi-index with 'sample_number' and 'user_id'.")
 
-    # Compute coefficients for each pair of people
-    for person1, person2 in row_pairs:
-        # Calculate the phi coefficient for the pair of people
-        phi_val = calculate_phi(df, person1, person2)
+    # Generate row pairs using combinations of multi-index
+    row_pairs = itertools.combinations(df.index, 2)
 
-        # Store the pair and coefficient regardless of threshold
-        coeff_array.append([person1, person2, phi_val])  # Store as [person1, person2, coefficient]
+    for (sample1, user1), (sample2, user2) in row_pairs:
+        # Extract rows corresponding to the pair
+        row1 = df.loc[(sample1, user1)]
+        row2 = df.loc[(sample2, user2)]
+
+        # Calculate phi value between the two rows
+        phi_val = calculate_phi(row1, row2)
+
+        # Append results with both sample numbers and user IDs
+        coeff_array.append({
+            "sample1": sample1,
+            "user1": user1,
+            "sample2": sample2,
+            "user2": user2,
+            "phi_value": phi_val
+        })
 
     return coeff_array
+
 
 if __name__ == "__main__":
     #TODO Modify the code below to read from a list of csv files and merge them together
@@ -49,5 +61,5 @@ if __name__ == "__main__":
     # Merge the DataFrames
     merged_data = pd.concat([first_half_data, second_half_data], axis=1)
 
-    coeff_dict = compute_coefficients_dictionary(merged_data)
+    coeff_dict = compute_coefficients_array(merged_data)
     print(coeff_dict)

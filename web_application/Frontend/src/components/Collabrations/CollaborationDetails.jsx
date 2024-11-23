@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Box, Typography, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, IconButton, Tooltip,
+import {
+  Box, Typography, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, IconButton, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Paper
 } from '@mui/material';
 import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon } from '@mui/icons-material';
 import { alpha } from '@mui/material';
@@ -22,13 +23,18 @@ const CollaborationDetails = () => {
   const [senderInfo, setSenderInfo] = useState({ id: null, name: '' });
   const [invitedUsers, setInvitedUsers] = useState([]);
   const [collaborationUuid, setCollaborationUuid] = useState('');
-  const [threshold, setThreshold] = useState(50);
+  const [threshold, setThreshold] = useState(0.1);
 
-  const [qcResultsAvailable, setQcResultsAvailable] = useState(false);
-  const [qcResults, setQcResults] = useState(null); // Optional: To store QC results
   const [isQcInitiateLoading, setIsQcInitiateLoading] = useState(false);
+  const [qcResultsAvailable, setQcResultsAvailable] = useState(false);
+  const [qcResults, setQcResults] = useState(null);
   const [isQcResultsLoading, setIsQcResultsLoading] = useState(false);
+  const [displayQcResults, setdisplayQcResults] = useState(false);
   const [qcInitiated, setQcInitiated] = useState(false); // New state to track QC initiation
+  const [filteredResults, setFilteredResults] = useState([]);
+  const prevFilteredResultsRef = useRef();
+
+  // const [matrix, setMatrix] = useState([]);
 
   const [isEditing, setIsEditing] = useState(false);
   const [originalCollabName, setOriginalCollabName] = useState('');
@@ -52,13 +58,12 @@ const CollaborationDetails = () => {
             Authorization: `Bearer ${localStorage.getItem('token')}`,
           },
         });
-        console.log(response.data);
+        // console.log(response.data);
         setCollaboration(response.data);
         setCollabName(response.data.name);
         setExperimentList(response.data.experiments || []);
         setPhenotype(response.data.datasets.phenotype || []);
         setSamples(response.data.datasets.samples || '');
-        // setRawData(response.data.raw_data);
         setCollaborationUuid(response.data.uuid);
         setSenderInfo({ id: response.data.sender_id, name: response.data.sender_name });
         setInvitedUsers(response.data.invited_users || []);
@@ -213,30 +218,80 @@ const CollaborationDetails = () => {
     }
   };
 
-  const handleSliderChange = (event, newValue) => {
-    setThreshold(newValue);
-  };
 
-  const handleSubmitThreshold = () => {
-    const endpoint = '/api/submit-threshold';
 
-    axios
-      .post(endpoint, { threshold })
-      .then((response) => {
-        console.log('Threshold submitted successfully:', response.data);
-        setSnackbar({ open: true, message: 'Threshold submitted successfully!', severity: 'success' });
-      })
-      .catch((error) => {
-        console.error('Error submitting threshold:', error);
-        setSnackbar({ open: true, message: 'Failed to submit threshold. Please try again.', severity: 'error' });
+  const handleSubmitThreshold = async () => {
+    try {
+      const response = await axios.post(`${URL}/api/datasets/${uuid}/filter-qc-results`, {
+        threshold: threshold,  // Send the threshold value to the backend
+      },
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+          },
+        }
+      );
+
+      console.log('Filtered QC Results:', response.data);
+
+      setSnackbar({
+        open: true,
+        message: 'Threshold applied and QC results filtered successfully!',
+        severity: 'success',
       });
+    } catch (error) {
+      console.error('Error submitting threshold and filtering:', error);
+
+      setSnackbar({
+        open: true,
+        message: 'Failed to apply threshold. Please try again.',
+        severity: 'error',
+      });
+    }
   };
+
+
+  const checkQcStatus = async () => {
+    try {
+      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      // console.log("results", response);
+      if (response.status === 200) {
+        setQcResultsAvailable(true);
+        return true;
+      } else {
+        // console.error(`Unexpected response status: ${response.status}`);
+        setQcResultsAvailable(false);
+        return false;
+      }
+    } catch (error) {
+      // console.error('Error checking QC status:', error);
+      setQcResultsAvailable(false); // Default to unavailable in case of error
+      return false;
+    }
+  };
+
 
   const handleQcInitiate = async () => {
     setIsQcInitiateLoading(true);
     try {
+      const resultsAvailable = await checkQcStatus();
+
+      if (resultsAvailable) {
+        setSnackbar({
+          open: true,
+          message: 'QC calculations are already completed.',
+          severity: 'info',
+        });
+        return; // Exit early if results are available
+      }
+
+      // Proceed with QC initiation if no results are available
       const response = await axios.post(
-        `${URL}/datasets/${uuid}`,
+        `${URL}/api/datasets/${uuid}`,
         {},
         {
           headers: {
@@ -244,44 +299,123 @@ const CollaborationDetails = () => {
           },
         }
       );
-      setSnackbar({ open: true, message: 'QC Calculations Initiated.', severity: 'success' });
-      setQcInitiated(true); // Set QC as initiated
+
+      setSnackbar({
+        open: true,
+        message: 'QC Calculations Initiated.',
+        severity: 'success',
+      });
+      setQcInitiated(true);
     } catch (error) {
       console.error('Error initiating QC calculations:', error);
-      setSnackbar({ open: true, message: 'Failed to initiate QC calculations. Please try again.', severity: 'error' });
+      setSnackbar({
+        open: true,
+        message: 'Failed to initiate QC calculations. Please try again.',
+        severity: 'error',
+      });
     } finally {
       setIsQcInitiateLoading(false);
+      setQcResultsAvailable(true);
     }
   };
 
+
+  // const handleQcResults = async () => {
+  //   setIsQcResultsLoading(true);
+  //   try {
+  //     const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results`, {
+  //       headers: {
+  //         Authorization: `Bearer ${localStorage.getItem('token')}`,
+  //       },
+  //     });
+  //     console.log(response.data);
+
+  //     if (response.status === 200) {
+  //       setSnackbar({ open: true, message: 'Results are available.', severity: 'success' });
+  //       setQcResultsAvailable(true);
+  //       setQcResults(response.data); // Store QC results if needed
+  //     } else {
+  //       setSnackbar({ open: true, message: 'Results are not available.', severity: 'info' });
+  //     }
+  //   } catch (error) {
+  //     console.error('Error fetching QC results:', error);
+  //     setSnackbar({ open: true, message: 'Results are not available.', severity: 'info' });
+  //   } finally {
+  //     setIsQcResultsLoading(false);
+  //   }
+  // };
+
   const handleQcResults = async () => {
+    if (qcResults) {
+      setSnackbar({ open: true, message: 'Results are already available.', severity: 'info' });
+      return;
+    }
+
     setIsQcResultsLoading(true);
     try {
-      const response = await axios.get(`${URL}/api/database/get_qc`, {
+      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
+      // console.log(response.data);
+
       if (response.status === 200) {
         setSnackbar({ open: true, message: 'Results are available.', severity: 'success' });
         setQcResultsAvailable(true);
-        setQcResults(response.data); // Store QC results if needed
+        setQcResults(response.data); // Store QC results
       } else {
         setSnackbar({ open: true, message: 'Results are not available.', severity: 'info' });
       }
     } catch (error) {
       console.error('Error fetching QC results:', error);
-      setSnackbar({ open: true, message: 'Results are not available.', severity: 'info' });
+      setSnackbar({ open: true, message: 'Error fetching results.', severity: 'error' });
     } finally {
       setIsQcResultsLoading(false);
+      setdisplayQcResults(true);
     }
   };
 
-  const isQcInitiateEnabled =
-    role === 'sender' && invitedUsers.length > 0 && invitedUsers.every(user => user.status === 'accepted');
+  const getMatrix = () => {
+    if (!qcResults) return [];
+    return qcResults.map((item) => [
+      item.phi_value,
+      item.sample1,
+      item.sample2
+    ]);
+  };
+  const matrix = getMatrix();
 
-  const isQcResultsEnabled = qcInitiated;
+  const handleSliderChange = (event, newValue) => {
+    setThreshold(newValue);
+  };
+
+  const filterData = (threshold) => {
+    const filteredData = matrix.filter(row => row.phi_value >= threshold);
+    setFilteredResults(filteredData);
+  };
+
+  // Re-filter the data when threshold changes
+  useEffect(() => {
+    const filteredResults = matrix.filter(row => row[0] < threshold);
+    // console.log('Filtered Results:', filteredResults.length);
+    // Only set state if filtered results have changed (compare with previous state)
+    if (JSON.stringify(filteredResults) !== JSON.stringify(prevFilteredResultsRef.current)) {
+      setFilteredResults(filteredResults);
+      prevFilteredResultsRef.current = filteredResults; // Update the ref with the current filtered results
+    }
+  }, [threshold, matrix]);
+
+
+  const isQcInitiateEnabled =
+    role === 'sender' && invitedUsers.length > 0 && invitedUsers.every(user => user.status === 'accepted' && !qcResultsAvailable);
+
+  const isQcResultsEnabled = !isQcInitiateEnabled && qcResultsAvailable;
+
+  useEffect(() => {
+    checkQcStatus(); // Update QC results availability on component load
+  }, []);
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -455,17 +589,19 @@ const CollaborationDetails = () => {
                           width: '100%', // Ensure the Box takes full width of its parent
                         }}
                       >
-                        {/* Wrapper for QC Initiate Button */}
+                        {/* QC Initiate Button */}
                         <Box sx={{ flex: 1 }}>
                           <Tooltip
                             title={
                               !isQcInitiateEnabled
-                                ? 'Waiting for users to accept the invitations, before you can initiate the QC Calculations'
-                                : 'Initiate QC Calculations'
+                                ? 'Cannot perform action at the moment'
+                                : role === 'receiver'
+                                  ? 'Receiver cannot initiate QC calculations'
+                                  : 'Initiate QC Calculations'
                             }
                             placement="bottom"
                           >
-                            <span> 
+                            <span>
                               <Button
                                 variant="contained"
                                 color="primary"
@@ -477,7 +613,7 @@ const CollaborationDetails = () => {
                                   )
                                 }
                                 fullWidth
-                                sx={{borderRadius:20}}
+                                sx={{ borderRadius: 20 }}
                               >
                                 Initiate QC Calculation
                               </Button>
@@ -485,13 +621,14 @@ const CollaborationDetails = () => {
                           </Tooltip>
                         </Box>
 
-                        {/* Wrapper for QC Results Button */}
+                        {/* QC Results Button */}
                         <Box sx={{ flex: 1 }}>
                           <Tooltip
                             title={
                               !isQcResultsEnabled
-                                ? 'Results not available to preview'
-                                : 'Get QC Results'
+                                ? 'Results not available to preview' : role === 'receiver'
+                                  ? 'Receiver cannot initiate QC results'
+                                  : 'Get QC Results'
                             }
                             placement="bottom"
                           >
@@ -500,14 +637,14 @@ const CollaborationDetails = () => {
                                 variant="outlined"
                                 color="secondary"
                                 onClick={handleQcResults}
-                                disabled={!isQcResultsEnabled || isQcResultsLoading}
+                                disabled={!isQcResultsEnabled || isQcResultsLoading || role === 'receiver'}
                                 startIcon={
                                   isQcResultsLoading && (
                                     <CircularProgress size={20} color="inherit" />
                                   )
                                 }
-                                fullWidth 
-                                sx={{borderRadius:20}}
+                                fullWidth
+                                sx={{ borderRadius: 20 }}
                               >
                                 QC Results
                               </Button>
@@ -520,7 +657,7 @@ const CollaborationDetails = () => {
                 </ListItem>
                 <Divider />
 
-                {qcResultsAvailable && (
+                {displayQcResults && (
                   <>
                     <ListItem disableGutters sx={{ mt: 2 }}>
                       <ListItemText
@@ -532,45 +669,35 @@ const CollaborationDetails = () => {
                               onChange={handleSliderChange}
                               aria-labelledby="threshold-slider"
                               valueLabelDisplay="auto"
-                              step={1}
-                              min={1}
-                              max={100}
+                              step={0.01}
+                              min={0}
+                              max={1}
                               sx={{
-                                color: 'primary',
+                                color: "primary",
                                 height: 8,
-                                '& .MuiSlider-track': {
-                                  border: 'none',
-                                },
-                                '& .MuiSlider-thumb': {
+                                "& .MuiSlider-track": { border: "none" },
+                                "& .MuiSlider-thumb": {
                                   height: 24,
                                   width: 24,
-                                  backgroundColor: '#fff',
-                                  border: '2px solid currentColor',
-                                  '&:focus, &:hover, &.Mui-active, &.Mui-focusVisible': {
-                                    boxShadow: 'inherit',
-                                  },
-                                  '&::before': {
-                                    display: 'none',
-                                  },
+                                  backgroundColor: "#fff",
+                                  border: "2px solid currentColor",
+                                  "&:focus, &:hover, &.Mui-active, &.Mui-focusVisible": { boxShadow: "inherit" },
+                                  "&::before": { display: "none" },
                                 },
-                                '& .MuiSlider-valueLabel': {
+                                "& .MuiSlider-valueLabel": {
                                   lineHeight: 1.2,
                                   fontSize: 12,
-                                  background: 'unset',
+                                  background: "unset",
                                   padding: 0,
                                   width: 32,
                                   height: 32,
-                                  borderRadius: '50% 50% 50% 0',
-                                  backgroundColor: '#1876D1',
-                                  transformOrigin: 'bottom left',
-                                  transform: 'translate(50%, -100%) rotate(-45deg) scale(0)',
-                                  '&::before': { display: 'none' },
-                                  '&.MuiSlider-valueLabelOpen': {
-                                    transform: 'translate(50%, -100%) rotate(-45deg) scale(1)',
-                                  },
-                                  '& > *': {
-                                    transform: 'rotate(45deg)',
-                                  },
+                                  borderRadius: "50% 50% 50% 0",
+                                  backgroundColor: "#1876D1",
+                                  transformOrigin: "bottom left",
+                                  transform: "translate(50%, -100%) rotate(-45deg) scale(0)",
+                                  "&::before": { display: "none" },
+                                  "&.MuiSlider-valueLabelOpen": { transform: "translate(50%, -100%) rotate(-45deg) scale(1)" },
+                                  "& > *": { transform: "rotate(45deg)" },
                                 },
                               }}
                             />
@@ -578,9 +705,8 @@ const CollaborationDetails = () => {
                             <Typography variant="body2" gutterBottom>
                               Current Threshold: {threshold}
                             </Typography>
-
                             <Tooltip title="Confirm your selected threshold value" placement="top">
-                              <Button variant="contained" color="primary" onClick={handleSubmitThreshold}>
+                              <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }}>
                                 Confirm Threshold Value
                               </Button>
                             </Tooltip>
@@ -596,12 +722,37 @@ const CollaborationDetails = () => {
                         primary={<strong>QC Results</strong>}
                         secondary={
                           qcResults ? (
-                            <Box sx={{ mt: 1 }}>
-                              {/* Display QC Results as needed. Here's a simple example: */}
-                              <Typography variant="body2" component="pre">
-                                {JSON.stringify(qcResults, null, 2)}
-                              </Typography>
+                            <Box sx={{ mt: 4, maxHeight: 400, border: '1px solid #ccc', borderRadius: 2 }}>
+                              <TableContainer sx={{ maxHeight: 400, overflow: "auto", borderRadius: 2 }}>
+                                <Table stickyHeader>
+                                  <TableHead>
+                                    <TableRow>
+                                      <TableCell sx={{ backgroundColor: "#3B6CC7", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
+                                        Phi Value
+                                      </TableCell>
+                                      <TableCell sx={{ backgroundColor: "#3B6CC7", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
+                                        Sample 1
+                                      </TableCell>
+                                      <TableCell sx={{ backgroundColor: "#3B6CC7", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
+                                        Sample 2
+                                      </TableCell>
+                                    </TableRow>
+                                  </TableHead>
+                                  <TableBody>
+                                    {filteredResults.map((row, rowIndex) => (
+                                      <TableRow key={rowIndex}>
+                                        {row.map((cell, cellIndex) => (
+                                          <TableCell key={cellIndex}>{cell}</TableCell>
+                                        ))}
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+
+                                </Table>
+                              </TableContainer>
+
                             </Box>
+
                           ) : (
                             <Typography variant="body2" color="text.secondary">
                               No QC results to display.
@@ -772,7 +923,7 @@ const CollaborationDetails = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Container>
+    </Container >
   );
 };
 
