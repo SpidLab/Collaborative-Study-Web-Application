@@ -1597,13 +1597,23 @@ def get_filtered_qc_results(collab_uuid):
         if not collaboration_data:
             return jsonify({"error": "Collaboration not found."}), 404
 
-        # Get threshold and QC results
-        threshold = collaboration_data.get("threshold", 0.08)
+        # Get the threshold value from the request body (or fallback to the default in collaboration data)
+        request_data = request.get_json()  # Expecting JSON data in the body of the request
+        threshold = request_data.get("threshold", collaboration_data.get("threshold", 0.08))
+
+        # Store the new threshold in the collaboration document
+        collaboration_collection = db["collaborations"]
+        collaboration_collection.update_one(
+            {"uuid": collab_uuid},
+            {"$set": {"threshold": threshold}}
+        )
+
+        # Get full QC results
         full_qc_results = collaboration_data.get("full_qc", [])
 
         filtered_results = {}
 
-        # Filter results based on phi value and multi-index
+        # Filter results based on the threshold and phi value
         for result in full_qc_results:
             if result["phi_value"] > threshold:
                 user1, sample1 = result["user1"], result["sample1"]
@@ -1622,7 +1632,7 @@ def get_filtered_qc_results(collab_uuid):
         for user_id in filtered_results:
             filtered_results[user_id] = list(filtered_results[user_id])
 
-        # Store the filtered results
+        # Store the filtered results in the database
         store_qc_results_in_mongo(collab_uuid, filtered_results, "filtered_qc")
 
         return jsonify(filtered_results), 200
