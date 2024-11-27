@@ -1176,7 +1176,7 @@ def upload_csv():
 
         file = request.files['file']
 
-        # If the user does not select a file, the browser submits an empty file w/o a filename
+        # If the user does not select a file, the browser submits an empty file without a filename
         if file.filename == '':
             logging.error('No selected file')
             return jsonify({'message': 'No selected file'}), 400
@@ -1186,23 +1186,17 @@ def upload_csv():
             number_of_samples = request.form.get('field2')
 
             try:
-                # Read the file directly into a DataFrame (in memory)
-                df = pd.read_csv(file)
+                # Read the file directly into a DataFrame, setting the first column as sample_id
+                df = pd.read_csv(file, index_col=0)
+                df.index.name = 'sample_id'  # Set the index name
 
                 # Check if DataFrame is not empty
                 if not df.empty:
                     data = {}
 
-                    for index, row in df.iterrows():
-                        row_id = str(row.name)  # Convert row index to string
-                        data[row_id] = {}
-                        for col in df.columns:
-                            value = row[col]
-                            # Convert numpy types to standard Python types
-                            if isinstance(value, np.number):  # Check if value is a NumPy number
-                                data[row_id][col] = value.item()  # Convert to standard Python int or float
-                            else:
-                                data[row_id][col] = value  # Keep the original value if it's not a numpy type
+                    # Store each row in the data dictionary using sample_id as the key
+                    for sample_id, row in df.iterrows():
+                        data[str(sample_id)] = row.to_dict()
 
                     # Insert records into the datasets collection
                     db['datasets'].insert_one({
@@ -1425,25 +1419,39 @@ def combine_datasets(dataset_ids, fetch_dataset):
         dataset = fetch_dataset(dataset_id)  # Fetch dataset by ID
 
         if 'data' in dataset:
-            df = pd.DataFrame.from_dict(dataset['data'], orient='index')
+            sample_data = dataset['data']
+            all_columns = set()
 
-            # Add 'user_id' and rename 'Unnamed: 0' to 'sample_number'
+            # Prepare list of sample data dictionaries
+            samples = []
+
+            for sample_id, sample in sample_data.items():
+                sample['sample_id'] = sample_id  # Add sample_id field
+
+                # Ensure that we have all columns (rs SNPs) in the DataFrame
+                all_columns.update(sample.keys())
+
+                # Append the sample data to the list
+                samples.append(sample)
+
+            # Create DataFrame from the sample data
+            df = pd.DataFrame(samples)
+
+            # Add 'user_id' to each sample's data
             df['user_id'] = dataset.get('user_id')
-            if "Unnamed: 0" in df.columns:
-                df.rename(columns={"Unnamed: 0": "sample_number"}, inplace=True)
 
-            # Set the multi-index
-            df.set_index(['sample_number', 'user_id'], inplace=True)
+            # Set the multi-index with sample_id and user_id
+            df.set_index(['sample_id', 'user_id'], inplace=True)
+
             combined_data.append(df)
         else:
             print(f"Dataset ID {dataset_id} does not contain 'data' key. Skipping.")
 
     if combined_data:
-        combined_df = pd.concat(combined_data, ignore_index=False)
+        combined_df = pd.concat(combined_data)
         return combined_df
     else:
         raise ValueError("No valid datasets to combine.")
-
 
 def combine_datasets_to_dataframe(datasets_data):
     if datasets_data:
@@ -1452,40 +1460,33 @@ def combine_datasets_to_dataframe(datasets_data):
 
         for dataset in datasets_data:
             if 'data' in dataset:
-                user_id = dataset.get('user_id')  # Extract user_id
+                user_id = dataset.get('user_id')
                 sample_data = dataset['data']
-                samples = [sample for sample in sample_data.values()]
+                samples = []
 
-                for sample in samples:
-                    # Add user_id to each sample
+                # For each sample in the dataset, gather the SNPs and add sample_id/user_id
+                for sample_id, sample in sample_data.items():
+                    sample['sample_id'] = sample_id
                     sample['user_id'] = user_id
+                    samples.append(sample)
+
                     all_columns.update(sample.keys())
 
-                # Convert samples into a DataFrame
+                # Create DataFrame from the sample data
                 df = pd.DataFrame(samples)
 
-                # Reindex to ensure all expected columns exist
-                df = df.reindex(columns=all_columns)
-
-                # Rename 'Unnamed: 0' to 'sample_number' for clarity
-                if "Unnamed: 0" in df.columns:
-                    df.rename(columns={"Unnamed: 0": "sample_number"}, inplace=True)
-
-                # Set multi-index with 'sample_number' and 'user_id'
-                df.set_index(['sample_number', 'user_id'], inplace=True)
+                # Reorder the DataFrame columns and set the index
+                df = df.reindex(columns=sorted(all_columns))  # Ensure all columns exist
+                df.set_index(['sample_id', 'user_id'], inplace=True)
 
                 dfs.append(df)
 
         if dfs:
-            # Combine all DataFrames into one
             combined_df = pd.concat(dfs)
-
-            # Ensure consistent column order
-            combined_df = combined_df[sorted(combined_df.columns)]
+            combined_df = combined_df[sorted(combined_df.columns)]  # Sort columns
             return combined_df
 
-    return pd.DataFrame()  # Return an empty DataFrame if no datasets
-
+    return pd.DataFrame()
 
 def get_combined_datasets(collab_uuid):
     try:
@@ -1509,8 +1510,6 @@ def get_combined_datasets(collab_uuid):
             return jsonify({"error": "No datasets found for the provided IDs."}), 404
 
         combined_df = combine_datasets_to_dataframe(datasets_data)
-
-        print(combined_df.head(3))
 
         # Return the combined DataFrame and threshold
         return combined_df, threshold
@@ -1590,7 +1589,7 @@ def get_initial_qc_matrix(collab_uuid):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/datasets/<uuid:collab_uuid>/qc-results', methods=['GET'])
+@app.route('/datasets/<uuid:collab_uuid>/qc-results', methods=['POST'])
 def get_filtered_qc_results(collab_uuid):
     try:
         # Fetch collaboration data

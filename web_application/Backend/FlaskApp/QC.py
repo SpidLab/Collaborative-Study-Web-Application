@@ -7,7 +7,7 @@ from app import get_initial_qc_matrix
 def main():
 
     with app.app_context():
-        uuid = "6ab7357d-6cf2-4889-abac-18c1de9512d8"
+        uuid = "123"
         collaboration_data = initiate_qc(uuid)
 
         if collaboration_data:
