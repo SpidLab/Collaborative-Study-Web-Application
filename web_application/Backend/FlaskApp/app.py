@@ -26,7 +26,7 @@ import logging
 from calculate_coefficients import compute_coefficients_array
 from fuzzywuzzy import process
 import uuid
-
+from stats import calc_chi_pvalue
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -1152,8 +1152,8 @@ def update_collaboration_details(uuid):
         print(f"Error occurred: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/upload_csv', methods=['POST'])
-def upload_csv():
+@app.route('/api/upload_csv_qc', methods=['POST'])
+def upload_csv_qc():
     try:
         auth_header = request.headers.get('Authorization')
         if not auth_header:
@@ -1222,6 +1222,100 @@ def upload_csv():
         logging.error(f'Unexpected error: {str(e)}')
         logging.error(traceback.format_exc())
         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+
+@app.route('/api/upload_csv_stats', methods=['POST'])
+def upload_csv_stats():
+    try:
+        # Validate Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
+
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
+
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
+
+        user_id = str(current_user.id)  # Ensure user_id is a string for JSON serialization
+
+        # Check for file in the request
+        if 'file' not in request.files:
+            logging.error('No file part in the request')
+            return jsonify({'message': 'No file part in the request'}), 400
+
+        file = request.files['file']
+
+        # Check if file is selected and has a valid CSV format
+        if file.filename == '':
+            logging.error('No selected file')
+            return jsonify({'message': 'No selected file'}), 400
+
+        if not file.filename.endswith('.csv'):
+            logging.error('Unsupported file type')
+            return jsonify({'message': 'Unsupported file type'}), 400
+
+        # Get the collaboration UUID from the request
+        collaboration_uuid = request.form.get('uuid')
+        if not collaboration_uuid:
+            logging.error("Collaboration UUID missing")
+            return jsonify({"error": "Collaboration UUID missing"}), 400
+
+        try:
+            # Read CSV into DataFrame
+            df = pd.read_csv(file)
+
+            # Ensure the first column is SNP_ID
+            if df.columns[0].lower() != 'snp_id':
+                logging.error('First column must be SNP_ID')
+                return jsonify({'message': 'First column must be SNP_ID'}), 400
+
+            user_stats = {}
+
+            for _, row in df.iterrows():
+                snp_id = row.iloc[0]
+                cases = {}
+                controls = {}
+
+                for col in df.columns[1:]:
+                    if col.lower().startswith('case_'):
+                        case_key = col.split('_')[1]
+                        cases[case_key] = row[col]
+                    elif col.lower().startswith('control_'):
+                        control_key = col.split('_')[1]
+                        controls[control_key] = row[col]
+
+                user_stats[snp_id] = {
+                    "case": cases,
+                    "control": controls,
+                    "user_id": user_id  # Include the user_id with each SNP entry
+                }
+
+            # Update the collaboration entry to add or merge user-specific stats
+            result = db['collaboration'].update_one(
+                {"uuid": collaboration_uuid},
+                {"$set": {f"stats.{user_id}": user_stats}},  # Store data under stats.{user_id}
+                upsert=True
+            )
+
+            if result.matched_count == 0 and not result.upserted_id:
+                logging.error("Collaboration entry not found or not updated")
+                return jsonify({'message': 'Collaboration entry not found or not updated'}), 404
+
+            return jsonify({'message': 'CSV file processed and stats updated successfully'}), 200
+
+        except Exception as e:
+            logging.error(f'Error processing CSV: {str(e)}')
+            logging.error(traceback.format_exc())
+            return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+
+    except Exception as e:
+        logging.error(f'Unexpected error: {str(e)}')
+        logging.error(traceback.format_exc())
+        return jsonify({'message': 'An unexpected error occurred', 'error': str(e)}), 500
+
 
 # @app.route('/api/upload_csv', methods=['POST'])
 # def upload_csv():
@@ -1640,6 +1734,67 @@ def get_filtered_qc_results(collab_uuid):
     except Exception as e:
         print(f"Error retrieving and filtering QC results: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+def handle_error(error_message, status_code):
+    logging.error(error_message)
+    return jsonify({"message": error_message}), status_code
+
+def calculate_and_store_chi_square_results(collaboration_uuid, db):
+    try:
+        # Fetch the collaboration document using the UUID
+        collaboration = db['collaboration'].find_one({"uuid": collaboration_uuid})
+
+        if not collaboration:
+            return handle_error("Collaboration not found", 404)
+
+        # Extract SNP data from the stats field
+        stats = collaboration.get('stats', {})
+
+        if not stats:
+            return handle_error("No SNP data found in the stats field", 400)
+
+        # Extract the SNP data for each user
+        snp_stats = []
+        for user_id, user_stats in stats.items():
+            for snp_id, snp_data in user_stats.items():
+                # Prepare data for chi-square calculation, structure it as [case, control]
+                case_counts = [snp_data["case"].get(str(i), 0) for i in range(3)]
+                control_counts = [snp_data["control"].get(str(i), 0) for i in range(3)]
+                snp_stats.append({snp_id: [case_counts, control_counts]})
+
+        # Call the provided function to calculate the chi-square p-values
+        gwas_result = calc_chi_pvalue(snp_stats)
+
+        # Store the chi-square results in the collaboration document
+        db['collaboration'].update_one(
+            {"uuid": collaboration_uuid},
+            {"$set": {"chi_square_results": gwas_result}},
+            upsert=False
+        )
+
+        return {"message": "Chi-square results calculated and stored successfully"}, 200
+
+    except Exception as e:
+        return handle_error(f"Error calculating or storing chi-square results: {str(e)}", 500)
+
+
+@app.route('/api/calculate_chi_square', methods=['POST'])
+def api_calculate_chi_square():
+    try:
+        # Get the collaboration UUID from the request body
+        data = request.get_json()
+        collaboration_uuid = data.get('uuid')
+
+        if not collaboration_uuid:
+            return handle_error("UUID is required", 400)
+
+        # Call the function to calculate and store chi-square results
+        response, status_code = calculate_and_store_chi_square_results(collaboration_uuid, db)
+
+        return jsonify(response), status_code
+
+    except Exception as e:
+        return handle_error(f"Unexpected error: {str(e)}", 500)
 
 if __name__ == '__main__':
     app.run(debug=True)
