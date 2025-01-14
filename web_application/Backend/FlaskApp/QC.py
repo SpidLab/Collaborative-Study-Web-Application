@@ -1,12 +1,13 @@
 from app import app
 from app import initiate_qc
 from app import get_filtered_qc_results
+from app import get_initial_qc_matrix
 
 
 def main():
 
     with app.app_context():
-        uuid = "7ef42880-e378-416f-915e-14e8c513049f"
+        uuid = "123"
         collaboration_data = initiate_qc(uuid)
 
         if collaboration_data:
