@@ -52,7 +52,7 @@ const HomePage = () => {
 
   return (
     <Box sx={{ mt: 4 }}>
-      <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', color: '#333' }}>
+      <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', color: '#333', justifyContent: 'center', display: 'flex' }}>
         Welcome Back, {userName}
       </Typography>
       <Grid container spacing={4} justifyContent="center">

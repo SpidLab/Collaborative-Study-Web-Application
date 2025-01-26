@@ -187,6 +187,7 @@ const CollaborationsPage = () => {
             Authorization: `Bearer ${token}`,
           },
         });
+        console.log('invitation data: ',response.data);
 
         const { user_id, invitations } = response.data;
 

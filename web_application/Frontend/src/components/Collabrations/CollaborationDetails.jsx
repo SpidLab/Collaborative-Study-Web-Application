@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Box, Typography, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, IconButton, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Paper
+  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, IconButton, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, LinearProgress
 } from '@mui/material';
 import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon } from '@mui/icons-material';
-import { alpha } from '@mui/material';
 import axios from 'axios';
 import URL from '../../config';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+
 
 const CollaborationDetails = () => {
   const { uuid } = useParams();
@@ -16,7 +17,7 @@ const CollaborationDetails = () => {
   const [experimentList, setExperimentList] = useState([]);
   const [phenoType, setPhenotype] = useState('');
   const [samples, setSamples] = useState('');
-  // const [rawData, setRawData] = useState(null);
+  const [statData, setStatData] = useState(null);
   const [role, setRole] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -24,7 +25,7 @@ const CollaborationDetails = () => {
   const [invitedUsers, setInvitedUsers] = useState([]);
   const [collaborationUuid, setCollaborationUuid] = useState('');
   const [threshold, setThreshold] = useState(0.1);
-
+  const [activeStep, setActiveStep] = useState(0);
   const [isQcInitiateLoading, setIsQcInitiateLoading] = useState(false);
   const [qcResultsAvailable, setQcResultsAvailable] = useState(false);
   const [qcResults, setQcResults] = useState(null);
@@ -33,9 +34,7 @@ const CollaborationDetails = () => {
   const [qcInitiated, setQcInitiated] = useState(false); // New state to track QC initiation
   const [filteredResults, setFilteredResults] = useState([]);
   const prevFilteredResultsRef = useRef();
-
   // const [matrix, setMatrix] = useState([]);
-
   const [isEditing, setIsEditing] = useState(false);
   const [originalCollabName, setOriginalCollabName] = useState('');
   const [originalExperimentList, setOriginalExperimentList] = useState([]);
@@ -49,6 +48,7 @@ const CollaborationDetails = () => {
       setRole('receiver');
     }
   };
+  const steps = ['QC Calculation', 'Stat Data Upload'];
 
   useEffect(() => {
     const fetchCollaborationDetails = async () => {
@@ -94,11 +94,33 @@ const CollaborationDetails = () => {
     const updatedList = experimentList.filter((_, i) => i !== index);
     setExperimentList(updatedList);
   };
+  // Stat upload handlers
+  const handleFileUpload = (e) => {
+    setStatData(e.target.files[0]);
+  };
 
-  // const handleFileUpload = (e) => {
-  //   setRawData(e.target.files[0]);
-  // };
+  const handleSubmitStat = async () => {
+    if (!statData) {
+      console.error('No file selected!');
+      return;
+    }
 
+    const collabStatData = new CollabStatData();
+    collabStatData.append('file', statData);
+
+    try {
+      //waiting for the endpoint to be created
+      const response = await axios.post(`${URL}/api/collaboration/PENDING`, collabStatData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      console.log('File uploaded successfully:', response.data);
+    } catch (error) {
+      console.error('Error uploading file:', error);
+    }
+  };
   const handleUpdateCollaboration = async () => {
     setIsLoading(true);
     try {
@@ -109,7 +131,7 @@ const CollaborationDetails = () => {
         samples: samples,
       };
       if (role === 'receiver') {
-        updateData.raw_data = rawData ? rawData.name : null;
+        updateData.stat_data = statData ? statData.name : null;
       }
       await axios.put(`${URL}/api/collaboration/${uuid}`, updateData, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
@@ -219,11 +241,11 @@ const CollaborationDetails = () => {
   };
 
 
-
+  // Send the threshold value to the backend
   const handleSubmitThreshold = async () => {
     try {
       const response = await axios.post(`${URL}/api/datasets/${uuid}/filter-qc-results`, {
-        threshold: threshold,  // Send the threshold value to the backend
+        threshold: threshold,
       },
         {
           headers: {
@@ -414,6 +436,13 @@ const CollaborationDetails = () => {
   const isQcResultsEnabled = !isQcInitiateEnabled && qcResultsAvailable;
 
   useEffect(() => {
+    if (isQcResultsEnabled) {
+      setActiveStep(1); // Automatically move to next step when QC calculation is ready
+    }
+  }, [isQcResultsEnabled]);
+
+
+  useEffect(() => {
     checkQcStatus(); // Update QC results availability on component load
   }, []);
 
@@ -577,86 +606,166 @@ const CollaborationDetails = () => {
                 </ListItem>
                 <Divider />
 
-                <ListItem disableGutters sx={{ mt: 2 }}>
-                  <ListItemText
-                    primary={<strong>Quality Control</strong>}
-                    secondary={
+                <ListItem disableGutters sx={{ mt: 2, display: 'block' }}>
+                  {role !== 'receiver' && (
+                    <ListItemText
+                      sx={{ width: '100%', display: 'block' }}
+                      primary={<strong>Quality Control</strong>}
+                      secondary={
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            gap: 2,
+                            mt: 1,
+                            width: '100%', // Ensure the Box takes full width of its parent
+                          }}
+                        >
+                          {/* QC Initiate Button */}
+                          <Box sx={{ flex: 1 }}>
+                            <Tooltip
+                              title={
+                                !isQcInitiateEnabled
+                                  ? 'Cannot perform action at the moment'
+                                  : role === 'receiver'
+                                    ? 'Receiver cannot initiate QC calculations'
+                                    : 'Initiate QC Calculations'
+                              }
+                              placement="bottom"
+                            >
+                              <span>
+                                <Button
+                                  variant="contained"
+                                  color="primary"
+                                  onClick={handleQcInitiate}
+                                  disabled={!isQcInitiateEnabled || isQcInitiateLoading}
+                                  startIcon={
+                                    isQcInitiateLoading && (
+                                      <CircularProgress size={20} color="inherit" />
+                                    )
+                                  }
+                                  fullWidth
+                                  sx={{ borderRadius: 20 }}
+                                >
+                                  Initiate QC Calculation
+                                </Button>
+                              </span>
+                            </Tooltip>
+                          </Box>
+
+                          {/* QC Results Button */}
+                          <Box sx={{ flex: 1 }}>
+                            <Tooltip
+                              title={
+                                !isQcResultsEnabled
+                                  ? 'Results not available to preview'
+                                  : role === 'receiver'
+                                    ? 'Receiver cannot initiate QC results'
+                                    : 'Get QC Results'
+                              }
+                              placement="bottom"
+                            >
+                              <span>
+                                <Button
+                                  variant="outlined"
+                                  color="secondary"
+                                  onClick={handleQcResults}
+                                  disabled={!isQcResultsEnabled || isQcResultsLoading || role === 'receiver'}
+                                  startIcon={
+                                    isQcResultsLoading && (
+                                      <CircularProgress size={20} color="inherit" />
+                                    )
+                                  }
+                                  fullWidth
+                                  sx={{ borderRadius: 20 }}
+                                >
+                                  QC Results
+                                </Button>
+                              </span>
+                            </Tooltip>
+                          </Box>
+                        </Box>
+                      }
+                    />
+                  )}
+                  <Divider />
+                  {role === 'receiver' && (
+                    <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 2 }}>
                       <Box
                         sx={{
                           display: 'flex',
-                          gap: 2,
-                          mt: 1,
-                          width: '100%', // Ensure the Box takes full width of its parent
+                          width: '100%',
+                          backgroundColor: '#E3F2E4', // Light green background for incomplete steps
+                          borderRadius: 50,
+                          height: 40,
+                          overflow: 'hidden',
+                          position: 'relative',
                         }}
                       >
-                        {/* QC Initiate Button */}
-                        <Box sx={{ flex: 1 }}>
-                          <Tooltip
-                            title={
-                              !isQcInitiateEnabled
-                                ? 'Cannot perform action at the moment'
-                                : role === 'receiver'
-                                  ? 'Receiver cannot initiate QC calculations'
-                                  : 'Initiate QC Calculations'
-                            }
-                            placement="bottom"
-                          >
-                            <span>
-                              <Button
-                                variant="contained"
-                                color="primary"
-                                onClick={handleQcInitiate}
-                                disabled={!isQcInitiateEnabled || isQcInitiateLoading}
-                                startIcon={
-                                  isQcInitiateLoading && (
-                                    <CircularProgress size={20} color="inherit" />
-                                  )
-                                }
-                                fullWidth
-                                sx={{ borderRadius: 20 }}
-                              >
-                                Initiate QC Calculation
-                              </Button>
-                            </span>
-                          </Tooltip>
-                        </Box>
+                        {/* Left section: Initiator Pending */}
+                        <Tooltip
+                          title={activeStep === 0 ? 'Initiator yet to do perform Quality Control Calculation' : 'Quality Control results avilable, contact Initiator for more information'}
+                          placement="top"
+                        >
 
-                        {/* QC Results Button */}
-                        <Box sx={{ flex: 1 }}>
-                          <Tooltip
-                            title={
-                              !isQcResultsEnabled
-                                ? 'Results not available to preview' : role === 'receiver'
-                                  ? 'Receiver cannot initiate QC results'
-                                  : 'Get QC Results'
-                            }
-                            placement="bottom"
+                          <Box
+                            sx={{
+                              width: '50%',
+                              backgroundColor:
+                                activeStep === 0
+                                  ? 'success.main' // Active step color
+                                  : activeStep > 0
+                                    ? '#E3F2E4' // Completed step background
+                                    : 'grey.300', // Incomplete step background (grey)
+                              display: 'flex',
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              color: activeStep === 0 ? 'white' : activeStep > 0 ? 'success.main' : 'text.secondary',
+                              borderRadius: '50px 0px 0px 50px',
+                              transition: 'background-color 0.3s ease',
+                            }}
                           >
-                            <span>
-                              <Button
-                                variant="outlined"
-                                color="secondary"
-                                onClick={handleQcResults}
-                                disabled={!isQcResultsEnabled || isQcResultsLoading || role === 'receiver'}
-                                startIcon={
-                                  isQcResultsLoading && (
-                                    <CircularProgress size={20} color="inherit" />
-                                  )
-                                }
-                                fullWidth
-                                sx={{ borderRadius: 20 }}
-                              >
-                                QC Results
-                              </Button>
-                            </span>
+                            {/* If step is completed, show checkmark icon */}
+                            {activeStep > 0 ? (
+                              <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1 }} />
+                            ) : null}
+                            <Typography variant="body2">{steps[0]}</Typography>
+                          </Box>
+                        </Tooltip>
+                        {/* Right section: Stat Data Upload */}
+                        <Tooltip
+                          title={activeStep === 1 ? 'You can now upload the Stat for GWAS Experiment' : 'Waiting for QC results'}
+                          placement="top"
+                        >
+
+                          <Box
+                            sx={{
+                              width: '50%',
+                              backgroundColor:
+                                activeStep === 1
+                                  ? 'success.main' // Active step color
+                                  : activeStep > 1
+                                    ? '#E3F2E4' // Completed step background
+                                    : 'grey.300', // Incomplete step background (grey)
+                              display: 'flex',
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              color: activeStep === 1 || activeStep > 1 ? 'white' : 'text.secondary',
+                              borderRadius: '0px 50px 50px 0px',
+                              transition: 'background-color 0.3s ease',
+                            }}
+                          >
+                            {/* If step is completed, show checkmark icon */}
+                            {activeStep > 1 ? (
+                              <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1 }} />
+                            ) : null}
+                            <Typography variant="body2">{steps[1]}</Typography>
+                          </Box>
                           </Tooltip>
-                        </Box>
                       </Box>
-                    }
-                  />
-                </ListItem>
-                <Divider />
+                    </Box>
 
+                  )}
+                </ListItem>
                 {displayQcResults && (
                   <>
                     <ListItem disableGutters sx={{ mt: 2 }}>
@@ -766,29 +875,127 @@ const CollaborationDetails = () => {
                 )}
 
                 {/* Upload Dataset */}
-                {/* {role === 'receiver' && (
-                  <>
-                    <ListItem disableGutters sx={{ mt: 2 }}>
+                <>
+                  <ListItem disableGutters>
+                    {isQcResultsEnabled && (
                       <ListItemText
-                        primary={<strong>Upload Dataset</strong>}
+                        primary={<strong>Upload Stat</strong>}
                         secondary={
                           <>
-                            <Button variant="outlined" component="label" fullWidth sx={{ mt: 1 }}>
-                              Upload Dataset
-                              <input type="file" hidden onChange={handleFileUpload} />
-                            </Button>
-                            {rawData && (
-                              <Typography variant="body2" sx={{ mt: 1 }}>
-                                Selected: {rawData.name}
-                              </Typography>
+                            {/* File Upload Button */}
+                            <Tooltip placement='top' title={statData ? "File already selected" : "Upload file must be in CSV or JSON formatted."}>
+                              <span>
+                                <Button variant="outlined" component="label" fullWidth sx={{ mt: 1, borderRadius: 10, }}>
+                                  Select Stat File
+                                  <input type="file" hidden onChange={handleFileUpload} />
+                                </Button>
+                                {statData && (
+                                  <Typography variant="body2" sx={{ mt: 1 }}>
+                                    Selected: {statData.name}
+                                  </Typography>
+                                )}
+                              </span>
+                            </Tooltip>
+                            {/* Submit Button */}
+                            {statData && (
+                              <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleSubmitStat} >
+                                Submit Stat Data
+                              </Button>
                             )}
                           </>
                         }
                       />
+                    )}
+                  </ListItem>
+
+                  <Divider />
+                </>
+                {/*GWAS Calculation Trigger */}
+                <>
+                  {role === 'sender' && (
+                    <ListItem disableGutters sx={{ mt: 2 }}>
+
+                      <ListItemText
+                        primary={<strong>GWAS Calculation</strong>}
+                        secondary={
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              gap: 2,
+                              mt: 1,
+                              width: '100%', // Ensure the Box takes full width of its parent
+                            }}
+                          >
+                            {/* GWAS Initiate Button */}
+                            <Box sx={{ flex: 1 }}>
+                              <Tooltip
+                                title={
+                                  !isQcInitiateEnabled
+                                    ? 'Cannot perform action at the moment'
+                                    : role === 'receiver'
+                                      ? 'Receiver cannot initiate QC calculations'
+                                      : 'Initiate QC Calculations'
+                                }
+                                placement="bottom"
+                              >
+                                <span>
+                                  <Button
+                                    variant="contained"
+                                    color="primary"
+                                    onClick={handleQcInitiate}
+                                    // disabled={!isQcInitiateEnabled || isQcInitiateLoading}
+                                    startIcon={
+                                      isQcInitiateLoading && (
+                                        <CircularProgress size={20} color="inherit" />
+                                      )
+                                    }
+                                    fullWidth
+                                    sx={{ borderRadius: 20 }}
+                                  >
+                                    Initiate GWAS Calculation
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            </Box>
+
+                            {/* GWAS Results Button */}
+                            <Box sx={{ flex: 1 }}>
+                              <Tooltip
+                                title={
+                                  !isQcResultsEnabled
+                                    ? 'Results not available to preview' : role === 'receiver'
+                                      ? 'Receiver cannot initiate QC results'
+                                      : 'Get QC Results'
+                                }
+                                placement="bottom"
+                              >
+                                <span>
+                                  <Button
+                                    variant="outlined"
+                                    color="secondary"
+                                    onClick={handleQcResults}
+                                    // disabled={!isQcResultsEnabled || isQcResultsLoading || role === 'receiver'}
+                                    startIcon={
+                                      isQcResultsLoading && (
+                                        <CircularProgress size={20} color="inherit" />
+                                      )
+                                    }
+                                    fullWidth
+                                    sx={{ borderRadius: 20 }}
+                                  >
+                                    Get Results
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            </Box>
+                          </Box>
+                        }
+                      />
                     </ListItem>
-                    <Divider />
-                  </>
-                )} */}
+                  )}
+                </>
+
+
               </List>
 
               {/* Save and Cancel Buttons */}

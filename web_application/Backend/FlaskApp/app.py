@@ -460,6 +460,7 @@ def get_user_invitations():
                 {'invited_users.user_id': ObjectId(user_id)}  # If the user is an invited user (receiver)
             ]
         })
+        
 
         invitations_list = []
         
@@ -1571,25 +1572,25 @@ def initiate_qc(collab_uuid):
 @app.route('/api/datasets/<uuid>/qc-results', methods=['GET'])
 def get_initial_qc_matrix(uuid):
     try:
-        print(f"Received request for QC results. Collaboration UUID: {uuid}")
+        # print(f"Received request for QC results. Collaboration UUID: {uuid}")
         
         collaboration_data = fetch_collaboration_data(uuid)
-        print(f"Collaboration data fetched: {collaboration_data}")
+        # print(f"Collaboration data fetched: {collaboration_data}")
         
         if not collaboration_data:
-            print(f"No collaboration found for UUID: {uuid}")
+            # print(f"No collaboration found for UUID: {uuid}")
             return jsonify({"error": "Collaboration not found."}), 404
         
         # Step 2: Extract QC results
         full_qc_results = collaboration_data.get("full_qc", [])
-        print(f"QC Results fetched: {full_qc_results}")
+        # print(f"QC Results fetched: {full_qc_results}")
         
         if not full_qc_results:
-            print(f"No QC results available for UUID: {uuid}")
+            # print(f"No QC results available for UUID: {uuid}")
             return jsonify({"message": "No QC results available for this collaboration."}), 204
         
         # Step 3: Return the QC results
-        print(f"Returning QC results for UUID {uuid}")
+        # print(f"Returning QC results for UUID {uuid}")
         return jsonify(full_qc_results), 200
 
     except Exception as e:
