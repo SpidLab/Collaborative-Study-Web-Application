@@ -26,7 +26,7 @@ def compute_coefficients_array(df):
 
     # Ensure the DataFrame has a multi-index
     if not isinstance(df.index, pd.MultiIndex):
-        raise ValueError("The DataFrame must have a multi-index with 'sample_number' and 'user_id'.")
+        raise ValueError("The DataFrame must have a multi-index with 'sample_id' and 'user_id'.")
 
     # Generate row pairs using combinations of multi-index
     row_pairs = itertools.combinations(df.index, 2)
