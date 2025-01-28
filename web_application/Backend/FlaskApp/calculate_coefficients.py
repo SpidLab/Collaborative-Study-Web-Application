@@ -51,7 +51,6 @@ def compute_coefficients_array(df):
     return coeff_array
 
 
-
 if __name__ == "__main__":
     #TODO Modify the code below to read from a list of csv files and merge them together
     print("sad")

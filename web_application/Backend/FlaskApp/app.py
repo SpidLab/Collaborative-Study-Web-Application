@@ -26,7 +26,8 @@ import logging
 from calculate_coefficients import compute_coefficients_array
 from fuzzywuzzy import process
 import uuid
-from stats import calc_chi_pvalue
+# from stats import calc_chi_pvalue
+# from stats import calc_chi_pvalue
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -460,6 +461,7 @@ def get_user_invitations():
                 {'invited_users.user_id': ObjectId(user_id)}  # If the user is an invited user (receiver)
             ]
         })
+        
 
         invitations_list = []
         
@@ -1632,7 +1634,7 @@ def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
     except Exception as e:
         print(f"Error storing results: {str(e)}")
 
-@app.route('/datasets/<uuid:collab_uuid>', methods=['POST'])
+@app.route('/api/datasets/<uuid:collab_uuid>', methods=['POST'])
 def initiate_qc(collab_uuid):
     try:
         # Get the combined datasets and threshold from the collaboration data
@@ -1661,7 +1663,7 @@ def initiate_qc(collab_uuid):
         print(f"An error occurred in initiate_qc: {str(e)}")
         return jsonify({"error": str(e)}), 500  # Return an error response
 
-@app.route('/datasets/<collab_uuid>/qc-results', methods=['GET'])
+@app.route('/api/datasets/<collab_uuid>/qc-results', methods=['GET'])
 def get_initial_qc_matrix(collab_uuid):
     try:
         # Fetch collaboration data
@@ -1671,19 +1673,20 @@ def get_initial_qc_matrix(collab_uuid):
 
         # Get the QC results matrix from the collaboration data
         full_qc_results = collaboration_data.get("full_qc", [])
+        threshold_value = collaboration_data.get("threshold", None)
 
         if not full_qc_results:
             return jsonify({"message": "No QC results available for this collaboration."}), 200
 
         # Return the full QC results matrix as a JSON response
-        return jsonify(full_qc_results), 200
+        return jsonify(full_qc_results=full_qc_results, threshold=threshold_value), 200
 
     except Exception as e:
         print(f"Error retrieving QC results matrix: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/datasets/<uuid:collab_uuid>/qc-results', methods=['POST'])
+@app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
 def get_filtered_qc_results(collab_uuid):
     try:
         # Fetch collaboration data
@@ -1692,8 +1695,9 @@ def get_filtered_qc_results(collab_uuid):
             return jsonify({"error": "Collaboration not found."}), 404
 
         # Get the threshold value from the request body (or fallback to the default in collaboration data)
-        request_data = request.get_json()  # Expecting JSON data in the body of the request
-        threshold = request_data.get("threshold", collaboration_data.get("threshold", 0.08))
+        # request_data = request.get_json()  # Expecting JSON data in the body of the request
+        threshold = request.json.get("threshold", collaboration_data.get("threshold", 0.08))
+        print("Thresold received:", {threshold})
 
         # Store the new threshold in the collaboration document
         collaboration_collection = db["collaborations"]
@@ -1799,5 +1803,4 @@ def api_calculate_chi_square():
 if __name__ == '__main__':
     app.run(debug=True)
 
-
-
+#----- Below code is older version ------
