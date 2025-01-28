@@ -1673,12 +1673,13 @@ def get_initial_qc_matrix(collab_uuid):
 
         # Get the QC results matrix from the collaboration data
         full_qc_results = collaboration_data.get("full_qc", [])
+        threshold_value = collaboration_data.get("threshold", None)
 
         if not full_qc_results:
             return jsonify({"message": "No QC results available for this collaboration."}), 200
 
         # Return the full QC results matrix as a JSON response
-        return jsonify(full_qc_results), 200
+        return jsonify(full_qc_results=full_qc_results, threshold=threshold_value), 200
 
     except Exception as e:
         print(f"Error retrieving QC results matrix: {str(e)}")

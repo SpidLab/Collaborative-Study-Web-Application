@@ -24,7 +24,8 @@ const CollaborationDetails = () => {
   const [senderInfo, setSenderInfo] = useState({ id: null, name: '' });
   const [invitedUsers, setInvitedUsers] = useState([]);
   const [collaborationUuid, setCollaborationUuid] = useState('');
-  const [threshold, setThreshold] = useState(0.1);
+  const [threshold, setThreshold] = useState(null);
+  const [thresholdDefined, setThresholdDefined] = useState();
   const [activeStep, setActiveStep] = useState(0);
   const [isQcInitiateLoading, setIsQcInitiateLoading] = useState(false);
   const [qcResultsAvailable, setQcResultsAvailable] = useState(false);
@@ -110,7 +111,7 @@ const CollaborationDetails = () => {
 
     try {
       //waiting for the endpoint to be created
-      const response = await axios.post(`${URL}/api/collaboration/PENDING`, collabStatData, {
+      const response = await axios.post(`${URL}/api/upload_csv_stats`, collabStatData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -244,7 +245,7 @@ const CollaborationDetails = () => {
   // Send the threshold value to the backend
   const handleSubmitThreshold = async () => {
     try {
-      const response = await axios.post(`${URL}/api/datasets/${uuid}/filter-qc-results`, {
+      const response = await axios.post(`${URL}/api/datasets/${uuid}/qc-results`, {
         threshold: threshold,
       },
         {
@@ -283,6 +284,15 @@ const CollaborationDetails = () => {
       // console.log("results", response);
       if (response.status === 200) {
         setQcResultsAvailable(true);
+        setdisplayQcResults(true);
+        setQcResults(response.data.full_qc_results); // Store QC results
+        // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
+        if (response.data.threshold !== null) {
+          setThreshold(response.data.threshold);
+          setThresholdDefined(true);
+        } else {
+          setThresholdDefined(false)
+        }
         return true;
       } else {
         // console.error(`Unexpected response status: ${response.status}`);
@@ -293,6 +303,9 @@ const CollaborationDetails = () => {
       // console.error('Error checking QC status:', error);
       setQcResultsAvailable(false); // Default to unavailable in case of error
       return false;
+    } finally {
+      setIsQcResultsLoading(false);
+      setdisplayQcResults(true);
     }
   };
 
@@ -340,33 +353,7 @@ const CollaborationDetails = () => {
       setQcResultsAvailable(true);
     }
   };
-
-
-  // const handleQcResults = async () => {
-  //   setIsQcResultsLoading(true);
-  //   try {
-  //     const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results`, {
-  //       headers: {
-  //         Authorization: `Bearer ${localStorage.getItem('token')}`,
-  //       },
-  //     });
-  //     console.log(response.data);
-
-  //     if (response.status === 200) {
-  //       setSnackbar({ open: true, message: 'Results are available.', severity: 'success' });
-  //       setQcResultsAvailable(true);
-  //       setQcResults(response.data); // Store QC results if needed
-  //     } else {
-  //       setSnackbar({ open: true, message: 'Results are not available.', severity: 'info' });
-  //     }
-  //   } catch (error) {
-  //     console.error('Error fetching QC results:', error);
-  //     setSnackbar({ open: true, message: 'Results are not available.', severity: 'info' });
-  //   } finally {
-  //     setIsQcResultsLoading(false);
-  //   }
-  // };
-
+// handleQcResults function might not be necessary since we are already checking the results in checkQcStatus function --- verify later
   const handleQcResults = async () => {
     if (qcResults) {
       setSnackbar({ open: true, message: 'Results are already available.', severity: 'info' });
@@ -381,12 +368,19 @@ const CollaborationDetails = () => {
         },
       });
 
-      // console.log(response.data);
+      console.log(response.data);
 
       if (response.status === 200) {
         setSnackbar({ open: true, message: 'Results are available.', severity: 'success' });
         setQcResultsAvailable(true);
-        setQcResults(response.data); // Store QC results
+        setQcResults(response.data.full_qc_results); // Store QC results
+        // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
+        if (response.data.threshold !== null) {
+          setThreshold(response.data.threshold);
+          setThresholdDefined(true);
+        } else {
+          setThresholdDefined(false)
+        }
       } else {
         setSnackbar({ open: true, message: 'Results are not available.', severity: 'info' });
       }
@@ -398,7 +392,6 @@ const CollaborationDetails = () => {
       setdisplayQcResults(true);
     }
   };
-
   const getMatrix = () => {
     if (!qcResults) return [];
     return qcResults.map((item) => [
@@ -410,6 +403,7 @@ const CollaborationDetails = () => {
   const matrix = getMatrix();
 
   const handleSliderChange = (event, newValue) => {
+    setThresholdDefined(false);
     setThreshold(newValue);
   };
 
@@ -625,7 +619,7 @@ const CollaborationDetails = () => {
                             <Tooltip
                               title={
                                 !isQcInitiateEnabled
-                                  ? 'Cannot perform action at the moment'
+                                  ? 'QC calculations already initiated or waiting for Collaborators'
                                   : role === 'receiver'
                                     ? 'Receiver cannot initiate QC calculations'
                                     : 'Initiate QC Calculations'
@@ -653,7 +647,7 @@ const CollaborationDetails = () => {
                           </Box>
 
                           {/* QC Results Button */}
-                          <Box sx={{ flex: 1 }}>
+                          {/* <Box sx={{ flex: 1 }}>
                             <Tooltip
                               title={
                                 !isQcResultsEnabled
@@ -682,12 +676,11 @@ const CollaborationDetails = () => {
                                 </Button>
                               </span>
                             </Tooltip>
-                          </Box>
+                          </Box> */}
                         </Box>
                       }
                     />
                   )}
-                  <Divider />
                   {role === 'receiver' && (
                     <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 2 }}>
                       <Box
@@ -726,7 +719,7 @@ const CollaborationDetails = () => {
                           >
                             {/* If step is completed, show checkmark icon */}
                             {activeStep > 0 ? (
-                              <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1 }} />
+                              <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1, fontSize: 15 }} />
                             ) : null}
                             <Typography variant="body2">{steps[0]}</Typography>
                           </Box>
@@ -760,13 +753,13 @@ const CollaborationDetails = () => {
                             ) : null}
                             <Typography variant="body2">{steps[1]}</Typography>
                           </Box>
-                          </Tooltip>
+                        </Tooltip>
                       </Box>
                     </Box>
 
                   )}
                 </ListItem>
-                {displayQcResults && (
+                {(displayQcResults && role === 'sender')&& (
                   <>
                     <ListItem disableGutters sx={{ mt: 2 }}>
                       <ListItemText
@@ -814,9 +807,9 @@ const CollaborationDetails = () => {
                             <Typography variant="body2" gutterBottom>
                               Current Threshold: {threshold}
                             </Typography>
-                            <Tooltip title="Confirm your selected threshold value" placement="top">
-                              <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }}>
-                                Confirm Threshold Value
+                            <Tooltip title={thresholdDefined ? 'Threshold previously defined' : 'Confirm your selected threshold value'} placement="bottom">
+                              <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }} disabled={thresholdDefined}>
+                                {thresholdDefined ? 'Threshold previously defined' : 'Confirm Threshold Value'}
                               </Button>
                             </Tooltip>
                           </Box>

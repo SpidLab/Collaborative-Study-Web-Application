@@ -1,4 +1,5 @@
 from scipy.stats import chi2_contingency
+
 import numpy as np
 
 def calc_chi_pvalue(snp_stats): 
