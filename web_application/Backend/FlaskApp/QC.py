@@ -1,13 +1,9 @@
-from app import app
-from app import initiate_qc
-from app import get_filtered_qc_results
-from app import get_initial_qc_matrix
-
+from app import app, initiate_qc
+import json
 
 def main():
-
     with app.app_context():
-        uuid = "123"
+        uuid = "0639c170-e109-4d0a-9117-8d65ad570340"
         collaboration_data = initiate_qc(uuid)
 
         if collaboration_data:
@@ -15,12 +11,16 @@ def main():
         else:
             print("Collaboration not found.")
 
-        filtered_results = get_filtered_qc_results(uuid)
+        # Use Flask test client
+        with app.test_client() as client:
+            response = client.post(
+                f"/api/datasets/{uuid}/qc-results",
+                data=json.dumps({"threshold": 0.1}),  # Send test threshold value
+                content_type="application/json"
+            )
 
-        if filtered_results:
-            print("Filtered results retrieved:", filtered_results)
-        else:
-            print("Filtered Results not found.")
+            print("Response status:", response.status_code)
+            print("Response data:", response.get_json())
 
 if __name__ == "__main__":
     main()
