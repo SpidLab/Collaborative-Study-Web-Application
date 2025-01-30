@@ -1634,6 +1634,26 @@ def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
     except Exception as e:
         print(f"Error storing results: {str(e)}")
 
+# def store_qc_results_in_mongo(collab_uuid, results_array):
+#     try:
+#         # Get the collaboration data
+#         collaboration_collection = db["collaborations"]
+#         collaboration_data = collaboration_collection.find_one({"uuid": collab_uuid})
+#
+#         if collaboration_data is None:
+#             print("Collaboration not found.")
+#             return None
+#
+#         # Add the results to the document
+#         collaboration_collection.update_one(
+#             {"uuid": collab_uuid},
+#             {"$set": {"qc_results": results_array}}
+#         )
+#         print("Results stored successfully.")
+#
+#     except Exception as e:
+#         print(f"Error storing results: {str(e)}")
+
 @app.route('/api/datasets/<uuid:collab_uuid>', methods=['POST'])
 def initiate_qc(collab_uuid):
     try:
@@ -1695,16 +1715,20 @@ def get_filtered_qc_results(collab_uuid):
             return jsonify({"error": "Collaboration not found."}), 404
 
         # Get the threshold value from the request body (or fallback to the default in collaboration data)
-        # request_data = request.get_json()  # Expecting JSON data in the body of the request
         threshold = request.json.get("threshold", collaboration_data.get("threshold", 0.08))
-        print("Thresold received:", {threshold})
+        print("Threshold received:", threshold)
 
-        # Store the new threshold in the collaboration document
+        # Reference to MongoDB collection
         collaboration_collection = db["collaborations"]
-        collaboration_collection.update_one(
+
+        # Update threshold in the database
+        threshold_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
             {"$set": {"threshold": threshold}}
         )
+
+        if threshold_update_result.matched_count == 0:
+            return jsonify({"error": "Failed to update threshold."}), 500
 
         # Get full QC results
         full_qc_results = collaboration_data.get("full_qc", [])
@@ -1731,7 +1755,13 @@ def get_filtered_qc_results(collab_uuid):
             filtered_results[user_id] = list(filtered_results[user_id])
 
         # Store the filtered results in the database
-        store_qc_results_in_mongo(collab_uuid, filtered_results, "filtered_qc")
+        filtered_qc_update_result = collaboration_collection.update_one(
+            {"uuid": collab_uuid},
+            {"$set": {"filtered_qc": filtered_results}}
+        )
+
+        if filtered_qc_update_result.matched_count == 0:
+            return jsonify({"error": "Failed to update filtered QC results."}), 500
 
         return jsonify(filtered_results), 200
 
@@ -1743,62 +1773,62 @@ def handle_error(error_message, status_code):
     logging.error(error_message)
     return jsonify({"message": error_message}), status_code
 
-def calculate_and_store_chi_square_results(collaboration_uuid, db):
-    try:
-        # Fetch the collaboration document using the UUID
-        collaboration = db['collaboration'].find_one({"uuid": collaboration_uuid})
-
-        if not collaboration:
-            return handle_error("Collaboration not found", 404)
-
-        # Extract SNP data from the stats field
-        stats = collaboration.get('stats', {})
-
-        if not stats:
-            return handle_error("No SNP data found in the stats field", 400)
-
-        # Extract the SNP data for each user
-        snp_stats = []
-        for user_id, user_stats in stats.items():
-            for snp_id, snp_data in user_stats.items():
-                # Prepare data for chi-square calculation, structure it as [case, control]
-                case_counts = [snp_data["case"].get(str(i), 0) for i in range(3)]
-                control_counts = [snp_data["control"].get(str(i), 0) for i in range(3)]
-                snp_stats.append({snp_id: [case_counts, control_counts]})
-
-        # Call the provided function to calculate the chi-square p-values
-        gwas_result = calc_chi_pvalue(snp_stats)
-
-        # Store the chi-square results in the collaboration document
-        db['collaboration'].update_one(
-            {"uuid": collaboration_uuid},
-            {"$set": {"chi_square_results": gwas_result}},
-            upsert=False
-        )
-
-        return {"message": "Chi-square results calculated and stored successfully"}, 200
-
-    except Exception as e:
-        return handle_error(f"Error calculating or storing chi-square results: {str(e)}", 500)
-
-
-@app.route('/api/calculate_chi_square', methods=['POST'])
-def api_calculate_chi_square():
-    try:
-        # Get the collaboration UUID from the request body
-        data = request.get_json()
-        collaboration_uuid = data.get('uuid')
-
-        if not collaboration_uuid:
-            return handle_error("UUID is required", 400)
-
-        # Call the function to calculate and store chi-square results
-        response, status_code = calculate_and_store_chi_square_results(collaboration_uuid, db)
-
-        return jsonify(response), status_code
-
-    except Exception as e:
-        return handle_error(f"Unexpected error: {str(e)}", 500)
+# def calculate_and_store_chi_square_results(collaboration_uuid, db):
+#     try:
+#         # Fetch the collaboration document using the UUID
+#         collaboration = db['collaboration'].find_one({"uuid": collaboration_uuid})
+#
+#         if not collaboration:
+#             return handle_error("Collaboration not found", 404)
+#
+#         # Extract SNP data from the stats field
+#         stats = collaboration.get('stats', {})
+#
+#         if not stats:
+#             return handle_error("No SNP data found in the stats field", 400)
+#
+#         # Extract the SNP data for each user
+#         snp_stats = []
+#         for user_id, user_stats in stats.items():
+#             for snp_id, snp_data in user_stats.items():
+#                 # Prepare data for chi-square calculation, structure it as [case, control]
+#                 case_counts = [snp_data["case"].get(str(i), 0) for i in range(3)]
+#                 control_counts = [snp_data["control"].get(str(i), 0) for i in range(3)]
+#                 snp_stats.append({snp_id: [case_counts, control_counts]})
+#
+#         # Call the provided function to calculate the chi-square p-values
+#         gwas_result = calc_chi_pvalue(snp_stats)
+#
+#         # Store the chi-square results in the collaboration document
+#         db['collaboration'].update_one(
+#             {"uuid": collaboration_uuid},
+#             {"$set": {"chi_square_results": gwas_result}},
+#             upsert=False
+#         )
+#
+#         return {"message": "Chi-square results calculated and stored successfully"}, 200
+#
+#     except Exception as e:
+#         return handle_error(f"Error calculating or storing chi-square results: {str(e)}", 500)
+#
+#
+# @app.route('/api/calculate_chi_square', methods=['POST'])
+# def api_calculate_chi_square():
+#     try:
+#         # Get the collaboration UUID from the request body
+#         data = request.get_json()
+#         collaboration_uuid = data.get('uuid')
+#
+#         if not collaboration_uuid:
+#             return handle_error("UUID is required", 400)
+#
+#         # Call the function to calculate and store chi-square results
+#         response, status_code = calculate_and_store_chi_square_results(collaboration_uuid, db)
+#
+#         return jsonify(response), status_code
+#
+#     except Exception as e:
+#         return handle_error(f"Unexpected error: {str(e)}", 500)
 
 if __name__ == '__main__':
     app.run(debug=True)
