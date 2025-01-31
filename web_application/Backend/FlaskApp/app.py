@@ -1591,7 +1591,7 @@ def get_combined_datasets(collab_uuid):
             return jsonify({"error": "Collaboration not found for the provided UUID."}), 404
 
         # Get threshold and dataset IDs
-        threshold = collaboration_data.get("threshold", 0.08)
+        threshold = collaboration_data.get("threshold", 1)
         invited_users = collaboration_data.get("invited_users", [])
         creator_dataset_id = collaboration_data.get("creator_dataset_id")
 
@@ -1652,8 +1652,8 @@ def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
 #
 #     except Exception as e:
 #         print(f"Error storing results: {str(e)}")
-
-@app.route('/api/datasets/<uuid:collab_uuid>', methods=['POST'])
+# init qc
+@app.route('/api/datasets/<collab_uuid>', methods=['POST'])
 def initiate_qc(collab_uuid):
     try:
         # Get the combined datasets and threshold from the collaboration data
@@ -1664,6 +1664,8 @@ def initiate_qc(collab_uuid):
 
         print("Got datasets")
         # print(df)
+        print(df)
+        
 
         # Compute the coefficients using the fetched threshold
         results = compute_coefficients_array(df)
@@ -1700,7 +1702,7 @@ def get_initial_qc_matrix(collab_uuid):
             return jsonify({"message": "No QC results available for this collaboration."}), 201
 
         # Return the full QC results matrix as a JSON response
-        return jsonify(full_qc_results=full_qc_results, threshold=threshold_value=full_qc_results, threshold=threshold_value), 200
+        return jsonify(full_qc_results=full_qc_results, threshold=threshold_value), 200
 
     except Exception as e:
         print(f"Error retrieving QC results matrix: {str(e)}")
