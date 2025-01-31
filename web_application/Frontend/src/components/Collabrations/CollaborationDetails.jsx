@@ -102,24 +102,39 @@ const CollaborationDetails = () => {
 
   const handleSubmitStat = async () => {
     if (!statData) {
-      console.error('No file selected!');
+      setSnackbar({ open: true, message: "No File Selected.", severity: 'error' });
       return;
     }
 
-    const collabStatData = new CollabStatData();
+    const collabStatData = new FormData();
     collabStatData.append('file', statData);
+    collabStatData.append('uuid', uuid);
 
     try {
       //waiting for the endpoint to be created
       const response = await axios.post(`${URL}/api/upload_csv_stats`, collabStatData, {
         headers: {
           'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
       console.log('File uploaded successfully:', response.data);
+      setSnackbar({
+        open: true,
+        message: 'Stat data uploaded Successfully!',
+        severity: 'success'
+      });
+
+      setStatData('');
+
     } catch (error) {
       console.error('Error uploading file:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to upload Stat data, please try again.',
+        severity: 'error'
+      });
     }
   };
   const handleUpdateCollaboration = async () => {
@@ -303,10 +318,11 @@ const CollaborationDetails = () => {
       // console.error('Error checking QC status:', error);
       setQcResultsAvailable(false); // Default to unavailable in case of error
       return false;
-    } finally {
-      setIsQcResultsLoading(false);
-      setdisplayQcResults(true);
-    }
+    } 
+    // finally {
+    //   setIsQcResultsLoading(false);
+    //   setdisplayQcResults(true);
+    // }
   };
 
 
@@ -334,7 +350,7 @@ const CollaborationDetails = () => {
           },
         }
       );
-
+      console.log('response:', response);
       setSnackbar({
         open: true,
         message: 'QC Calculations Initiated.',
@@ -867,7 +883,6 @@ const CollaborationDetails = () => {
                   </>
                 )}
 
-                {/* Upload Dataset */}
                 <>
                   <ListItem disableGutters>
                     {isQcResultsEnabled && (
@@ -901,11 +916,10 @@ const CollaborationDetails = () => {
                     )}
                   </ListItem>
 
-                  <Divider />
                 </>
                 {/*GWAS Calculation Trigger */}
                 <>
-                  {role === 'sender' && (
+                 {(role === 'sender' && isQcResultsEnabled) && (
                     <ListItem disableGutters sx={{ mt: 2 }}>
 
                       <ListItemText
@@ -987,7 +1001,6 @@ const CollaborationDetails = () => {
                     </ListItem>
                   )}
                 </>
-
 
               </List>
 

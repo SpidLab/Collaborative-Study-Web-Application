@@ -1,8 +1,7 @@
 import traceback
 
 from pandas import DataFrame
-
-from calculate_coefficients import compute_coefficients_array
+# from calculate_coefficients import compute_coefficients_array
 import numpy as np
 from flask import Flask, request, jsonify, g
 from flask_login import LoginManager, login_user, logout_user, UserMixin
@@ -1634,7 +1633,7 @@ def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
     except Exception as e:
         print(f"Error storing results: {str(e)}")
 
-@app.route('/api/datasets/<uuid:collab_uuid>', methods=['POST'])
+@app.route('/api/datasets/<collab_uuid>', methods=['POST'])
 def initiate_qc(collab_uuid):
     try:
         # Get the combined datasets and threshold from the collaboration data
@@ -1644,6 +1643,7 @@ def initiate_qc(collab_uuid):
             return df  # This is already a JSON response
 
         print("Got datasets")
+        # print(df)
 
         # Compute the coefficients using the fetched threshold
         results = compute_coefficients_array(df)
@@ -1676,7 +1676,7 @@ def get_initial_qc_matrix(collab_uuid):
         threshold_value = collaboration_data.get("threshold", None)
 
         if not full_qc_results:
-            return jsonify({"message": "No QC results available for this collaboration."}), 200
+            return jsonify({"message": "No QC results available for this collaboration."}), 201
 
         # Return the full QC results matrix as a JSON response
         return jsonify(full_qc_results=full_qc_results, threshold=threshold_value), 200

@@ -187,7 +187,7 @@ const CollaborationsPage = () => {
             Authorization: `Bearer ${token}`,
           },
         });
-        console.log('invitation data: ',response.data);
+        // console.log('invitation data: ',response.data);
 
         const { user_id, invitations } = response.data;
 
@@ -198,7 +198,7 @@ const CollaborationsPage = () => {
           (invitation) => invitation.sender_id === user_id
         );
         const accepted = invitations.filter(
-          (invitation) => invitation.status === 'accepted' && invitation.sender_id === user_id || invitation.receiver_id === user_id
+          (invitation) => invitation.status === 'accepted' && (invitation.sender_id === user_id || invitation.receiver_id === user_id)
         );
 
         setCurrentUserId(user_id);
@@ -321,6 +321,7 @@ const CollaborationsPage = () => {
         setOpenSnackbar(true);
         setSentInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
         setAcceptedInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
+        console.log("acceptedInvitation:", acceptedInvitations);
       }
     } catch (error) {
       console.error('Error revoking invitation:', error);
