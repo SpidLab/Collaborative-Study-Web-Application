@@ -56,7 +56,7 @@ const UploadForm = () => {
                 throw new Error('No file selected.');
             }
 
-            const response = await axios.post(`${URL}/api/upload_csv`, formData, {
+            const response = await axios.post(`${URL}/api/upload_csv_qc`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                     'Authorization': `Bearer ${token}`
