@@ -1,7 +1,6 @@
 import traceback
 
 from pandas import DataFrame
-# from calculate_coefficients import compute_coefficients_array
 import numpy as np
 from flask import Flask, request, jsonify, g
 from flask_login import LoginManager, login_user, logout_user, UserMixin
@@ -25,7 +24,7 @@ import logging
 from calculate_coefficients import compute_coefficients_array
 from fuzzywuzzy import process
 import uuid
-# from stats import calc_chi_pvalue
+from stats import calc_chi_pvalue
 # from stats import calc_chi_pvalue
 
 app = Flask(__name__)
@@ -1776,62 +1775,81 @@ def handle_error(error_message, status_code):
     logging.error(error_message)
     return jsonify({"message": error_message}), status_code
 
-# def calculate_and_store_chi_square_results(collaboration_uuid, db):
-#     try:
-#         # Fetch the collaboration document using the UUID
-#         collaboration = db['collaboration'].find_one({"uuid": collaboration_uuid})
-#
-#         if not collaboration:
-#             return handle_error("Collaboration not found", 404)
-#
-#         # Extract SNP data from the stats field
-#         stats = collaboration.get('stats', {})
-#
-#         if not stats:
-#             return handle_error("No SNP data found in the stats field", 400)
-#
-#         # Extract the SNP data for each user
-#         snp_stats = []
-#         for user_id, user_stats in stats.items():
-#             for snp_id, snp_data in user_stats.items():
-#                 # Prepare data for chi-square calculation, structure it as [case, control]
-#                 case_counts = [snp_data["case"].get(str(i), 0) for i in range(3)]
-#                 control_counts = [snp_data["control"].get(str(i), 0) for i in range(3)]
-#                 snp_stats.append({snp_id: [case_counts, control_counts]})
-#
-#         # Call the provided function to calculate the chi-square p-values
-#         gwas_result = calc_chi_pvalue(snp_stats)
-#
-#         # Store the chi-square results in the collaboration document
-#         db['collaboration'].update_one(
-#             {"uuid": collaboration_uuid},
-#             {"$set": {"chi_square_results": gwas_result}},
-#             upsert=False
-#         )
-#
-#         return {"message": "Chi-square results calculated and stored successfully"}, 200
-#
-#     except Exception as e:
-#         return handle_error(f"Error calculating or storing chi-square results: {str(e)}", 500)
-#
-#
-# @app.route('/api/calculate_chi_square', methods=['POST'])
-# def api_calculate_chi_square():
-#     try:
-#         # Get the collaboration UUID from the request body
-#         data = request.get_json()
-#         collaboration_uuid = data.get('uuid')
-#
-#         if not collaboration_uuid:
-#             return handle_error("UUID is required", 400)
-#
-#         # Call the function to calculate and store chi-square results
-#         response, status_code = calculate_and_store_chi_square_results(collaboration_uuid, db)
-#
-#         return jsonify(response), status_code
-#
-#     except Exception as e:
-#         return handle_error(f"Unexpected error: {str(e)}", 500)
+
+def calculate_and_store_chi_square_results(collaboration_uuid):
+    try:
+        # Fetch the collaboration document using the UUID
+        collaboration = db['collaborations'].find_one({"uuid": collaboration_uuid})
+
+        if not collaboration:
+            return {"error": "Collaboration not found"}, 404
+
+        # Extract SNP data from the stats field
+        stats = collaboration.get('stats', {})
+
+        if not stats:
+            return {"error": "No SNP data found in the stats field"}, 400
+
+        # Debug: Log stats structure
+        print(f"Stats structure: {stats}")
+
+        # Store chi-square results per user
+        chi_square_results = {}
+
+        for user_id, user_stats in stats.items():
+            user_snp_stats = []
+
+            for snp_id, snp_data in user_stats.items():
+                # Ensure data is well-formed before proceeding
+                case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
+                control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
+
+                user_snp_stats.append({snp_id: [case_counts, control_counts]})
+
+            # Compute chi-square results for this user
+            gwas_result = calc_chi_pvalue(user_snp_stats)
+            chi_square_results[user_id] = gwas_result
+
+        # Store the structured chi-square results in the collaboration document
+        db['collaborations'].update_one(
+            {"uuid": collaboration_uuid},
+            {"$set": {"chi_square_results": chi_square_results}},
+            upsert=False
+        )
+
+        return {"message": "Chi-square results calculated and stored successfully"}, 200
+
+    except Exception as e:
+        return {"error": f"Error calculating or storing chi-square results: {str(e)}"}, 500
+
+@app.route('/api/calculate_chi_square', methods=['POST'])
+def calculate_chi_square():
+    try:
+        data = request.get_json()
+        collaboration_uuid = data.get('uuid')
+
+        if not collaboration_uuid:
+            return jsonify({"error": "UUID is required"}), 400
+
+        # Debug: Log received UUID
+        print(f"Received UUID: {collaboration_uuid}")
+
+        # Call the function
+        result = calculate_and_store_chi_square_results(collaboration_uuid)
+
+        # Debug: Log function output
+        print(f"Function Output: {result}")
+
+        # Ensure proper response format
+        if isinstance(result, tuple) and isinstance(result[0], dict) and isinstance(result[1], int):
+            return jsonify(result[0]), result[1]
+
+        return jsonify({"error": "Unexpected response format"}), 500
+
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True)
