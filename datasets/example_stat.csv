@@ -1,0 +1,11 @@
+SNP_ID,Case_0,Case_1,Case_2,Control_0,Control_1,Control_2
+snp_id_1,5,4,3,6,7,8
+snp_id_2,2,3,5,8,6,4
+snp_id_3,7,6,4,5,3,2
+snp_id_4,3,5,6,7,8,4
+snp_id_5,6,7,8,3,5,2
+snp_id_6,4,3,2,8,7,6
+snp_id_7,5,6,7,4,3,2
+snp_id_8,8,7,6,5,4,3
+snp_id_9,3,2,5,6,7,8
+snp_id_10,7,5,4,2,3,6
