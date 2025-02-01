@@ -1295,8 +1295,8 @@ def upload_csv_stats():
                     "user_id": user_id  # Include the user_id with each SNP entry
                 }
 
-            # Update the collaboration entry to add or merge user-specific stats
-            result = db['collaboration'].update_one(
+            # Update the collaborations entry to add or merge user-specific stats
+            result = db['collaborations'].update_one(
                 {"uuid": collaboration_uuid},
                 {"$set": {f"stats.{user_id}": user_stats}},  # Store data under stats.{user_id}
                 upsert=True
