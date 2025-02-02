@@ -66,7 +66,7 @@ const CollaborationDetails = () => {
         setPhenotype(response.data.datasets.phenotype || []);
         setSamples(response.data.datasets.samples || '');
         setCollaborationUuid(response.data.uuid);
-        setSenderInfo({ id: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
+        setSenderInfo({ is_sender: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
         setInvitedUsers(response.data.invited_users || []);
         determineUserRole(response.data);
       } catch (error) {
