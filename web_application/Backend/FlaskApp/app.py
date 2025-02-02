@@ -1040,6 +1040,7 @@ def get_collaboration_details(uuid):
         user_id = str(current_user.id)
 
         is_sender = collaboration['creator_id'] == ObjectId(user_id)
+        sender_id = str(collaboration['creator_id'])  
         sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
         sender_name = sender_user["name"] if sender_user else "Unknown"
 
@@ -1076,7 +1077,8 @@ def get_collaboration_details(uuid):
             'experiments': collaboration.get('experiments', []),
             'phenotype': collaboration.get('phenotype', None),
             'samples': collaboration.get('samples', None),
-            'sender_id': is_sender,
+            'is_sender': is_sender,
+            'sender_id': sender_id,
             'sender_name': sender_name,
             'invited_users': invited_users_details,
             'datasets': creator_dataset

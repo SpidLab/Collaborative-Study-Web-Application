@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, IconButton, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, LinearProgress
@@ -43,7 +43,7 @@ const CollaborationDetails = () => {
   const [originalSamples, setOriginalSamples] = useState('');
 
   const determineUserRole = (data) => {
-    if (data.sender_id) {
+    if (data.is_sender) {
       setRole('sender');
     } else {
       setRole('receiver');
@@ -66,7 +66,7 @@ const CollaborationDetails = () => {
         setPhenotype(response.data.datasets.phenotype || []);
         setSamples(response.data.datasets.samples || '');
         setCollaborationUuid(response.data.uuid);
-        setSenderInfo({ id: response.data.sender_id, name: response.data.sender_name });
+        setSenderInfo({ id: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
         setInvitedUsers(response.data.invited_users || []);
         determineUserRole(response.data);
       } catch (error) {
@@ -137,38 +137,38 @@ const CollaborationDetails = () => {
       });
     }
   };
-  const handleUpdateCollaboration = async () => {
-    setIsLoading(true);
-    try {
-      const updateData = {
-        name: collabName,
-        experiments: experimentList,
-        phenotype: phenoType,
-        samples: samples,
-      };
-      if (role === 'receiver') {
-        updateData.stat_data = statData ? statData.name : null;
-      }
-      await axios.put(`${URL}/api/collaboration/${uuid}`, updateData, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-      });
-      setSnackbar({
-        open: true,
-        message: 'Collaboration updated successfully!',
-        severity: 'success',
-      });
-      setIsEditing(false);
-    } catch (error) {
-      console.error('Error updating collaboration:', error);
-      setSnackbar({
-        open: true,
-        message: 'Failed to update collaboration. Please try again.',
-        severity: 'error',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // const handleUpdateCollaboration = async () => {
+  //   setIsLoading(true);
+  //   try {
+  //     const updateData = {
+  //       name: collabName,
+  //       experiments: experimentList,
+  //       phenotype: phenoType,
+  //       samples: samples,
+  //     };
+  //     if (role === 'receiver') {
+  //       updateData.stat_data = statData ? statData.name : null;
+  //     }
+  //     await axios.put(`${URL}/api/collaboration/${uuid}`, updateData, {
+  //       headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+  //     });
+  //     setSnackbar({
+  //       open: true,
+  //       message: 'Collaboration updated successfully!',
+  //       severity: 'success',
+  //     });
+  //     setIsEditing(false);
+  //   } catch (error) {
+  //     console.error('Error updating collaboration:', error);
+  //     setSnackbar({
+  //       open: true,
+  //       message: 'Failed to update collaboration. Please try again.',
+  //       severity: 'error',
+  //     });
+  //   } finally {
+  //     setIsLoading(false);
+  //   }
+  // };
 
   const handleCloseSnackbar = (event, reason) => {
     if (reason === 'clickaway') {
@@ -318,7 +318,7 @@ const CollaborationDetails = () => {
       // console.error('Error checking QC status:', error);
       setQcResultsAvailable(false); // Default to unavailable in case of error
       return false;
-    } 
+    }
     // finally {
     //   setIsQcResultsLoading(false);
     //   setdisplayQcResults(true);
@@ -353,7 +353,7 @@ const CollaborationDetails = () => {
       console.log('response:', response);
       setSnackbar({
         open: true,
-        message: 'QC Calculations Initiated.',
+        message: 'QC Calculations successfully Initiated. Come back later for the QC Results',
         severity: 'success',
       });
       setQcInitiated(true);
@@ -369,7 +369,7 @@ const CollaborationDetails = () => {
       setQcResultsAvailable(true);
     }
   };
-// handleQcResults function might not be necessary since we are already checking the results in checkQcStatus function --- verify later
+  // handleQcResults function might not be necessary since we are already checking the results in checkQcStatus function --- verify later
   const handleQcResults = async () => {
     if (qcResults) {
       setSnackbar({ open: true, message: 'Results are already available.', severity: 'info' });
@@ -408,36 +408,155 @@ const CollaborationDetails = () => {
       setdisplayQcResults(true);
     }
   };
-  const getMatrix = () => {
-    if (!qcResults) return [];
-    return qcResults.map((item) => [
-      item.phi_value,
-      item.sample1,
-      item.sample2
-    ]);
+  // console.log("QC Results", qcResults);
+  // const getMatrix = () => {
+  //   if (!qcResults) return [];
+  //   return qcResults.map((item) => [
+  //     item.phi_value,
+  //     item.sample1,
+  //     item.sample2
+  //   ]);
+  // };
+  // const matrix = getMatrix();
+
+  // const handleSliderChange = (event, newValue) => {
+  //   setThresholdDefined(false);
+  //   setThreshold(newValue);
+  // };
+
+  // console.log("matrix",matrix);
+
+  // const filterData = (threshold) => {
+  //   const filteredData = matrix.filter(row => row.phi_value >= threshold);
+  //   setFilteredResults(filteredData);
+  // };
+
+  // // Re-filter the data when threshold changes
+  // useEffect(() => {
+  //   const filteredResults = matrix.filter(row => row[0] < threshold);
+  //   console.log('Filtered Results:', filteredResults);
+  //   // Only set state if filtered results have changed (compare with previous state)
+  //   if (JSON.stringify(filteredResults) !== JSON.stringify(prevFilteredResultsRef.current)) {
+  //     setFilteredResults(filteredResults);
+  //     prevFilteredResultsRef.current = filteredResults; // Update the ref with the current filtered results
+  //   }
+  // }, [threshold, matrix]);
+
+  // const getGroupedSampleCounts = (qcResults, threshold) => {
+  //   if (!qcResults || !Array.isArray(qcResults)) return { userCounts: {}, totalSamples: 0, filteredData: [] }; // Safety check
+
+  //   const userSamples = {}; // Object to track unique samples per user
+
+  //   // Filter data first based on threshold
+  //   const filteredData = qcResults.filter(({ phi_value }) => phi_value < threshold);
+
+  //   filteredData.forEach(({ sample1, sample2, user1, user2 }) => {
+  //     if (!userSamples[user1]) userSamples[user1] = new Set();
+  //     if (!userSamples[user2]) userSamples[user2] = new Set();
+
+  //     userSamples[user1].add(sample1);
+  //     userSamples[user2].add(sample2);
+  //   });
+
+  //   const userSamplesList = {};
+  //   Object.keys(userSamples).forEach(user => {
+  //       userSamplesList[user] = Array.from(userSamples[user]);
+  //   });
+
+  //   console.log("Unique Samples per User:", userSamplesList);
+
+  //   // Calculate total samples per user and overall count
+  //   let totalSamples = 0;
+  //   const userCounts = {};
+  //   Object.keys(userSamples).forEach(user => {
+  //     userCounts[user] = userSamples[user].size;
+  //     totalSamples += userSamples[user].size;
+  //   });
+
+  //   return { userCounts, totalSamples, filteredData };
+  // };
+
+  // const handleSliderChange = (event, newValue) => {
+  //   setThreshold(newValue);
+  //   if (!qcResults || !Array.isArray(qcResults)) return;
+  //   const { userCounts, totalSamples, filteredData } = getGroupedSampleCounts(qcResults, newValue);
+  //   setFilteredResults({ userCounts, filteredData });
+  //   setThresholdDefined(false);
+  // };
+
+  // useEffect(() => {
+  //   if (!qcResults || !Array.isArray(qcResults) || qcResults.length === 0) return;
+  //   const { userCounts, totalSamples, filteredData } = getGroupedSampleCounts(qcResults, threshold);
+  //   console.log("Updated User-wise sample count:", userCounts);
+  //   console.log("Updated Total unique samples:", totalSamples);
+  //   setFilteredResults({ userCounts, filteredData });
+  // }, [threshold, qcResults]);
+  const getUserName = (userId) => {
+    if (senderInfo.id === userId) return senderInfo.name; // Check if sender matches
+    const invitedUser = invitedUsers?.find(user => user.user_id === userId);
+    return invitedUser ? invitedUser.name : "Unknown User"; // Return name if found
   };
-  const matrix = getMatrix();
+
+  const getGroupedSampleCounts = (qcResults, threshold) => {
+    if (!qcResults || !Array.isArray(qcResults)) return {
+      userCounts: {},
+      totalSamples: 0,
+      selectedSamples: 0,
+      filteredData: [],
+      userSamplesList: {}
+    };
+
+    const userSamples = {}; 
+    const allUniqueSamples = new Set();   
+    const selectedUniqueSamples = new Set();
+
+    const filteredData = qcResults.filter(({ phi_value }) => phi_value < threshold);
+
+    qcResults.forEach(({ sample1, sample2 }) => {
+      allUniqueSamples.add(sample1);
+      allUniqueSamples.add(sample2);
+    });
+
+    filteredData.forEach(({ sample1, sample2, user1, user2 }) => {
+      if (!userSamples[user1]) userSamples[user1] = new Set();
+      if (!userSamples[user2]) userSamples[user2] = new Set();
+
+      userSamples[user1].add(sample1);
+      userSamples[user2].add(sample2);
+
+      selectedUniqueSamples.add(sample1);
+      selectedUniqueSamples.add(sample2);
+    });
+
+    const userSamplesList = {};
+    Object.keys(userSamples).forEach(user => {
+      userSamplesList[user] = Array.from(userSamples[user]);
+    });
+
+    // Calculate sample counts
+    return {
+      userCounts: Object.fromEntries(Object.entries(userSamples).map(([user, samples]) => [user, samples.size])),
+      totalSamples: allUniqueSamples.size,
+      selectedSamples: selectedUniqueSamples.size,
+      filteredData,
+      userSamplesList
+    };
+  };
 
   const handleSliderChange = (event, newValue) => {
-    setThresholdDefined(false);
     setThreshold(newValue);
+    if (!qcResults || !Array.isArray(qcResults)) return;
+
+    const { userCounts, totalSamples, selectedSamples, filteredData, userSamplesList } = getGroupedSampleCounts(qcResults, newValue);
+
+    // console.log("Total Unique Samples in dataset:", totalSamples);
+    // console.log("Total Selected Samples (after filtering):", selectedSamples);
+    // console.log("User-wise Unique Samples:", userCounts);
+    // console.log("Unique Sample Values Per User:", userSamplesList);
+
+    setFilteredResults({ userCounts, totalSamples, selectedSamples, filteredData });
   };
 
-  const filterData = (threshold) => {
-    const filteredData = matrix.filter(row => row.phi_value >= threshold);
-    setFilteredResults(filteredData);
-  };
-
-  // Re-filter the data when threshold changes
-  useEffect(() => {
-    const filteredResults = matrix.filter(row => row[0] < threshold);
-    // console.log('Filtered Results:', filteredResults.length);
-    // Only set state if filtered results have changed (compare with previous state)
-    if (JSON.stringify(filteredResults) !== JSON.stringify(prevFilteredResultsRef.current)) {
-      setFilteredResults(filteredResults);
-      prevFilteredResultsRef.current = filteredResults; // Update the ref with the current filtered results
-    }
-  }, [threshold, matrix]);
 
 
   const isQcInitiateEnabled =
@@ -474,7 +593,7 @@ const CollaborationDetails = () => {
                   <strong>About Collaboration</strong>
                 </Typography>
                 <Divider sx={{ flexGrow: 30, borderColor: 'black' }} />
-                {role === 'sender' && !isEditing && (
+                {/* {role === 'sender' && !isEditing && (
                   <Tooltip title="Edit Collaboration Details">
                     <IconButton
                       onClick={() => {
@@ -489,7 +608,7 @@ const CollaborationDetails = () => {
                       <EditIcon />
                     </IconButton>
                   </Tooltip>
-                )}
+                )} */}
               </Box>
 
               {/* Collaboration Name */}
@@ -572,7 +691,7 @@ const CollaborationDetails = () => {
                 {/* Phenotype */}
                 <ListItem disableGutters>
                   <ListItemText
-                    primary={<strong>Phenotype</strong>}
+                    primary={<Tooltip title='Phenotype from Initiator data' placement='right'><strong>Phenotype</strong></Tooltip>}
                     secondary={
                       role === 'sender' ? (
                         isEditing ? (
@@ -595,7 +714,7 @@ const CollaborationDetails = () => {
 
                 <ListItem disableGutters>
                   <ListItemText
-                    primary={<strong>Number of Samples</strong>}
+                    primary={<Tooltip title='Number of Samples from Initiator data' placement='right'><strong>Number of Samples</strong></Tooltip>}
                     secondary={
                       role === 'sender' ? (
                         isEditing ? (
@@ -775,7 +894,7 @@ const CollaborationDetails = () => {
 
                   )}
                 </ListItem>
-                {(displayQcResults && role === 'sender')&& (
+                {(displayQcResults && role === 'sender') && (
                   <>
                     <ListItem disableGutters sx={{ mt: 2 }}>
                       <ListItemText
@@ -828,6 +947,15 @@ const CollaborationDetails = () => {
                                 {thresholdDefined ? 'Threshold previously defined' : 'Confirm Threshold Value'}
                               </Button>
                             </Tooltip>
+                            {/* {matrix.length > 0 ? (
+                              <p>
+                                Showing {filteredResults.length} out of {matrix.length} groups
+                                below threshold ({threshold.toFixed(2)})
+                              </p>
+                            ) : (
+                              <p>No data available</p>
+                            )} */}
+
                           </Box>
                         }
                       />
@@ -840,34 +968,45 @@ const CollaborationDetails = () => {
                         primary={<strong>QC Results</strong>}
                         secondary={
                           qcResults ? (
-                            <Box sx={{ mt: 4, maxHeight: 400, border: '1px solid #ccc', borderRadius: 2 }}>
-                              <TableContainer sx={{ maxHeight: 400, overflow: "auto", borderRadius: 2 }}>
+                            <Box sx={{ mt: 1, maxHeight: 400 }}>
+                              {/* <TableContainer sx={{ maxHeight: 400, overflow: "auto", borderRadius: 2, marginTop: 2 }}>
                                 <Table stickyHeader>
                                   <TableHead>
                                     <TableRow>
-                                      <TableCell sx={{ backgroundColor: "#3B6CC7", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
+                                      <TableCell sx={{ backgroundColor: "#1876D1", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
                                         Phi Value
                                       </TableCell>
-                                      <TableCell sx={{ backgroundColor: "#3B6CC7", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
+                                      <TableCell sx={{ backgroundColor: "#1876D1", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
                                         Sample 1
                                       </TableCell>
-                                      <TableCell sx={{ backgroundColor: "#3B6CC7", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
+                                      <TableCell sx={{ backgroundColor: "#1876D1", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
                                         Sample 2
                                       </TableCell>
                                     </TableRow>
                                   </TableHead>
                                   <TableBody>
-                                    {filteredResults.map((row, rowIndex) => (
-                                      <TableRow key={rowIndex}>
-                                        {row.map((cell, cellIndex) => (
-                                          <TableCell key={cellIndex}>{cell}</TableCell>
-                                        ))}
+                                    {filteredResults?.filteredData && filteredResults.filteredData.map(({ phi_value, sample1, sample2 }, index) => (
+                                      <TableRow key={index}>
+                                        <TableCell>{phi_value}</TableCell>
+                                        <TableCell>{sample1}</TableCell>
+                                        <TableCell>{sample2}</TableCell>
                                       </TableRow>
                                     ))}
                                   </TableBody>
-
                                 </Table>
-                              </TableContainer>
+                              </TableContainer> */}
+                              <Typography variant="body2">Total Samples to be included in GWAS experiment {filteredResults?.selectedSamples || 0} out of {filteredResults?.totalSamples || 0}</Typography>
+                              <Typography variant="body2">Samples to be included per user dataset:</Typography>
+                              <ul>
+                                {filteredResults?.userCounts &&
+                                  Object.entries(filteredResults.userCounts).map(([user, count]) => (
+                                    <li key={user}>
+                                       {getUserName(user)}: {count} Samples
+                                    </li>
+                                  ))}
+                              </ul>
+
+
 
                             </Box>
 
@@ -885,7 +1024,7 @@ const CollaborationDetails = () => {
 
                 <>
                   <ListItem disableGutters>
-                    {isQcResultsEnabled && (
+                    {thresholdDefined && (
                       <ListItemText
                         primary={<strong>Upload Stat</strong>}
                         secondary={
@@ -917,9 +1056,12 @@ const CollaborationDetails = () => {
                   </ListItem>
 
                 </>
-                {/*GWAS Calculation Trigger */}
+                GWAS Calculation Triggers
                 <>
-                 {(role === 'sender' && isQcResultsEnabled) && (
+
+                  {/* {(role === 'sender' && isQcResultsEnabled) && ( */}
+                  {false && (
+
                     <ListItem disableGutters sx={{ mt: 2 }}>
 
                       <ListItemText
@@ -1005,7 +1147,7 @@ const CollaborationDetails = () => {
               </List>
 
               {/* Save and Cancel Buttons */}
-              {isEditing && (
+              {/* {isEditing && (
                 <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
                   <Tooltip title="Save your changes" placement="top">
                     <Button
@@ -1038,7 +1180,7 @@ const CollaborationDetails = () => {
                     </Button>
                   </Tooltip>
                 </Box>
-              )}
+              )} */}
             </CardContent>
           </Card>
         </Grid>
@@ -1115,7 +1257,7 @@ const CollaborationDetails = () => {
         </Grid>
       </Grid>
 
-      <Box mt={4}>
+      {/* <Box mt={4}>
         <Tooltip title="Save your collaboration details" placement="top">
           <Button
             variant="contained"
@@ -1129,7 +1271,7 @@ const CollaborationDetails = () => {
             {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Update Collaboration'}
           </Button>
         </Tooltip>
-      </Box>
+      </Box> */}
 
       <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={handleCloseSnackbar}>
         <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
