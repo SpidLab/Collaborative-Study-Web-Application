@@ -1808,7 +1808,12 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
 
             # Compute chi-square results for this user
             gwas_result = calc_chi_pvalue(user_snp_stats)
-            chi_square_results[user_id] = gwas_result
+
+            # Include both chi-square value and p-value in results
+            chi_square_results[user_id] = {
+                snp_id: {"chi_square": chi_value, "p_value": p_value}
+                for snp_id, (chi_value, p_value) in gwas_result.items()
+            }
 
         # Store the structured chi-square results in the collaboration document
         db['collaborations'].update_one(
