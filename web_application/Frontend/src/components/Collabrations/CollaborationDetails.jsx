@@ -1,12 +1,15 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, IconButton, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, LinearProgress
+  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, IconButton, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel
 } from '@mui/material';
 import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon } from '@mui/icons-material';
 import axios from 'axios';
 import URL from '../../config';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+
+
 
 
 const CollaborationDetails = () => {
@@ -27,6 +30,7 @@ const CollaborationDetails = () => {
   const [threshold, setThreshold] = useState(null);
   const [thresholdDefined, setThresholdDefined] = useState();
   const [activeStep, setActiveStep] = useState(0);
+  const [progressActiveStep, setProgressActiveStep] = useState(0);
   const [isQcInitiateLoading, setIsQcInitiateLoading] = useState(false);
   const [qcResultsAvailable, setQcResultsAvailable] = useState(false);
   const [qcResults, setQcResults] = useState(null);
@@ -34,6 +38,8 @@ const CollaborationDetails = () => {
   const [displayQcResults, setdisplayQcResults] = useState(false);
   const [qcInitiated, setQcInitiated] = useState(false); // New state to track QC initiation
   const [filteredResults, setFilteredResults] = useState([]);
+  const [gwasResults, setGwasResults] = useState([]);
+  const [gwasResultsAvailable, setGwasResultsAvailable] = useState(false);
   const prevFilteredResultsRef = useRef();
   // const [matrix, setMatrix] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
@@ -269,8 +275,7 @@ const CollaborationDetails = () => {
           },
         }
       );
-
-      console.log('Filtered QC Results:', response.data);
+      setThresholdDefined(true);
 
       setSnackbar({
         open: true,
@@ -305,9 +310,11 @@ const CollaborationDetails = () => {
         if (response.data.threshold !== null) {
           setThreshold(response.data.threshold);
           setThresholdDefined(true);
+          console.log("is threshold value define", thresholdDefined);
         } else {
           setThresholdDefined(false)
         }
+
         return true;
       } else {
         // console.error(`Unexpected response status: ${response.status}`);
@@ -325,6 +332,100 @@ const CollaborationDetails = () => {
     // }
   };
 
+  const checkGwasStatus = async () => {
+    try {
+      // check the endpoints for GWAS Results
+      const response = await axios.get(`${URL}/api/calculate_chi_square_results/${uuid}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      // console.log("results", response);
+      if (response.status === 200) {
+        setGwasResults(response.data.chi_square_results);
+        setGwasResultsAvailable(true);
+      } else {
+        // console.error(`Unexpected response status: ${response.status}`);
+        setGwasResultsAvailable(false);
+        return false;
+      }
+    } catch (error) {
+      // console.error('Error checking QC status:', error);
+      setGwasResultsAvailable(false); // Default to unavailable in case of error
+      return false;
+    }
+  };
+  console.log("GwasResultAvailanle", gwasResultsAvailable);
+
+
+  const handleGwasInitiate = async () => {
+    try {
+      const resultsAvailable = await checkGwasStatus();
+
+      if (resultsAvailable) {
+        setSnackbar({
+          open: true,
+          message: 'GWAS calculations are already completed.',
+          severity: 'info',
+        });
+        return; // Exit early if results are available
+      }
+
+      // Proceed with GWAS initiation if no results are available
+      const response = await axios.post(
+        `${URL}/api/calculate_chi_square`,
+        { uuid: uuid },
+        {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json',
+          }
+        }
+      );
+      console.log('GWAS Results:', response);
+      setSnackbar({
+        open: true,
+        message: 'GWAS Calculations successfully Initiated. Come back later for the GWAS Results',
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error('Error initiating GWAS calculations:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to initiate GWAS calculations. Please try again.',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleGwasResults = async () => {
+    if (gwasResults) {
+      setSnackbar({ open: true, message: 'Results are already available.', severity: 'info' });
+      return;
+    }
+
+    try {
+      //change the endpooint here
+      const response = await axios.get(`${URL}/api/calculate_chi_square_results/${uuid}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+
+      // console.log(response.data);
+
+      if (response.status === 200) {
+        setSnackbar({ open: true, message: 'Results are available.', severity: 'success' });
+        setGwasResults(response.data.chi_square_results); // check with backend
+        // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
+      } else {
+        setSnackbar({ open: true, message: 'Results are not available.', severity: 'info' });
+      }
+    } catch (error) {
+      console.error('Error fetching Gwas results:', error);
+      setSnackbar({ open: true, message: 'Error fetching results.', severity: 'error' });
+    }
+  };
 
   const handleQcInitiate = async () => {
     setIsQcInitiateLoading(true);
@@ -491,6 +592,7 @@ const CollaborationDetails = () => {
   //   console.log("Updated Total unique samples:", totalSamples);
   //   setFilteredResults({ userCounts, filteredData });
   // }, [threshold, qcResults]);
+
   const getUserName = (userId) => {
     if (senderInfo.id === userId) return senderInfo.name; // Check if sender matches
     const invitedUser = invitedUsers?.find(user => user.user_id === userId);
@@ -506,8 +608,8 @@ const CollaborationDetails = () => {
       userSamplesList: {}
     };
 
-    const userSamples = {}; 
-    const allUniqueSamples = new Set();   
+    const userSamples = {};
+    const allUniqueSamples = new Set();
     const selectedUniqueSamples = new Set();
 
     const filteredData = qcResults.filter(({ phi_value }) => phi_value < threshold);
@@ -527,7 +629,6 @@ const CollaborationDetails = () => {
       selectedUniqueSamples.add(sample1);
       selectedUniqueSamples.add(sample2);
     });
-
     const userSamplesList = {};
     Object.keys(userSamples).forEach(user => {
       userSamplesList[user] = Array.from(userSamples[user]);
@@ -543,20 +644,71 @@ const CollaborationDetails = () => {
     };
   };
 
+  useEffect(() => {
+    if (qcResults && threshold !== null) {
+      const { userCounts, totalSamples, selectedSamples, filteredData, userSamplesList } =
+        getGroupedSampleCounts(qcResults, threshold);
+
+      setFilteredResults({ userCounts, totalSamples, selectedSamples, filteredData });
+    }
+  }, [qcResults, threshold]); // Runs whenever `qcResults` or `threshold` updates
+
+
   const handleSliderChange = (event, newValue) => {
+    setThresholdDefined(false);
     setThreshold(newValue);
-    if (!qcResults || !Array.isArray(qcResults)) return;
-
-    const { userCounts, totalSamples, selectedSamples, filteredData, userSamplesList } = getGroupedSampleCounts(qcResults, newValue);
-
-    // console.log("Total Unique Samples in dataset:", totalSamples);
-    // console.log("Total Selected Samples (after filtering):", selectedSamples);
-    // console.log("User-wise Unique Samples:", userCounts);
-    // console.log("Unique Sample Values Per User:", userSamplesList);
-
-    setFilteredResults({ userCounts, totalSamples, selectedSamples, filteredData });
+  };
+  // utility functions for Data Export
+  const convertToCSV = (data) => {
+    const headers = ['SNP ID,Chi-Square,P-Value'];
+    const rows = data.map(snp =>
+      `"${snp.snpKey}",${snp.chi},${snp.pValue}`
+    );
+    return [...headers, ...rows].join('\n');
   };
 
+  const handleDownload = (userId, data) => {
+    try {
+      const csvContent = convertToCSV(data);
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+
+      const link = document.createElement('a');
+      const url = window.URL.createObjectURL(blob);
+      link.href = url;
+      link.download = `gwas_results_${getUserName(userId)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Download error:', error);
+      alert(`Download failed: ${error.message}`);
+    }
+  };
+
+
+
+  const gwasResultPreview = useMemo(() => {
+    if (!gwasResults) return [];
+
+    return Object.entries(gwasResults).map(([userId, userSnps]) => {
+      const sortedSnps = Object.entries(userSnps)
+        .map(([snpKey, values]) => {
+          // const snpNumber = snpKey.match(/(\d+)$/)?.[1] || 'N/A';
+          return {
+            snpKey,
+            chi: values.chi_square,
+            pValue: values.p_value
+          };
+        })
+        .sort((a, b) => b.pValue - a.pValue); // Descending by p-value
+
+      return { userId, sortedSnps };
+    });
+  }, [gwasResults]);
+
+  // console.log('Processed Data:', gwasResultPreview);
 
 
   const isQcInitiateEnabled =
@@ -564,16 +716,74 @@ const CollaborationDetails = () => {
 
   const isQcResultsEnabled = !isQcInitiateEnabled && qcResultsAvailable;
 
+  const isGwasInitiateEnabled =
+    role === 'sender' && qcResultsAvailable && thresholdDefined && !gwasResultsAvailable;
+
+  const isGwasResultsEnabled = !isGwasInitiateEnabled && gwasResultsAvailable;
+
   useEffect(() => {
     if (isQcResultsEnabled) {
       setActiveStep(1); // Automatically move to next step when QC calculation is ready
     }
-  }, [isQcResultsEnabled]);
-
+    if (isGwasResultsEnabled) {
+       setActiveStep(2); 
+      }
+  }, [isQcResultsEnabled, isGwasInitiateEnabled]);
 
   useEffect(() => {
-    checkQcStatus(); // Update QC results availability on component load
-  }, []);
+    checkQcStatus();
+    checkGwasStatus();
+  }, [qcResultsAvailable]);
+
+
+  const progressSteps = [{
+    label: 'Onboarding Collaborators',
+    description: 'Waiting for Collaborators to accept the invitation'
+  },
+  {
+    label: 'QC Calculation',
+    description: !qcResultsAvailable ? 'QC Calculation, results are not available' : 'QC results are available, waiting for initator to confirm the Threshold'
+  },
+  {
+    label: 'Upload Stat Data',
+    description: 'Upload Stat Data for GWAS experiment'
+  },
+  {
+    label: 'GWAS Calculation',
+    description: 'GWAS experiment Results available'
+  },
+  ];
+
+  const getActiveStep = () => {
+    // if all user accept the invitation it moves forward else not
+    if (!(invitedUsers.length > 0 && invitedUsers.every(user => user.status === 'accepted'))) {
+      setProgressActiveStep(0);
+      return;
+    }
+    // if QC Results not avaialble, it stays here
+    if (isQcInitiateEnabled) {
+      setProgressActiveStep(1);
+      return;
+    }
+    if ((thresholdDefined && Object.keys(gwasResults).length === 0)) {
+      setProgressActiveStep(2);
+      return;
+    }
+    if ((isGwasInitiateEnabled)) {
+      setProgressActiveStep(3);
+      return;
+    }
+
+    if ((isGwasResultsEnabled)) {
+      setProgressActiveStep(4);
+      return;
+    }// All steps completed
+  };
+  useEffect(() => {
+    getActiveStep();
+  }, [invitedUsers, qcResultsAvailable, thresholdDefined, gwasResultsAvailable, displayQcResults]);
+
+
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -585,15 +795,16 @@ const CollaborationDetails = () => {
         {/* Left Column */}
         <Grid item xs={12} md={8}>
           {/* Collaboration Details Card */}
-          <Card sx={{ height: '100%', marginBottom: '20px', border: '1px solid #ccc', borderRadius: 2, boxShadow: 'none' }}>
-            <CardContent>
+          {/* <Card sx={{ height: '100%', marginBottom: '20px', border: '1px solid #ccc', borderRadius: 2, boxShadow: 'none', p:0 }}> */}
+          <Card sx={{ height: '100%', marginBottom: '20px', p: 0, boxShadow: 'none' }}>
+            <CardContent sx={{ p: 0 }}>
               {/* Header */}
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              {/* <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6" sx={{ flexGrow: 1 }}>
                   <strong>About Collaboration</strong>
                 </Typography>
                 <Divider sx={{ flexGrow: 30, borderColor: 'black' }} />
-                {/* {role === 'sender' && !isEditing && (
+                {role === 'sender' && !isEditing && (
                   <Tooltip title="Edit Collaboration Details">
                     <IconButton
                       onClick={() => {
@@ -608,67 +819,74 @@ const CollaborationDetails = () => {
                       <EditIcon />
                     </IconButton>
                   </Tooltip>
-                )} */}
-              </Box>
-
-              {/* Collaboration Name */}
-              {role === 'sender' ? (
-                isEditing ? (
-                  <TextField
-                    label="Collaboration Name"
-                    variant="outlined"
-                    fullWidth
-                    sx={{ mt: 2 }}
-                    value={collabName}
-                    onChange={(e) => setCollabName(e.target.value)}
-                  />
-                ) : (
-                  <Typography variant="body1" sx={{ mt: 1 }}>
-                    <strong>Title:</strong> {collabName}
-                  </Typography>
-                )
-              ) : (
-                <Typography variant="body1" sx={{ mt: 1 }}>
-                  <strong>Title:</strong> {collabName}
-                </Typography>
-              )}
+                )}
+              </Box> */}
 
               {/* List of Details */}
-              <List>
-                {/* Experiments */}
-                <ListItem disableGutters>
-                  <ListItemText
-                    primary={<strong>Experiments</strong>}
-                    secondary={
-                      role === 'sender' ? (
-                        isEditing ? (
-                          <>
-                            <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
-                              <TextField
-                                variant="outlined"
-                                value={experimentName}
-                                onChange={(e) => setExperimentName(e.target.value)}
-                                size="small"
-                                sx={{ mr: 2, flexGrow: 1 }}
-                              />
-                              <Tooltip title="Add a new experiment">
-                                <Button variant="contained" color="primary" startIcon={<Add />} onClick={handleAddExperiment}>
-                                  Add
-                                </Button>
-                              </Tooltip>
-                            </Box>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 2 }}>
-                              {experimentList.map((experiment, index) => (
-                                <Chip
-                                  key={index}
-                                  label={experiment}
-                                  onDelete={() => handleDeleteExperiment(index)}
-                                  color="primary"
+              <Box sx={{ bgcolor: '#f9fdff', p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                <List sx={{ pt: 0, pb: 0 }}>
+                  {/* Collaboration Name */}
+                  {role === 'sender' ? (
+                    isEditing ? (
+                      <TextField
+                        label="Collaboration Name"
+                        variant="outlined"
+                        fullWidth
+                        sx={{ mt: 2 }}
+                        value={collabName}
+                        onChange={(e) => setCollabName(e.target.value)}
+                      />
+                    ) : (
+                      <Typography variant="body1">
+                        <strong>Title:</strong> {collabName}
+                      </Typography>
+                    )
+                  ) : (
+                    <Typography variant="body1">
+                      <strong>Title:</strong> {collabName}
+                    </Typography>
+                  )}
+                  {/* Experiments */}
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={<strong>Experiments</strong>}
+                      secondary={
+                        role === 'sender' ? (
+                          isEditing ? (
+                            <>
+                              <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+                                <TextField
                                   variant="outlined"
+                                  value={experimentName}
+                                  onChange={(e) => setExperimentName(e.target.value)}
+                                  size="small"
+                                  sx={{ mr: 2, flexGrow: 1 }}
                                 />
+                                <Tooltip title="Add a new experiment">
+                                  <Button variant="contained" color="primary" startIcon={<Add />} onClick={handleAddExperiment}>
+                                    Add
+                                  </Button>
+                                </Tooltip>
+                              </Box>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 2 }}>
+                                {experimentList.map((experiment, index) => (
+                                  <Chip
+                                    key={index}
+                                    label={experiment}
+                                    onDelete={() => handleDeleteExperiment(index)}
+                                    color="primary"
+                                    variant="outlined"
+                                  />
+                                ))}
+                              </Box>
+                            </>
+                          ) : (
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                              {experimentList.map((experiment, index) => (
+                                <Chip key={index} label={experiment} color="primary" variant="outlined" />
                               ))}
                             </Box>
-                          </>
+                          )
                         ) : (
                           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                             {experimentList.map((experiment, index) => (
@@ -676,113 +894,109 @@ const CollaborationDetails = () => {
                             ))}
                           </Box>
                         )
-                      ) : (
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                          {experimentList.map((experiment, index) => (
-                            <Chip key={index} label={experiment} color="primary" variant="outlined" />
-                          ))}
-                        </Box>
-                      )
-                    }
-                  />
-                </ListItem>
-                <Divider />
+                      }
+                    />
+                  </ListItem>
+                  <Divider />
 
-                {/* Phenotype */}
-                <ListItem disableGutters>
-                  <ListItemText
-                    primary={<Tooltip title='Phenotype from Initiator data' placement='right'><strong>Phenotype</strong></Tooltip>}
-                    secondary={
-                      role === 'sender' ? (
-                        isEditing ? (
-                          <TextField
-                            variant="outlined"
-                            fullWidth
-                            value={phenoType}
-                            onChange={(e) => setPhenotype(e.target.value)}
-                          />
+                  {/* Phenotype */}
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={<Tooltip title='Phenotype from Initiator data' placement='right'><strong>Phenotype</strong></Tooltip>}
+                      secondary={
+                        role === 'sender' ? (
+                          isEditing ? (
+                            <TextField
+                              variant="outlined"
+                              fullWidth
+                              value={phenoType}
+                              onChange={(e) => setPhenotype(e.target.value)}
+                            />
+                          ) : (
+                            <Typography variant="body2">{phenoType}</Typography>
+                          )
                         ) : (
                           <Typography variant="body2">{phenoType}</Typography>
                         )
-                      ) : (
-                        <Typography variant="body2">{phenoType}</Typography>
-                      )
-                    }
-                  />
-                </ListItem>
-                <Divider />
+                      }
+                    />
+                  </ListItem>
+                  <Divider />
 
-                <ListItem disableGutters>
-                  <ListItemText
-                    primary={<Tooltip title='Number of Samples from Initiator data' placement='right'><strong>Number of Samples</strong></Tooltip>}
-                    secondary={
-                      role === 'sender' ? (
-                        isEditing ? (
-                          <TextField
-                            variant="outlined"
-                            fullWidth
-                            value={samples}
-                            onChange={(e) => setSamples(e.target.value)}
-                          />
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={<Tooltip title='Number of Samples from Initiator data' placement='right'><strong>Number of Samples</strong></Tooltip>}
+                      secondary={
+                        role === 'sender' ? (
+                          isEditing ? (
+                            <TextField
+                              variant="outlined"
+                              fullWidth
+                              value={samples}
+                              onChange={(e) => setSamples(e.target.value)}
+                            />
+                          ) : (
+                            <Typography variant="body2">{samples}</Typography>
+                          )
                         ) : (
                           <Typography variant="body2">{samples}</Typography>
                         )
-                      ) : (
-                        <Typography variant="body2">{samples}</Typography>
-                      )
-                    }
-                  />
-                </ListItem>
-                <Divider />
-
-                <ListItem disableGutters sx={{ mt: 2, display: 'block' }}>
-                  {role !== 'receiver' && (
-                    <ListItemText
-                      sx={{ width: '100%', display: 'block' }}
-                      primary={<strong>Quality Control</strong>}
-                      secondary={
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            gap: 2,
-                            mt: 1,
-                            width: '100%', // Ensure the Box takes full width of its parent
-                          }}
-                        >
-                          {/* QC Initiate Button */}
-                          <Box sx={{ flex: 1 }}>
-                            <Tooltip
-                              title={
-                                !isQcInitiateEnabled
-                                  ? 'QC calculations already initiated or waiting for Collaborators'
-                                  : role === 'receiver'
-                                    ? 'Receiver cannot initiate QC calculations'
-                                    : 'Initiate QC Calculations'
-                              }
-                              placement="bottom"
+                      }
+                    />
+                  </ListItem>
+                </List>
+              </Box>
+              {(isQcInitiateEnabled || isQcResultsEnabled) && (
+                <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                  <List sx={{ pt: 0, pb: 0 }}>
+                    <ListItem disableGutters sx={{ display: 'block' }}>
+                      {role !== 'receiver' && (
+                        <ListItemText
+                          sx={{ width: '100%', display: 'block' }}
+                          primary={<strong>Quality Control</strong>}
+                          secondary={
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                gap: 2,
+                                mt: 1,
+                                width: '100%', // Ensure the Box takes full width of its parent
+                              }}
                             >
-                              <span>
-                                <Button
-                                  variant="contained"
-                                  color="primary"
-                                  onClick={handleQcInitiate}
-                                  disabled={!isQcInitiateEnabled || isQcInitiateLoading}
-                                  startIcon={
-                                    isQcInitiateLoading && (
-                                      <CircularProgress size={20} color="inherit" />
-                                    )
+                              {/* QC Initiate Button */}
+                              <Box sx={{ flex: 1 }}>
+                                <Tooltip
+                                  title={
+                                    !isQcInitiateEnabled
+                                      ? 'QC calculations already initiated or waiting for Collaborators'
+                                      : role === 'receiver'
+                                        ? 'Receiver cannot initiate QC calculations'
+                                        : 'Initiate QC Calculations'
                                   }
-                                  fullWidth
-                                  sx={{ borderRadius: 20 }}
+                                  placement="bottom"
                                 >
-                                  Initiate QC Calculation
-                                </Button>
-                              </span>
-                            </Tooltip>
-                          </Box>
+                                  <span>
+                                    <Button
+                                      variant="contained"
+                                      color="primary"
+                                      onClick={handleQcInitiate}
+                                      disabled={!isQcInitiateEnabled || isQcInitiateLoading}
+                                      startIcon={
+                                        isQcInitiateLoading && (
+                                          <CircularProgress size={20} color="inherit" />
+                                        )
+                                      }
+                                      fullWidth
+                                      sx={{ borderRadius: 20 }}
+                                    >
+                                      Initiate QC Calculation
+                                    </Button>
+                                  </span>
+                                </Tooltip>
+                              </Box>
 
-                          {/* QC Results Button */}
-                          {/* <Box sx={{ flex: 1 }}>
+                              {/* QC Results Button */}
+                              {/* <Box sx={{ flex: 1 }}>
                             <Tooltip
                               title={
                                 !isQcResultsEnabled
@@ -812,142 +1026,142 @@ const CollaborationDetails = () => {
                               </span>
                             </Tooltip>
                           </Box> */}
-                        </Box>
-                      }
-                    />
-                  )}
-                  {role === 'receiver' && (
-                    <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 2 }}>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          width: '100%',
-                          backgroundColor: '#E3F2E4', // Light green background for incomplete steps
-                          borderRadius: 50,
-                          height: 40,
-                          overflow: 'hidden',
-                          position: 'relative',
-                        }}
-                      >
-                        {/* Left section: Initiator Pending */}
-                        <Tooltip
-                          title={activeStep === 0 ? 'Initiator yet to do perform Quality Control Calculation' : 'Quality Control results avilable, contact Initiator for more information'}
-                          placement="top"
-                        >
-
+                            </Box>
+                          }
+                        />
+                      )}
+                      {role === 'receiver' && (
+                        <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 2 }}>
                           <Box
                             sx={{
-                              width: '50%',
-                              backgroundColor:
-                                activeStep === 0
-                                  ? 'success.main' // Active step color
-                                  : activeStep > 0
-                                    ? '#E3F2E4' // Completed step background
-                                    : 'grey.300', // Incomplete step background (grey)
                               display: 'flex',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              color: activeStep === 0 ? 'white' : activeStep > 0 ? 'success.main' : 'text.secondary',
-                              borderRadius: '50px 0px 0px 50px',
-                              transition: 'background-color 0.3s ease',
+                              width: '100%',
+                              backgroundColor: '#E3F2E4', // Light green background for incomplete steps
+                              borderRadius: 50,
+                              height: 40,
+                              overflow: 'hidden',
+                              position: 'relative',
                             }}
                           >
-                            {/* If step is completed, show checkmark icon */}
-                            {activeStep > 0 ? (
-                              <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1, fontSize: 15 }} />
-                            ) : null}
-                            <Typography variant="body2">{steps[0]}</Typography>
-                          </Box>
-                        </Tooltip>
-                        {/* Right section: Stat Data Upload */}
-                        <Tooltip
-                          title={activeStep === 1 ? 'You can now upload the Stat for GWAS Experiment' : 'Waiting for QC results'}
-                          placement="top"
-                        >
+                            {/* Left section: Initiator Pending */}
+                            <Tooltip
+                              title={activeStep === 0 ? 'Initiator yet to do perform Quality Control Calculation' : 'Quality Control results avilable, contact Initiator for more information'}
+                              placement="top"
+                            >
 
-                          <Box
-                            sx={{
-                              width: '50%',
-                              backgroundColor:
-                                activeStep === 1
-                                  ? 'success.main' // Active step color
-                                  : activeStep > 1
-                                    ? '#E3F2E4' // Completed step background
-                                    : 'grey.300', // Incomplete step background (grey)
-                              display: 'flex',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              color: activeStep === 1 || activeStep > 1 ? 'white' : 'text.secondary',
-                              borderRadius: '0px 50px 50px 0px',
-                              transition: 'background-color 0.3s ease',
-                            }}
-                          >
-                            {/* If step is completed, show checkmark icon */}
-                            {activeStep > 1 ? (
-                              <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1 }} />
-                            ) : null}
-                            <Typography variant="body2">{steps[1]}</Typography>
-                          </Box>
-                        </Tooltip>
-                      </Box>
-                    </Box>
-
-                  )}
-                </ListItem>
-                {(displayQcResults && role === 'sender') && (
-                  <>
-                    <ListItem disableGutters sx={{ mt: 2 }}>
-                      <ListItemText
-                        primary={<strong>Select Threshold Value</strong>}
-                        secondary={
-                          <Box sx={{ mt: 1 }}>
-                            <Slider
-                              value={threshold}
-                              onChange={handleSliderChange}
-                              aria-labelledby="threshold-slider"
-                              valueLabelDisplay="auto"
-                              step={0.01}
-                              min={0}
-                              max={1}
-                              sx={{
-                                color: "primary",
-                                height: 8,
-                                "& .MuiSlider-track": { border: "none" },
-                                "& .MuiSlider-thumb": {
-                                  height: 24,
-                                  width: 24,
-                                  backgroundColor: "#fff",
-                                  border: "2px solid currentColor",
-                                  "&:focus, &:hover, &.Mui-active, &.Mui-focusVisible": { boxShadow: "inherit" },
-                                  "&::before": { display: "none" },
-                                },
-                                "& .MuiSlider-valueLabel": {
-                                  lineHeight: 1.2,
-                                  fontSize: 12,
-                                  background: "unset",
-                                  padding: 0,
-                                  width: 32,
-                                  height: 32,
-                                  borderRadius: "50% 50% 50% 0",
-                                  backgroundColor: "#1876D1",
-                                  transformOrigin: "bottom left",
-                                  transform: "translate(50%, -100%) rotate(-45deg) scale(0)",
-                                  "&::before": { display: "none" },
-                                  "&.MuiSlider-valueLabelOpen": { transform: "translate(50%, -100%) rotate(-45deg) scale(1)" },
-                                  "& > *": { transform: "rotate(45deg)" },
-                                },
-                              }}
-                            />
-
-                            <Typography variant="body2" gutterBottom>
-                              Current Threshold: {threshold}
-                            </Typography>
-                            <Tooltip title={thresholdDefined ? 'Threshold previously defined' : 'Confirm your selected threshold value'} placement="bottom">
-                              <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }} disabled={thresholdDefined}>
-                                {thresholdDefined ? 'Threshold previously defined' : 'Confirm Threshold Value'}
-                              </Button>
+                              <Box
+                                sx={{
+                                  width: '50%',
+                                  backgroundColor:
+                                    activeStep === 0
+                                      ? 'success.main' // Active step color
+                                      : activeStep > 0
+                                        ? '#E3F2E4' // Completed step background
+                                        : 'grey.300', // Incomplete step background (grey)
+                                  display: 'flex',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  color: activeStep === 0 ? 'white' : activeStep > 0 ? 'success.main' : 'text.secondary',
+                                  borderRadius: '50px 0px 0px 50px',
+                                  transition: 'background-color 0.3s ease',
+                                }}
+                              >
+                                {/* If step is completed, show checkmark icon */}
+                                {activeStep > 0 ? (
+                                  <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1, fontSize: 20 }} />
+                                ) : null}
+                                <Typography variant="body2">{steps[0]}</Typography>
+                              </Box>
                             </Tooltip>
-                            {/* {matrix.length > 0 ? (
+                            {/* Right section: Stat Data Upload */}
+                            <Tooltip
+                              title={activeStep === 1 ? 'You can now upload the Stat for GWAS Experiment' : 'GWAS Results Available, contact Initiator to learn more'}
+                              placement="top"
+                            >
+
+                              <Box
+                                sx={{
+                                  width: '50%',
+                                  backgroundColor:
+                                    activeStep === 1
+                                      ? 'success.main' // Active step color
+                                      : activeStep > 1
+                                        ? '#E3F2E4' // Completed step background
+                                        : 'grey.300', // Incomplete step background (grey)
+                                  display: 'flex',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  color: activeStep === 1 ? 'white' : activeStep > 1 ? 'success.main' : 'text.secondary',
+                                  borderRadius: '0px 50px 50px 0px',
+                                  transition: 'background-color 0.3s ease',
+                                }}
+                              >
+                                {/* If step is completed, show checkmark icon */}
+                                {activeStep > 1 ? (
+                                  <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1, fontSize: 20 }} />
+                                ) : null}
+                                <Typography variant="body2">{steps[1]}</Typography>
+                              </Box>
+                            </Tooltip>
+                          </Box>
+                        </Box>
+
+                      )}
+                    </ListItem>
+                    {(displayQcResults && role === 'sender') && (
+                      <>
+                        <ListItem disableGutters sx={{ mt: 2 }}>
+                          <ListItemText
+                            primary={<strong>Select Threshold Value</strong>}
+                            secondary={
+                              <Box sx={{ mt: 1 }}>
+                                <Slider
+                                  value={threshold}
+                                  onChange={handleSliderChange}
+                                  aria-labelledby="threshold-slider"
+                                  valueLabelDisplay="auto"
+                                  step={0.01}
+                                  min={0}
+                                  max={1}
+                                  sx={{
+                                    color: "primary",
+                                    height: 8,
+                                    "& .MuiSlider-track": { border: "none" },
+                                    "& .MuiSlider-thumb": {
+                                      height: 24,
+                                      width: 24,
+                                      backgroundColor: "#fff",
+                                      border: "2px solid currentColor",
+                                      "&:focus, &:hover, &.Mui-active, &.Mui-focusVisible": { boxShadow: "inherit" },
+                                      "&::before": { display: "none" },
+                                    },
+                                    "& .MuiSlider-valueLabel": {
+                                      lineHeight: 1.2,
+                                      fontSize: 12,
+                                      background: "unset",
+                                      padding: 0,
+                                      width: 32,
+                                      height: 32,
+                                      borderRadius: "50% 50% 50% 0",
+                                      backgroundColor: "#1876D1",
+                                      transformOrigin: "bottom left",
+                                      transform: "translate(50%, -100%) rotate(-45deg) scale(0)",
+                                      "&::before": { display: "none" },
+                                      "&.MuiSlider-valueLabelOpen": { transform: "translate(50%, -100%) rotate(-45deg) scale(1)" },
+                                      "& > *": { transform: "rotate(45deg)" },
+                                    },
+                                  }}
+                                />
+
+                                <Typography variant="body2" gutterBottom>
+                                  Current Threshold: {threshold}
+                                </Typography>
+                                <Tooltip title={thresholdDefined ? 'Threshold Defined' : 'Confirm your selected threshold value'} placement="bottom">
+                                  <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }} disabled={thresholdDefined}>
+                                    {thresholdDefined ? 'Threshold Defined' : 'Confirm Threshold Value'}
+                                  </Button>
+                                </Tooltip>
+                                {/* {matrix.length > 0 ? (
                               <p>
                                 Showing {filteredResults.length} out of {matrix.length} groups
                                 below threshold ({threshold.toFixed(2)})
@@ -956,20 +1170,20 @@ const CollaborationDetails = () => {
                               <p>No data available</p>
                             )} */}
 
-                          </Box>
-                        }
-                      />
-                    </ListItem>
-                    <Divider />
+                              </Box>
+                            }
+                          />
+                        </ListItem>
+                        <Divider />
 
-                    {/* QC Results Section */}
-                    <ListItem disableGutters sx={{ mt: 2 }}>
-                      <ListItemText
-                        primary={<strong>QC Results</strong>}
-                        secondary={
-                          qcResults ? (
-                            <Box sx={{ mt: 1, maxHeight: 400 }}>
-                              {/* <TableContainer sx={{ maxHeight: 400, overflow: "auto", borderRadius: 2, marginTop: 2 }}>
+                        {/* QC Results Section */}
+                        <ListItem disableGutters sx={{ mt: 2 }}>
+                          <ListItemText
+                            primary={<strong>QC Results</strong>}
+                            secondary={
+                              qcResults ? (
+                                <Box sx={{ mt: 1, maxHeight: 400 }}>
+                                  {/* <TableContainer sx={{ maxHeight: 400, overflow: "auto", borderRadius: 2, marginTop: 2 }}>
                                 <Table stickyHeader>
                                   <TableHead>
                                     <TableRow>
@@ -995,157 +1209,198 @@ const CollaborationDetails = () => {
                                   </TableBody>
                                 </Table>
                               </TableContainer> */}
-                              <Typography variant="body2">Total Samples to be included in GWAS experiment {filteredResults?.selectedSamples || 0} out of {filteredResults?.totalSamples || 0}</Typography>
-                              <Typography variant="body2">Samples to be included per user dataset:</Typography>
-                              <ul>
-                                {filteredResults?.userCounts &&
-                                  Object.entries(filteredResults.userCounts).map(([user, count]) => (
-                                    <li key={user}>
-                                       {getUserName(user)}: {count} Samples
-                                    </li>
-                                  ))}
-                              </ul>
+                                  <Typography variant="body2">Total Samples to be included in GWAS experiment {filteredResults?.selectedSamples || 0} out of {filteredResults?.totalSamples || 0}</Typography>
+                                  <Typography variant="body2">Samples to be included per user dataset:</Typography>
+                                  <ul>
+                                    {filteredResults?.userCounts &&
+                                      Object.entries(filteredResults.userCounts).map(([user, count]) => (
+                                        <li key={user}>
+                                          {getUserName(user)}: {count} Samples
+                                        </li>
+                                      ))}
+                                  </ul>
 
 
 
-                            </Box>
+                                </Box>
 
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              No QC results to display.
-                            </Typography>
-                          )
-                        }
-                      />
-                    </ListItem>
-                    <Divider />
-                  </>
-                )}
-
-                <>
-                  <ListItem disableGutters>
-                    {thresholdDefined && (
-                      <ListItemText
-                        primary={<strong>Upload Stat</strong>}
-                        secondary={
-                          <>
-                            {/* File Upload Button */}
-                            <Tooltip placement='top' title={statData ? "File already selected" : "Upload file must be in CSV or JSON formatted."}>
-                              <span>
-                                <Button variant="outlined" component="label" fullWidth sx={{ mt: 1, borderRadius: 10, }}>
-                                  Select Stat File
-                                  <input type="file" hidden onChange={handleFileUpload} />
-                                </Button>
-                                {statData && (
-                                  <Typography variant="body2" sx={{ mt: 1 }}>
-                                    Selected: {statData.name}
-                                  </Typography>
-                                )}
-                              </span>
-                            </Tooltip>
-                            {/* Submit Button */}
-                            {statData && (
-                              <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleSubmitStat} >
-                                Submit Stat Data
-                              </Button>
-                            )}
-                          </>
-                        }
-                      />
+                              ) : (
+                                <Typography variant="body2" color="text.secondary">
+                                  No QC results to display.
+                                </Typography>
+                              )
+                            }
+                          />
+                        </ListItem>
+                        <Divider />
+                      </>
                     )}
-                  </ListItem>
 
-                </>
-                GWAS Calculation Triggers
-                <>
-
-                  {/* {(role === 'sender' && isQcResultsEnabled) && ( */}
-                  {false && (
-
-                    <ListItem disableGutters sx={{ mt: 2 }}>
-
-                      <ListItemText
-                        primary={<strong>GWAS Calculation</strong>}
-                        secondary={
-                          <Box
-                            sx={{
-                              display: 'flex',
-                              gap: 2,
-                              mt: 1,
-                              width: '100%', // Ensure the Box takes full width of its parent
-                            }}
-                          >
-                            {/* GWAS Initiate Button */}
-                            <Box sx={{ flex: 1 }}>
-                              <Tooltip
-                                title={
-                                  !isQcInitiateEnabled
-                                    ? 'Cannot perform action at the moment'
-                                    : role === 'receiver'
-                                      ? 'Receiver cannot initiate QC calculations'
-                                      : 'Initiate QC Calculations'
-                                }
-                                placement="bottom"
-                              >
-                                <span>
-                                  <Button
-                                    variant="contained"
-                                    color="primary"
-                                    onClick={handleQcInitiate}
-                                    // disabled={!isQcInitiateEnabled || isQcInitiateLoading}
-                                    startIcon={
-                                      isQcInitiateLoading && (
-                                        <CircularProgress size={20} color="inherit" />
-                                      )
-                                    }
-                                    fullWidth
-                                    sx={{ borderRadius: 20 }}
-                                  >
-                                    Initiate GWAS Calculation
+                    <>
+                      <ListItem disableGutters>
+                        {(thresholdDefined && Object.keys(gwasResults).length === 0) && (
+                          <ListItemText
+                            primary={<strong>Upload Stat</strong>}
+                            secondary={
+                              <>
+                                {/* File Upload Button */}
+                                <Tooltip placement='top' title={statData ? "File already selected" : "Upload file must be in CSV or JSON formatted."}>
+                                  <span>
+                                    <Button variant="outlined" component="label" fullWidth sx={{ mt: 1, borderRadius: 10, }}>
+                                      Select Stat File
+                                      <input type="file" hidden onChange={handleFileUpload} />
+                                    </Button>
+                                    {statData && (
+                                      <Typography variant="body2" sx={{ mt: 1 }}>
+                                        Selected: {statData.name}
+                                      </Typography>
+                                    )}
+                                  </span>
+                                </Tooltip>
+                                {/* Submit Button */}
+                                {statData && (
+                                  <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleSubmitStat} >
+                                    Submit Stat Data
                                   </Button>
-                                </span>
-                              </Tooltip>
-                            </Box>
+                                )}
+                              </>
+                            }
+                          />
+                        )}
+                      </ListItem>
+                    </>
+                  </List>
+                </Box>
+              )}
+              {(role === 'sender' && (isGwasInitiateEnabled || isGwasResultsEnabled)) && (
+                <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                  <List>
+                    <>
+                      <ListItem disableGutters>
+                        <ListItemText
+                          primary={<strong>GWAS Calculation</strong>}
+                          secondary={
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                gap: 2,
+                                mt: 1,
+                                width: '100%', // Ensure the Box takes full width of its parent
+                              }}
+                            >
+                              {/* GWAS Initiate Button */}
+                              <Box sx={{ flex: 1 }}>
+                                <Tooltip
+                                  title={
+                                    !isGwasInitiateEnabled
+                                      ? 'GWAS Calculation already Initiated or Users yet to upload Stat Data'
+                                      : role === 'receiver'
+                                        ? 'Receiver cannot initiate QC calculations'
+                                        : 'Initiate GWAS Calculations'
+                                  }
+                                  placement="bottom"
+                                >
+                                  <span>
+                                    <Button
+                                      variant="contained"
+                                      color="primary"
+                                      onClick={handleGwasInitiate}
+                                      disabled={!isGwasInitiateEnabled}
+                                      fullWidth
+                                      sx={{ borderRadius: 20 }}
+                                    >
+                                      Initiate GWAS Calculation
+                                    </Button>
+                                  </span>
+                                </Tooltip>
+                              </Box>
 
-                            {/* GWAS Results Button */}
-                            <Box sx={{ flex: 1 }}>
-                              <Tooltip
-                                title={
-                                  !isQcResultsEnabled
-                                    ? 'Results not available to preview' : role === 'receiver'
-                                      ? 'Receiver cannot initiate QC results'
-                                      : 'Get QC Results'
-                                }
-                                placement="bottom"
-                              >
-                                <span>
+                              {/* GWAS Results Button */}
+                              <Box sx={{ flex: 1 }}>
+                                <Tooltip
+                                  title={
+                                    !isGwasResultsEnabled
+                                      ? 'Results not available to preview' : role === 'receiver'
+                                        ? 'Receiver cannot initiate GWAS results'
+                                        : 'Get GWAS Results'
+                                  }
+                                  placement="bottom"
+                                >
+                                  {/* <span>
                                   <Button
                                     variant="outlined"
                                     color="secondary"
-                                    onClick={handleQcResults}
-                                    // disabled={!isQcResultsEnabled || isQcResultsLoading || role === 'receiver'}
-                                    startIcon={
-                                      isQcResultsLoading && (
-                                        <CircularProgress size={20} color="inherit" />
-                                      )
-                                    }
+                                    onClick={handleGwasResults}
+                                    // startIcon={
+                                    //   isQcResultsLoading && (
+                                    //     <CircularProgress size={20} color="inherit" />
+                                    //   )
+                                    // }
                                     fullWidth
                                     sx={{ borderRadius: 20 }}
                                   >
                                     Get Results
                                   </Button>
-                                </span>
-                              </Tooltip>
+                                </span> */}
+                                </Tooltip>
+                              </Box>
                             </Box>
+                          }
+                        />
+                      </ListItem>
+                    </>
+                    {(role === 'sender' && gwasResultsAvailable) && (
+                      <Box sx={{ mt: 4 }}>
+                        <Typography variant="body1" gutterBottom>
+                          <strong>GWAS Experiment</strong>
+                        </Typography>
+
+                        {gwasResultPreview.map((userData) => (
+                          <Box key={userData.userId} sx={{ mb: 4 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, borderRadius: 2, border: 1, borderColor: '#85b1e6', p: 1 }}>
+                              <Typography variant="title" sx={{ fontWeight: 'bold' }}>
+                                {getUserName(userData.userId)} - SNP Results
+                              </Typography>
+
+                              <Button
+                                variant="contained"
+                                size="small"
+                                color="primary"
+                                onClick={() => handleDownload(userData.userId, userData.sortedSnps)}
+                              >
+                                Download Results
+                              </Button>
+                            </Box>
+
+
+                            <TableContainer sx={{ maxHeight: 400, overflow: "auto", borderRadius: 2, border: 1, borderColor: '#cccccc', marginTop: 2 }}>
+                              <Table stickyHeader>
+                                <TableHead>
+                                  <TableRow>
+                                    <TableCell sx={{ backgroundColor: "#1876D1", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }} align='center'>SNP</TableCell>
+                                    <TableCell sx={{ backgroundColor: "#1876D1", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }} align='center'>Chi-Square</TableCell>
+                                    <TableCell sx={{ backgroundColor: "#1876D1", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }} align='center'>P-Value</TableCell>
+                                  </TableRow>
+                                </TableHead>
+
+                                <TableBody>
+                                  {userData.sortedSnps.map((snp) => (
+                                    <TableRow key={snp.snpKey}>
+                                      <TableCell align='center'>{snp.snpKey}</TableCell>
+                                      <TableCell align='center'>{snp.chi.toFixed(3)}</TableCell>
+                                      <TableCell align='center'>{snp.pValue.toFixed(3)}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </TableContainer>
                           </Box>
-                        }
-                      />
-                    </ListItem>
-                  )}
-                </>
-
-              </List>
-
+                        ))}
+                      </Box>
+                    )}
+                  </List>
+                </Box>
+              )}
               {/* Save and Cancel Buttons */}
               {/* {isEditing && (
                 <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
@@ -1186,72 +1441,97 @@ const CollaborationDetails = () => {
         </Grid>
 
         <Grid item xs={12} md={4}>
-          <Card sx={{ height: '100%', marginBottom: '20px', border: '1px solid #ccc', borderRadius: 2, boxShadow: 'none' }}>
-            <CardContent>
+          <Card sx={{ height: '100%', marginBottom: '20px', p: 0, boxShadow: 'none' }}>
+            <CardContent sx={{ p: 0 }}>
               {/* Header */}
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ flexGrow: 1 }}>
-                  <strong>Collaborators</strong>
-                </Typography>
-                <Divider sx={{ flexGrow: 30, borderColor: 'black' }} />
-              </Box>
-              <List>
-                <ListItem disableGutters>
-                  <ListItemText
-                    primary={`${senderInfo.name} (Initiator)`}
-                  />
-                </ListItem>
-                <Divider />
-
-                {invitedUsers.map((user, index) => (
-                  <ListItem key={index} disableGutters sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box sx={{ bgcolor: '#f9fdff', p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Typography variant="h6" sx={{ flexGrow: 1 }}>
+                    <strong>Collaborators</strong>
+                  </Typography>
+                  <Divider sx={{ flexGrow: 30, borderColor: 'black' }} />
+                </Box>
+                <List>
+                  <ListItem disableGutters>
                     <ListItemText
-                      primary={user.name}
-                      secondary={`Phenotype: ${user.phenotype}`}
+                      primary={`${senderInfo.name} (Initiator)`}
                     />
-                    <Box>
-                      {role === 'sender' && user.status === 'pending' ? (
-                        <Tooltip title="Withdraw this invitation" placement="top">
-                          <Button
-                            variant="outlined"
-                            color="secondary"
-                            size="small"
-                            onClick={() => handleWithdraw(user.user_id)}
-                          >
-                            Withdraw
-                          </Button>
-                        </Tooltip>
-                      ) : role === 'receiver' && user.status === 'pending' ? (
-                        <>
-                          <Tooltip title="Accept this invitation" placement="top">
-                            <Button
-                              variant="outlined"
-                              color="primary"
-                              size="small"
-                              onClick={() => handleAccept(user.user_id)}
-                              sx={{ mr: 1 }}
-                            >
-                              Accept
-                            </Button>
-                          </Tooltip>
-                          <Tooltip title="Reject this invitation" placement="top">
+                  </ListItem>
+                  <Divider />
+
+                  {invitedUsers.map((user, index) => (
+                    <ListItem key={index} disableGutters sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <ListItemText
+                        primary={user.name}
+                        secondary={`Phenotype: ${user.phenotype}`}
+                      />
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        {role === 'sender' && user.status === 'pending' ? (
+                          <Tooltip title="Withdraw this invitation" placement="top">
                             <Button
                               variant="outlined"
                               color="secondary"
                               size="small"
-                              onClick={() => handleReject(user.user_id)}
+                              onClick={() => handleWithdraw(user.user_id)}
+                              sx={{ borderRadius:10}}
                             >
-                              Reject
+                              Withdraw
                             </Button>
                           </Tooltip>
-                        </>
-                      ) : (
-                        <StatusChip status={user.status} />
-                      )}
-                    </Box>
-                  </ListItem>
-                ))}
-              </List>
+                        ) : role === 'receiver' && user.status === 'pending' ? (
+                          <>
+                            <Tooltip title="Accept this invitation" placement="top">
+                              <Button
+                                variant="contained"
+                                color="primary"
+                                size="small"
+                                startIcon={<CheckCircleIcon />}
+                                onClick={() => handleAccept(user.user_id)}
+                                sx={{ mr: 1, borderRadius:10 }}
+                              >
+                                Accept
+                              </Button>
+                            </Tooltip>
+                            <Tooltip title="Reject this invitation" placement="top">
+                              <Button
+                                variant="outlined"
+                                color="primary"
+                                size="small"
+                                onClick={() => handleReject(user.user_id)}
+                                startIcon={<CancelIcon />}
+                                sx={{ borderRadius:10}}
+                              >
+                                Reject
+                              </Button>
+                            </Tooltip>
+                          </>
+                        ) : (
+                          <StatusChip status={user.status} />
+                        )}
+                      </Box>
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+              <Box sx={{ bgcolor: '#f9fdff', p: 2, mt: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Typography variant="h6" sx={{ flexGrow: 1 }}>
+                    <strong>Collaboration Status</strong>
+                  </Typography>
+                  <Divider sx={{ flexGrow: 30, borderColor: 'black' }} />
+                </Box>
+                {/*Will have the progress bar here*/}
+                <Stepper activeStep={progressActiveStep} orientation="vertical">
+                  {progressSteps.map((step, index) => (
+                    <Step key={index}>
+                      <StepLabel>{step.label}</StepLabel>
+                      <StepContent>{step.description}</StepContent>
+                    </Step>
+                  ))}
+                </Stepper>
+
+
+              </Box>
             </CardContent>
           </Card>
         </Grid>

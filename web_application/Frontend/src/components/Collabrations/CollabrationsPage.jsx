@@ -114,7 +114,7 @@ const UserInvitation = ({
                     size="small"
                     startIcon={<CheckCircleIcon />}
                     onClick={handleAccept}
-                    sx={{ mr: 1 }}
+                    sx={{ mr: 1, borderRadius: 10 }}
                   >
                     Accept
                   </Button>
@@ -122,10 +122,11 @@ const UserInvitation = ({
                 <Tooltip title="Reject Invitation">
                   <Button
                     variant="outlined"
-                    color="secondary"
+                    color="primary"
                     size="small"
                     startIcon={<CancelIcon />}
                     onClick={handleReject}
+                    sx={{ borderRadius:10}}
                   >
                     Reject
                   </Button>
@@ -141,6 +142,7 @@ const UserInvitation = ({
                     size="small"
                     startIcon={<CancelPresentationIcon />}
                     onClick={handleRevoke}
+                    sx={{ borderRadius:10}}
                   >
                     Revoke
                   </Button>
@@ -148,11 +150,12 @@ const UserInvitation = ({
               ) : (
                 <Tooltip title="Withdraw Invitation">
                   <Button
-                    variant="outlined"
+                    variant="contained"
                     color="primary"
                     size="small"
                     startIcon={<UndoIcon />}
                     onClick={handleWithdraw}
+                    sx={{ borderRadius:10}}
                   >
                     Withdraw
                   </Button>
@@ -444,12 +447,13 @@ const CollaborationsPage = () => {
                   <Grid item xs={12} sm={4} sx={{ textAlign: { xs: 'left', sm: 'right' }, mt: { xs: 2, sm: 0 } }}>
                     {invitation.sender_id === currentUserId && (
                       <Button
-                        variant="contained"
+                        variant="outlined"
                         color="primary"
                         size="small"
-                        onClick={() => navigate('/session')}
+                        sx={{borderRadius:10}}
+                        onClick={() => navigate(`/collaboration/${invitation.collab_uuid}`)}
                       >
-                        Create a Session
+                        View Details
                       </Button>
                     )}
                     {invitation.receiver_id === currentUserId && (
@@ -459,6 +463,7 @@ const CollaborationsPage = () => {
                           color="secondary"
                           size="small"
                           startIcon={<CancelPresentationIcon />}
+                          sx={{borderRadius:10}}
                           onClick={() =>
                             handleRevoke(invitation._id, invitation.receiver_id, invitation.sender_id, invitation.collab_uuid)
                           }

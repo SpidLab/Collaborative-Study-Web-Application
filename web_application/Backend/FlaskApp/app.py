@@ -26,6 +26,7 @@ from fuzzywuzzy import process
 import uuid
 from stats import calc_chi_pvalue
 # from stats import calc_chi_pvalue
+# from stats import calc_chi_pvalue
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -1857,9 +1858,25 @@ def calculate_chi_square():
         print(f"Unexpected error: {str(e)}")
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
+@app.route('/api/calculate_chi_square_results/<collab_uuid>', methods=['GET'])
+def get_chi_square_results(collab_uuid):
+    try:
+        # Fetch the chi-square results from the database (after calculation)
+        collaboration = db['collaborations'].find_one({"uuid": collab_uuid})
+        chi_square_results = collaboration.get('chi_square_results', {})
+
+        if not chi_square_results:
+            return jsonify({"error": "Chi-square results not found"}), 404
+
+        return jsonify({"chi_square_results": chi_square_results}), 200
+
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
 
-#----- Below code is older version ------
 #----- Below code is older version ------
