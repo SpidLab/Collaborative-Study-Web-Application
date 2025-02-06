@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, IconButton, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel
+  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel
 } from '@mui/material';
-import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon } from '@mui/icons-material';
+import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, DownloadRounded } from '@mui/icons-material';
 import axios from 'axios';
 import URL from '../../config';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -47,6 +47,7 @@ const CollaborationDetails = () => {
   const [originalExperimentList, setOriginalExperimentList] = useState([]);
   const [originalPhenoType, setOriginalPhenoType] = useState('');
   const [originalSamples, setOriginalSamples] = useState('');
+  const [selectedTab, setSelectedTab] = useState(0);
 
   const determineUserRole = (data) => {
     if (data.is_sender) {
@@ -84,9 +85,10 @@ const CollaborationDetails = () => {
         });
       }
     };
-
     fetchCollaborationDetails();
   }, [uuid]);
+
+  console.log('Invited Users', invitedUsers);
 
   const handleAddExperiment = () => {
     if (experimentName.trim()) {
@@ -708,7 +710,7 @@ const CollaborationDetails = () => {
     });
   }, [gwasResults]);
 
-  // console.log('Processed Data:', gwasResultPreview);
+  console.log('Gwas Results:', gwasResults);
 
 
   const isQcInitiateEnabled =
@@ -726,8 +728,8 @@ const CollaborationDetails = () => {
       setActiveStep(1); // Automatically move to next step when QC calculation is ready
     }
     if (isGwasResultsEnabled) {
-       setActiveStep(2); 
-      }
+      setActiveStep(2);
+    }
   }, [isQcResultsEnabled, isGwasInitiateEnabled]);
 
   useEffect(() => {
@@ -783,7 +785,8 @@ const CollaborationDetails = () => {
     getActiveStep();
   }, [invitedUsers, qcResultsAvailable, thresholdDefined, gwasResultsAvailable, displayQcResults]);
 
-
+  // Experiments Tabs:
+  const placeholderTabs = ['Chi-Square', 'Odd-Even Ratio', 'GWAS Experiment 3', 'GWAS Experiment 4', 'GWAS Experiment 5'];
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -953,7 +956,7 @@ const CollaborationDetails = () => {
                       {role !== 'receiver' && (
                         <ListItemText
                           sx={{ width: '100%', display: 'block' }}
-                          primary={<strong>Quality Control</strong>}
+                          primary={<Typography variant="h6" fontWeight="bold">Quality Control</Typography>}
                           secondary={
                             <Box
                               sx={{
@@ -1272,61 +1275,62 @@ const CollaborationDetails = () => {
                   </List>
                 </Box>
               )}
-              {(role === 'sender' && (isGwasInitiateEnabled || isGwasResultsEnabled)) && (
+              {((isGwasInitiateEnabled || isGwasResultsEnabled)) && (
                 <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                   <List>
                     <>
-                      <ListItem disableGutters>
-                        <ListItemText
-                          primary={<strong>GWAS Calculation</strong>}
-                          secondary={
-                            <Box
-                              sx={{
-                                display: 'flex',
-                                gap: 2,
-                                mt: 1,
-                                width: '100%', // Ensure the Box takes full width of its parent
-                              }}
-                            >
-                              {/* GWAS Initiate Button */}
-                              <Box sx={{ flex: 1 }}>
-                                <Tooltip
-                                  title={
-                                    !isGwasInitiateEnabled
-                                      ? 'GWAS Calculation already Initiated or Users yet to upload Stat Data'
-                                      : role === 'receiver'
-                                        ? 'Receiver cannot initiate QC calculations'
-                                        : 'Initiate GWAS Calculations'
-                                  }
-                                  placement="bottom"
-                                >
-                                  <span>
-                                    <Button
-                                      variant="contained"
-                                      color="primary"
-                                      onClick={handleGwasInitiate}
-                                      disabled={!isGwasInitiateEnabled}
-                                      fullWidth
-                                      sx={{ borderRadius: 20 }}
-                                    >
-                                      Initiate GWAS Calculation
-                                    </Button>
-                                  </span>
-                                </Tooltip>
-                              </Box>
+                      {role === 'sender' && (
+                        <ListItem disableGutters>
+                          <ListItemText
+                            primary={<Typography variant="h6" fontWeight="bold">GWAS Experiment</Typography>}
+                            secondary={
+                              <Box
+                                sx={{
+                                  display: 'flex',
+                                  gap: 2,
+                                  mt: 1,
+                                  width: '100%', // Ensure the Box takes full width of its parent
+                                }}
+                              >
+                                {/* GWAS Initiate Button */}
+                                <Box sx={{ flex: 1 }}>
+                                  <Tooltip
+                                    title={
+                                      !isGwasInitiateEnabled
+                                        ? 'GWAS Calculation already Initiated or Users yet to upload Stat Data'
+                                        : role === 'receiver'
+                                          ? 'Receiver cannot initiate QC calculations'
+                                          : 'Initiate GWAS Calculations'
+                                    }
+                                    placement="bottom"
+                                  >
+                                    <span>
+                                      <Button
+                                        variant="contained"
+                                        color="primary"
+                                        onClick={handleGwasInitiate}
+                                        disabled={!isGwasInitiateEnabled}
+                                        fullWidth
+                                        sx={{ borderRadius: 20 }}
+                                      >
+                                        Initiate GWAS Calculation
+                                      </Button>
+                                    </span>
+                                  </Tooltip>
+                                </Box>
 
-                              {/* GWAS Results Button */}
-                              <Box sx={{ flex: 1 }}>
-                                <Tooltip
-                                  title={
-                                    !isGwasResultsEnabled
-                                      ? 'Results not available to preview' : role === 'receiver'
-                                        ? 'Receiver cannot initiate GWAS results'
-                                        : 'Get GWAS Results'
-                                  }
-                                  placement="bottom"
-                                >
-                                  {/* <span>
+                                {/* GWAS Results Button */}
+                                <Box sx={{ flex: 1 }}>
+                                  <Tooltip
+                                    title={
+                                      !isGwasResultsEnabled
+                                        ? 'Results not available to preview' : role === 'receiver'
+                                          ? 'Receiver cannot initiate GWAS results'
+                                          : 'Get GWAS Results'
+                                    }
+                                    placement="bottom"
+                                  >
+                                    {/* <span>
                                   <Button
                                     variant="outlined"
                                     color="secondary"
@@ -1342,20 +1346,33 @@ const CollaborationDetails = () => {
                                     Get Results
                                   </Button>
                                 </span> */}
-                                </Tooltip>
+                                  </Tooltip>
+                                </Box>
                               </Box>
-                            </Box>
-                          }
-                        />
-                      </ListItem>
+                            }
+                          />
+                        </ListItem>
+                      )}
                     </>
-                    {(role === 'sender' && gwasResultsAvailable) && (
-                      <Box sx={{ mt: 4 }}>
-                        <Typography variant="body1" gutterBottom>
+                    {(gwasResultsAvailable) && (
+                      <Box sx={{ mt: 2 }}>
+                        {/* <Typography variant="h6" gutterBottom>
                           <strong>GWAS Experiment</strong>
-                        </Typography>
+                        </Typography> */}
 
-                        {gwasResultPreview.map((userData) => (
+                        <Tabs
+                          value={selectedTab}
+                          onChange={(event, newValue) => setSelectedTab(newValue)}
+                          variant="scrollable"
+                          scrollButtons="auto"
+                          sx={{ borderBottom: 1, bgcolor: '#cee7ff91', border: 1, borderRadius: 3, borderColor: '#85b1e6' }}
+                        >
+                          {placeholderTabs.map((tab, index) => (
+                            <Tab key={index} label={tab} />
+                          ))}
+                        </Tabs>
+
+                        {/* {gwasResultPreview.map((userData) => (
                           <Box key={userData.userId} sx={{ mb: 4 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, borderRadius: 2, border: 1, borderColor: '#85b1e6', p: 1 }}>
                               <Typography variant="title" sx={{ fontWeight: 'bold' }}>
@@ -1366,6 +1383,8 @@ const CollaborationDetails = () => {
                                 variant="contained"
                                 size="small"
                                 color="primary"
+                                sx={{ borderRadius: 10, fontSize: 10 }}
+                                endIcon={<DownloadRounded />}
                                 onClick={() => handleDownload(userData.userId, userData.sortedSnps)}
                               >
                                 Download Results
@@ -1395,7 +1414,56 @@ const CollaborationDetails = () => {
                               </Table>
                             </TableContainer>
                           </Box>
-                        ))}
+                        ))} */}
+
+                        <Box sx={{ pt: 2 }}>
+                          {selectedTab === 0 && (
+                            <Box>
+                              {gwasResultPreview.map((userData) => (
+                                <Box key={userData.userId} sx={{ mb: 4 }}>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, borderBottom: 1, borderColor: 'divider', p: 1 }}>
+                                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                                      {getUserName(userData.userId)} - SNP Results
+                                    </Typography>
+                                    <Button
+                                      variant="contained"
+                                      size="small"
+                                      color="primary"
+                                      sx={{ borderRadius: 10, fontSize: 10 }}
+                                      endIcon={<DownloadRounded />}
+                                      onClick={() => handleDownload(userData.userId, userData.sortedSnps)}
+                                    >
+                                      Download Results
+                                    </Button>
+                                  </Box>
+                                  <TableContainer sx={{ maxHeight: 400, overflow: 'auto', borderRadius: 2, border: 1, borderColor: '#cccccc', mt: 2 }}>
+                                    <Table stickyHeader>
+                                      <TableHead>
+                                        <TableRow>
+                                          <TableCell align="center" sx={{ backgroundColor: '#1876D1', color: 'white', fontWeight: 'bold' }}>SNP</TableCell>
+                                          <TableCell align="center" sx={{ backgroundColor: '#1876D1', color: 'white', fontWeight: 'bold' }}>Chi-Square</TableCell>
+                                          <TableCell align="center" sx={{ backgroundColor: '#1876D1', color: 'white', fontWeight: 'bold' }}>P-Value</TableCell>
+                                        </TableRow>
+                                      </TableHead>
+                                      <TableBody>
+                                        {userData.sortedSnps.map((snp) => (
+                                          <TableRow key={snp.snpKey}>
+                                            <TableCell align="center">{snp.snpKey}</TableCell>
+                                            <TableCell align="center">{snp.chi.toFixed(3)}</TableCell>
+                                            <TableCell align="center">{snp.pValue.toFixed(3)}</TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </TableContainer>
+                                </Box>
+                              ))}
+                            </Box>
+                          )}
+                          {selectedTab !== 0 && (
+                            <Typography variant="body1">Placeholder content for {placeholderTabs[selectedTab]}</Typography>
+                          )}
+                        </Box>
                       </Box>
                     )}
                   </List>
@@ -1473,7 +1541,7 @@ const CollaborationDetails = () => {
                               color="secondary"
                               size="small"
                               onClick={() => handleWithdraw(user.user_id)}
-                              sx={{ borderRadius:10}}
+                              sx={{ borderRadius: 10 }}
                             >
                               Withdraw
                             </Button>
@@ -1487,7 +1555,7 @@ const CollaborationDetails = () => {
                                 size="small"
                                 startIcon={<CheckCircleIcon />}
                                 onClick={() => handleAccept(user.user_id)}
-                                sx={{ mr: 1, borderRadius:10 }}
+                                sx={{ mr: 1, borderRadius: 10 }}
                               >
                                 Accept
                               </Button>
@@ -1499,7 +1567,7 @@ const CollaborationDetails = () => {
                                 size="small"
                                 onClick={() => handleReject(user.user_id)}
                                 startIcon={<CancelIcon />}
-                                sx={{ borderRadius:10}}
+                                sx={{ borderRadius: 10 }}
                               >
                                 Reject
                               </Button>
