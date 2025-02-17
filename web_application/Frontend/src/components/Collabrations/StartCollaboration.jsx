@@ -4,9 +4,12 @@ import {
   Snackbar, Alert, CircularProgress, Grid, Card, CardContent, Chip, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import { Add, Delete, Upload, Info } from '@mui/icons-material';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SearchPage from '../Search/Search';
 import axios from 'axios';
 import URL from '../../config';
+import InfoIcon from '@mui/icons-material/Info';
+
 
 //we need to make changes here
 const StartCollaboration = () => {
@@ -17,6 +20,8 @@ const StartCollaboration = () => {
   // const [phenoType, setPhenotype] = useState('');
   // const [samples, setSamples] = useState('');
   // const [rawData, setRawData] = useState(null);
+  const [csvFile, setCSVFile] = useState(null);
+  const [fileName, setFileName] = useState('');
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -85,6 +90,22 @@ const StartCollaboration = () => {
   //   setData(e.target.files[0]);
   // };
 
+  const handleFileChange = (event) => {
+    const file = event.target.files[0];
+    setCSVFile(file);
+    setFileName(file.name);
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files[0];
+    setCSVFile(file);
+    setFileName(file.name);
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+  };
   const handleCreateCollaboration = async () => {
     // console.log("Selected Users:", selectedUsers);
 
@@ -129,8 +150,19 @@ const StartCollaboration = () => {
           }
         })
       );
-
       await Promise.all(invitationPromises);
+      if (csvFile) {
+        const formData = new FormData();
+        formData.append('file', csvFile);
+        formData.append('dataset_id', selectedDataset.dataset_id);
+
+        await axios.post(`${URL}/api/update_qc_data`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+      }
 
       setSnackbar({
         open: true,
@@ -143,6 +175,8 @@ const StartCollaboration = () => {
       // setPhenotype('');
       // setSamples('');
       // setRawData(null);
+      setCSVFile(null);
+      setFileName('');
       setSelectedUsers([]);
       setSelectedDataset('');
       setExperimentOptions([]);
@@ -213,6 +247,10 @@ const StartCollaboration = () => {
             sx={{ mt: 2 }}
             value={collabName}
             onChange={(e) => setCollabName(e.target.value)}
+            InputProps={{
+              sx: {borderRadius: 2, borderColor: 'divider'}
+            }}
+            
           />
 
           <Box mt={2}>
@@ -246,8 +284,11 @@ const StartCollaboration = () => {
             </Box>*/}
             <FormControl fullWidth sx={{ mb: 1 }}>
               <InputLabel id="experiment-select-label" >Experiment Name</InputLabel>
-              <Select onChange={handleAddExperiment} labelId="experiment-select-label"
-                label="Experiment Name">
+              <Select 
+                onChange={handleAddExperiment} 
+                labelId="experiment-select-label"
+                label="Experiment Name"
+                sx={{borderRadius: 2, borderColor: 'divider'}}>
                 {experimentOptions.map((option, index) => (
                   <MenuItem key={index} value={option}>
                     {option}
@@ -323,6 +364,7 @@ const StartCollaboration = () => {
                   value={selectedDataset}
                   label="Select Dataset"
                   onChange={handleDatasetChange}
+                  sx={{ borderRadius: 2, borderColor: 'divider' }}
                 >
                   {datasets.length > 0 ? (
                     datasets.map((dataset, index) => (
@@ -354,7 +396,47 @@ const StartCollaboration = () => {
                   Upload the Noisy version of Dataset
                 </Typography>
               </Box> */}
+              <Box
+                sx={{
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 2,
+                  padding: 2,
+                  textAlign: 'center',
+                  marginTop: 2,
+                  backgroundColor: '#fafafa',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.3s',
+                  '&:hover': {
+                    backgroundColor: '#f0f0f0',
+                  },
+                }}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+              >
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                  id="csv-file-input"
+                />
+                <label htmlFor="csv-file-input" style={{ display: 'block', cursor: 'pointer' }}>
+                  <IconButton color="primary" component="span">
+                    <CloudUploadIcon sx={{ fontSize: 40 }} />
+                  </IconButton>
+                  <Typography variant="body1">
+                    {fileName || 'Upload Dataset File'}
+                  </Typography>
+                </label>
+              </Box>
             </Box>
+            {(csvFile && selectedDataset) && (
+              <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
+                <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                <Typography variant="body2">{fileName} will be linked to {selectedDataset.phenotype} for this collaboration.</Typography>
+              </Box>
+            )}
           </CardContent>
         </Card>
 
@@ -418,7 +500,7 @@ const StartCollaboration = () => {
           size="large"
           onClick={handleCreateCollaboration}
           disabled={isLoading}
-          sx={{ py: 2, fontSize: '1.1rem' }}
+          sx={{ py: 2, fontSize: '1.1rem', borderRadius: 100 }}
         >
           {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Create Collaboration'}
         </Button>

@@ -1,13 +1,16 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel
+  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material';
 import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, DownloadRounded } from '@mui/icons-material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import axios from 'axios';
 import URL from '../../config';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+import ArrowRightIcon from '@mui/icons-material/ArrowRight';
+import statSampleImage from "../../assets/Stat Sample.png";
+import InfoIcon from '@mui/icons-material/Info';
 
 
 
@@ -20,7 +23,7 @@ const CollaborationDetails = () => {
   const [experimentList, setExperimentList] = useState([]);
   const [phenoType, setPhenotype] = useState('');
   const [samples, setSamples] = useState('');
-  const [statData, setStatData] = useState(null);
+  const [file, setFile] = useState(null);
   const [role, setRole] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -40,6 +43,7 @@ const CollaborationDetails = () => {
   const [filteredResults, setFilteredResults] = useState([]);
   const [gwasResults, setGwasResults] = useState([]);
   const [gwasResultsAvailable, setGwasResultsAvailable] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const prevFilteredResultsRef = useRef();
   // const [matrix, setMatrix] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
@@ -88,7 +92,7 @@ const CollaborationDetails = () => {
     fetchCollaborationDetails();
   }, [uuid]);
 
-  console.log('Invited Users', invitedUsers);
+  console.log('QC Data:', collaboration);
 
   const handleAddExperiment = () => {
     if (experimentName.trim()) {
@@ -105,17 +109,17 @@ const CollaborationDetails = () => {
   };
   // Stat upload handlers
   const handleFileUpload = (e) => {
-    setStatData(e.target.files[0]);
+    setFile(e.target.files[0]);
   };
 
   const handleSubmitStat = async () => {
-    if (!statData) {
+    if (!file) {
       setSnackbar({ open: true, message: "No File Selected.", severity: 'error' });
       return;
     }
 
     const collabStatData = new FormData();
-    collabStatData.append('file', statData);
+    collabStatData.append('file', file);
     collabStatData.append('uuid', uuid);
 
     try {
@@ -134,7 +138,7 @@ const CollaborationDetails = () => {
         severity: 'success'
       });
 
-      setStatData('');
+      setFile('');
 
     } catch (error) {
       console.error('Error uploading file:', error);
@@ -145,6 +149,50 @@ const CollaborationDetails = () => {
       });
     }
   };
+  //Updates DB with the user's dataset file
+  const handleQcUpload = async () => {
+    if (!file) {
+      setSnackbar({ open: true, message: "No File Selected.", severity: 'error' });
+      return;
+    }
+
+    const qcData = new FormData();
+    qcData.append('file', file);
+    qcData.append('dataset_id', collaboration.invited_users[0].user_dataset_id);
+
+    try {
+      //waiting for the endpoint to be created
+      const response = await axios.post(`${URL}/api/update_qc_data`, qcData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+
+      if(response === 200){
+        checkQcStatus();
+      }
+
+      // console.log('File uploaded successfully:', response.data);
+      setSnackbar({
+        open: true,
+        message: 'QC Data uploaded Successfully!',
+        severity: 'success'
+      });
+
+      setFile('');
+
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to upload QC Data, please try again.',
+        severity: 'error'
+      });
+    }
+  };
+
+
   // const handleUpdateCollaboration = async () => {
   //   setIsLoading(true);
   //   try {
@@ -155,7 +203,7 @@ const CollaborationDetails = () => {
   //       samples: samples,
   //     };
   //     if (role === 'receiver') {
-  //       updateData.stat_data = statData ? statData.name : null;
+  //       updateData.stat_data = file ? file.name : null;
   //     }
   //     await axios.put(`${URL}/api/collaboration/${uuid}`, updateData, {
   //       headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
@@ -303,10 +351,11 @@ const CollaborationDetails = () => {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
       });
-      // console.log("results", response);
+      console.log("QC results", response);
       if (response.status === 200) {
         setQcResultsAvailable(true);
         setdisplayQcResults(true);
+        setIsQcInitiateLoading(false);
         setQcResults(response.data.full_qc_results); // Store QC results
         // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
         if (response.data.threshold !== null) {
@@ -328,11 +377,9 @@ const CollaborationDetails = () => {
       setQcResultsAvailable(false); // Default to unavailable in case of error
       return false;
     }
-    // finally {
-    //   setIsQcResultsLoading(false);
-    //   setdisplayQcResults(true);
-    // }
   };
+  // to optimise
+  // console.log("QC Loading", isQcInitiateLoading);
 
   const checkGwasStatus = async () => {
     try {
@@ -357,7 +404,7 @@ const CollaborationDetails = () => {
       return false;
     }
   };
-  console.log("GwasResultAvailanle", gwasResultsAvailable);
+  // console.log("Gwas Available", gwasResultsAvailable);
 
 
   const handleGwasInitiate = async () => {
@@ -600,6 +647,14 @@ const CollaborationDetails = () => {
     const invitedUser = invitedUsers?.find(user => user.user_id === userId);
     return invitedUser ? invitedUser.name : "Unknown User"; // Return name if found
   };
+  // Function below will only work for single collaborator and initiator (might need change for multi user)
+  const getCurrentUserId = (role) => {
+    return role === 'sender'
+      ? senderInfo.id
+      : invitedUsers?.[0]?.user_id || null;
+  };
+  const currentUserId = getCurrentUserId(role);
+
 
   const getGroupedSampleCounts = (qcResults, threshold) => {
     if (!qcResults || !Array.isArray(qcResults)) return {
@@ -645,15 +700,38 @@ const CollaborationDetails = () => {
       userSamplesList
     };
   };
-
   useEffect(() => {
     if (qcResults && threshold !== null) {
       const { userCounts, totalSamples, selectedSamples, filteredData, userSamplesList } =
         getGroupedSampleCounts(qcResults, threshold);
 
-      setFilteredResults({ userCounts, totalSamples, selectedSamples, filteredData });
+      setFilteredResults({ userCounts, totalSamples, selectedSamples, filteredData, userSamplesList });
     }
-  }, [qcResults, threshold]); // Runs whenever `qcResults` or `threshold` updates
+  }, [qcResults, threshold]);
+
+  const downloadSamples = (samples, filename) => {
+    try {
+      if (!samples || samples.length === 0) {
+        alert("No samples to download.");
+        return;
+      }
+
+      const jsonContent = JSON.stringify(samples, null, 2);
+      const blob = new Blob([jsonContent], { type: "application/json" });
+
+      const link = document.createElement("a");
+      const url = window.URL.createObjectURL(blob);
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error("Download error:", error);
+      alert(`Download failed: ${error.message}`);
+    }
+  };
 
 
   const handleSliderChange = (event, newValue) => {
@@ -690,7 +768,6 @@ const CollaborationDetails = () => {
   };
 
 
-
   const gwasResultPreview = useMemo(() => {
     if (!gwasResults) return [];
 
@@ -710,11 +787,13 @@ const CollaborationDetails = () => {
     });
   }, [gwasResults]);
 
-  console.log('Gwas Results:', gwasResults);
+  // console.log('Gwas Results:', gwasResults);
 
 
-  const isQcInitiateEnabled =
-    role === 'sender' && invitedUsers.length > 0 && invitedUsers.every(user => user.status === 'accepted' && !qcResultsAvailable);
+  const userAcceptedInvitation = invitedUsers.length > 0 && invitedUsers.every(user => user.status === 'accepted');
+  // check if sender and all user accepted the invitation and invited user has uploaded the dataset and qc results are not available
+  const isQcInitiateEnabled = role === 'sender' && userAcceptedInvitation && collaboration.user_dataset_uploaded && !qcResultsAvailable;
+
 
   const isQcResultsEnabled = !isQcInitiateEnabled && qcResultsAvailable;
 
@@ -737,10 +816,12 @@ const CollaborationDetails = () => {
     checkGwasStatus();
   }, [qcResultsAvailable]);
 
+  console.log("QC Results", isQcResultsEnabled);
+
 
   const progressSteps = [{
     label: 'Onboarding Collaborators',
-    description: 'Waiting for Collaborators to accept the invitation'
+    description: 'Waiting for Collaborators to accept the invitation and upload QC data'
   },
   {
     label: 'QC Calculation',
@@ -758,7 +839,7 @@ const CollaborationDetails = () => {
 
   const getActiveStep = () => {
     // if all user accept the invitation it moves forward else not
-    if (!(invitedUsers.length > 0 && invitedUsers.every(user => user.status === 'accepted'))) {
+    if (!(userAcceptedInvitation && collaboration.user_dataset_uploaded)) {
       setProgressActiveStep(0);
       return;
     }
@@ -808,7 +889,7 @@ const CollaborationDetails = () => {
                 </Typography>
                 <Divider sx={{ flexGrow: 30, borderColor: 'black' }} />
                 {role === 'sender' && !isEditing && (
-                  <Tooltip title="Edit Collaboration Details">
+                  <Tooltip arrow title="Edit Collaboration Details">
                     <IconButton
                       onClick={() => {
                         // Store original values before editing
@@ -865,7 +946,7 @@ const CollaborationDetails = () => {
                                   size="small"
                                   sx={{ mr: 2, flexGrow: 1 }}
                                 />
-                                <Tooltip title="Add a new experiment">
+                                <Tooltip arrow title="Add a new experiment">
                                   <Button variant="contained" color="primary" startIcon={<Add />} onClick={handleAddExperiment}>
                                     Add
                                   </Button>
@@ -905,7 +986,7 @@ const CollaborationDetails = () => {
                   {/* Phenotype */}
                   <ListItem disableGutters>
                     <ListItemText
-                      primary={<Tooltip title='Phenotype from Initiator data' placement='right'><strong>Phenotype</strong></Tooltip>}
+                      primary={<Tooltip arrow title='Phenotype from Initiator data' placement='right'><strong>Phenotype</strong></Tooltip>}
                       secondary={
                         role === 'sender' ? (
                           isEditing ? (
@@ -928,7 +1009,7 @@ const CollaborationDetails = () => {
 
                   <ListItem disableGutters>
                     <ListItemText
-                      primary={<Tooltip title='Number of Samples from Initiator data' placement='right'><strong>Number of Samples</strong></Tooltip>}
+                      primary={<Tooltip arrow title='Number of Samples from Initiator data' placement='right'><strong>Number of Samples</strong></Tooltip>}
                       secondary={
                         role === 'sender' ? (
                           isEditing ? (
@@ -949,6 +1030,48 @@ const CollaborationDetails = () => {
                   </ListItem>
                 </List>
               </Box>
+              {/*Quality Control Data Upload - After user accepts the request, upload the data for their phenotype*/}
+              {(userAcceptedInvitation && !collaboration.user_dataset_uploaded) && role === 'receiver' && (
+                <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                  <List>
+                    <ListItem sx={{ width: '100%', display: 'block' }}>
+                      <ListItemText
+                        primary={<Typography variant="h6" fontWeight="bold">Upload Quality Control Data</Typography>}
+                      />
+                      <Box>
+                        <Tooltip placement="bottom" arrow title={file ? "File already selected" : "Upload file must be in CSV or JSON format."}>
+                          <span>
+                            <Button
+                              variant="outlined"
+                              component="label"
+                              fullWidth
+                              sx={{ mt: 1, borderRadius: 10 }}
+                            >
+                              {file ? file.name : "Select QC Data"}
+                              <input type="file" hidden onChange={handleFileUpload} />
+                            </Button>
+                          </span>
+                        </Tooltip>
+
+
+                        {/* Submit Button */}
+                        {file && (
+                          <>
+                            <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleQcUpload}>
+                              Upload QC Data
+                            </Button>
+                            <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
+                              <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                              <Typography variant="body2">{file.name} will be linked to {invitedUsers[0].phenotype} for this collaboration.</Typography>
+                            </Box>
+                          </>
+                        )}
+
+                      </Box>
+                    </ListItem>
+                  </List>
+                </Box>
+              )}
               {(isQcInitiateEnabled || isQcResultsEnabled) && (
                 <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                   <List sx={{ pt: 0, pb: 0 }}>
@@ -966,10 +1089,52 @@ const CollaborationDetails = () => {
                                 width: '100%', // Ensure the Box takes full width of its parent
                               }}
                             >
-                              {/* QC Initiate Button */}
+
                               <Box sx={{ flex: 1 }}>
                                 <Tooltip
-                                  title={
+                                  arrow title={
+                                    isQcInitiateLoading || isQcResultsEnabled
+                                      ? isQcResultsEnabled
+                                        ? 'Get QC Results'
+                                        : 'Results not available to preview'
+                                      : !isQcInitiateEnabled
+                                        ? 'QC calculations already initiated or waiting for Collaborators'
+                                        : role === 'receiver'
+                                          ? 'Receiver cannot initiate QC calculations'
+                                          : 'Initiate QC Calculations'
+                                  }
+                                  placement="bottom"
+                                >
+                                  <span>
+                                    <Button
+                                      variant={isQcResultsEnabled ? "outlined" : "contained"}
+                                      color={isQcResultsEnabled ? "secondary" : "primary"}
+                                      onClick={isQcResultsEnabled ? handleQcResults : handleQcInitiate}
+                                      disabled={
+                                        (isQcInitiateLoading && !isQcResultsEnabled) ||
+                                        (!isQcInitiateEnabled && !isQcResultsEnabled) ||
+                                        isQcResultsLoading ||
+                                        role === 'receiver'
+                                      }
+                                      startIcon={
+                                        (isQcInitiateLoading || isQcResultsLoading) && (
+                                          <CircularProgress size={20} color="inherit" />
+                                        )
+                                      }
+                                      fullWidth
+                                      sx={{ borderRadius: 20 }}
+                                    >
+                                      {isQcResultsEnabled ? "Get QC Results" : "Initiate QC Calculation"}
+                                    </Button>
+                                  </span>
+                                </Tooltip>
+                              </Box>
+
+
+                              {/* QC Initiate Button */}
+                              {/* <Box sx={{ flex: 1 }}>
+                                <Tooltip
+                                  arrow title={
                                     !isQcInitiateEnabled
                                       ? 'QC calculations already initiated or waiting for Collaborators'
                                       : role === 'receiver'
@@ -996,39 +1161,39 @@ const CollaborationDetails = () => {
                                     </Button>
                                   </span>
                                 </Tooltip>
-                              </Box>
+                              </Box> */}
 
                               {/* QC Results Button */}
                               {/* <Box sx={{ flex: 1 }}>
-                            <Tooltip
-                              title={
-                                !isQcResultsEnabled
-                                  ? 'Results not available to preview'
-                                  : role === 'receiver'
-                                    ? 'Receiver cannot initiate QC results'
-                                    : 'Get QC Results'
-                              }
-                              placement="bottom"
-                            >
-                              <span>
-                                <Button
-                                  variant="outlined"
-                                  color="secondary"
-                                  onClick={handleQcResults}
-                                  disabled={!isQcResultsEnabled || isQcResultsLoading || role === 'receiver'}
-                                  startIcon={
-                                    isQcResultsLoading && (
-                                      <CircularProgress size={20} color="inherit" />
-                                    )
+                                <Tooltip
+                                  arrow title={
+                                    !isQcResultsEnabled
+                                      ? 'Results not available to preview'
+                                      : role === 'receiver'
+                                        ? 'Receiver cannot initiate QC results'
+                                        : 'Get QC Results'
                                   }
-                                  fullWidth
-                                  sx={{ borderRadius: 20 }}
+                                  placement="bottom"
                                 >
-                                  QC Results
-                                </Button>
-                              </span>
-                            </Tooltip>
-                          </Box> */}
+                                  <span>
+                                    <Button
+                                      variant="outlined"
+                                      color="secondary"
+                                      onClick={handleQcResults}
+                                      disabled={!isQcResultsEnabled || isQcResultsLoading || role === 'receiver'}
+                                      startIcon={
+                                        isQcResultsLoading && (
+                                          <CircularProgress size={20} color="inherit" />
+                                        )
+                                      }
+                                      fullWidth
+                                      sx={{ borderRadius: 20 }}
+                                    >
+                                      QC Results
+                                    </Button>
+                                  </span>
+                                </Tooltip>
+                              </Box> */}
                             </Box>
                           }
                         />
@@ -1048,7 +1213,7 @@ const CollaborationDetails = () => {
                           >
                             {/* Left section: Initiator Pending */}
                             <Tooltip
-                              title={activeStep === 0 ? 'Initiator yet to do perform Quality Control Calculation' : 'Quality Control results avilable, contact Initiator for more information'}
+                              arrow title={activeStep === 0 ? 'Initiator yet to do perform Quality Control Calculation' : 'Quality Control results avilable, contact Initiator for more information'}
                               placement="top"
                             >
 
@@ -1078,7 +1243,7 @@ const CollaborationDetails = () => {
                             </Tooltip>
                             {/* Right section: Stat Data Upload */}
                             <Tooltip
-                              title={activeStep === 1 ? 'You can now upload the Stat for GWAS Experiment' : 'GWAS Results Available, contact Initiator to learn more'}
+                              arrow title={activeStep === 1 ? 'You can now upload the Stat for GWAS Experiment' : 'GWAS Results Available, contact Initiator to learn more'}
                               placement="top"
                             >
 
@@ -1111,60 +1276,62 @@ const CollaborationDetails = () => {
 
                       )}
                     </ListItem>
-                    {(displayQcResults && role === 'sender') && (
+                    {(displayQcResults && (role === 'sender' || role === 'receiver')) && (
                       <>
-                        <ListItem disableGutters sx={{ mt: 2 }}>
-                          <ListItemText
-                            primary={<strong>Select Threshold Value</strong>}
-                            secondary={
-                              <Box sx={{ mt: 1 }}>
-                                <Slider
-                                  value={threshold}
-                                  onChange={handleSliderChange}
-                                  aria-labelledby="threshold-slider"
-                                  valueLabelDisplay="auto"
-                                  step={0.01}
-                                  min={0}
-                                  max={1}
-                                  sx={{
-                                    color: "primary",
-                                    height: 8,
-                                    "& .MuiSlider-track": { border: "none" },
-                                    "& .MuiSlider-thumb": {
-                                      height: 24,
-                                      width: 24,
-                                      backgroundColor: "#fff",
-                                      border: "2px solid currentColor",
-                                      "&:focus, &:hover, &.Mui-active, &.Mui-focusVisible": { boxShadow: "inherit" },
-                                      "&::before": { display: "none" },
-                                    },
-                                    "& .MuiSlider-valueLabel": {
-                                      lineHeight: 1.2,
-                                      fontSize: 12,
-                                      background: "unset",
-                                      padding: 0,
-                                      width: 32,
-                                      height: 32,
-                                      borderRadius: "50% 50% 50% 0",
-                                      backgroundColor: "#1876D1",
-                                      transformOrigin: "bottom left",
-                                      transform: "translate(50%, -100%) rotate(-45deg) scale(0)",
-                                      "&::before": { display: "none" },
-                                      "&.MuiSlider-valueLabelOpen": { transform: "translate(50%, -100%) rotate(-45deg) scale(1)" },
-                                      "& > *": { transform: "rotate(45deg)" },
-                                    },
-                                  }}
-                                />
+                        {role === 'sender' && (
+                          <>
+                            <ListItem disableGutters sx={{ mt: 2 }}>
+                              <ListItemText
+                                primary={<strong>Select Threshold Value</strong>}
+                                secondary={
+                                  <Box sx={{ mt: 1 }}>
+                                    <Slider
+                                      value={threshold}
+                                      onChange={handleSliderChange}
+                                      aria-labelledby="threshold-slider"
+                                      valueLabelDisplay="auto"
+                                      step={0.01}
+                                      min={0}
+                                      max={1}
+                                      sx={{
+                                        color: "primary",
+                                        height: 8,
+                                        "& .MuiSlider-track": { border: "none" },
+                                        "& .MuiSlider-thumb": {
+                                          height: 24,
+                                          width: 24,
+                                          backgroundColor: "#fff",
+                                          border: "2px solid currentColor",
+                                          "&:focus, &:hover, &.Mui-active, &.Mui-focusVisible": { boxShadow: "inherit" },
+                                          "&::before": { display: "none" },
+                                        },
+                                        "& .MuiSlider-valueLabel": {
+                                          lineHeight: 1.2,
+                                          fontSize: 12,
+                                          background: "unset",
+                                          padding: 0,
+                                          width: 32,
+                                          height: 32,
+                                          borderRadius: "50% 50% 50% 0",
+                                          backgroundColor: "#1876D1",
+                                          transformOrigin: "bottom left",
+                                          transform: "translate(50%, -100%) rotate(-45deg) scale(0)",
+                                          "&::before": { display: "none" },
+                                          "&.MuiSlider-valueLabelOpen": { transform: "translate(50%, -100%) rotate(-45deg) scale(1)" },
+                                          "& > *": { transform: "rotate(45deg)" },
+                                        },
+                                      }}
+                                    />
 
-                                <Typography variant="body2" gutterBottom>
-                                  Current Threshold: {threshold}
-                                </Typography>
-                                <Tooltip title={thresholdDefined ? 'Threshold Defined' : 'Confirm your selected threshold value'} placement="bottom">
-                                  <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }} disabled={thresholdDefined}>
-                                    {thresholdDefined ? 'Threshold Defined' : 'Confirm Threshold Value'}
-                                  </Button>
-                                </Tooltip>
-                                {/* {matrix.length > 0 ? (
+                                    <Typography variant="body2" gutterBottom>
+                                      Current Threshold: {threshold}
+                                    </Typography>
+                                    <Tooltip arrow title={thresholdDefined ? 'Threshold Defined' : 'Confirm your selected threshold value'} placement="bottom">
+                                      <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }} disabled={thresholdDefined}>
+                                        {thresholdDefined ? 'Threshold Defined' : 'Confirm Threshold Value'}
+                                      </Button>
+                                    </Tooltip>
+                                    {/* {matrix.length > 0 ? (
                               <p>
                                 Showing {filteredResults.length} out of {matrix.length} groups
                                 below threshold ({threshold.toFixed(2)})
@@ -1173,59 +1340,246 @@ const CollaborationDetails = () => {
                               <p>No data available</p>
                             )} */}
 
-                              </Box>
-                            }
-                          />
-                        </ListItem>
-                        <Divider />
+                                  </Box>
+                                }
+                              />
+                            </ListItem>
+                            <Divider />
+                          </>
+                        )}
 
                         {/* QC Results Section */}
+                        {thresholdDefined && (
                         <ListItem disableGutters sx={{ mt: 2 }}>
                           <ListItemText
                             primary={<strong>QC Results</strong>}
                             secondary={
                               qcResults ? (
-                                <Box sx={{ mt: 1, maxHeight: 400 }}>
-                                  {/* <TableContainer sx={{ maxHeight: 400, overflow: "auto", borderRadius: 2, marginTop: 2 }}>
-                                <Table stickyHeader>
-                                  <TableHead>
-                                    <TableRow>
-                                      <TableCell sx={{ backgroundColor: "#1876D1", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
-                                        Phi Value
-                                      </TableCell>
-                                      <TableCell sx={{ backgroundColor: "#1876D1", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
-                                        Sample 1
-                                      </TableCell>
-                                      <TableCell sx={{ backgroundColor: "#1876D1", color: "white", fontWeight: "bold", position: "sticky", top: 0, zIndex: 1 }}>
-                                        Sample 2
-                                      </TableCell>
-                                    </TableRow>
-                                  </TableHead>
-                                  <TableBody>
-                                    {filteredResults?.filteredData && filteredResults.filteredData.map(({ phi_value, sample1, sample2 }, index) => (
-                                      <TableRow key={index}>
-                                        <TableCell>{phi_value}</TableCell>
-                                        <TableCell>{sample1}</TableCell>
-                                        <TableCell>{sample2}</TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </TableContainer> */}
-                                  <Typography variant="body2">Total Samples to be included in GWAS experiment {filteredResults?.selectedSamples || 0} out of {filteredResults?.totalSamples || 0}</Typography>
-                                  <Typography variant="body2">Samples to be included per user dataset:</Typography>
-                                  <ul>
-                                    {filteredResults?.userCounts &&
-                                      Object.entries(filteredResults.userCounts).map(([user, count]) => (
-                                        <li key={user}>
-                                          {getUserName(user)}: {count} Samples
-                                        </li>
-                                      ))}
-                                  </ul>
+                                <Box>
+                                  {/* Total Samples Typography Block */}
+                                  <Box sx={{ mb: 2 }}>
+                                    <Typography variant="body1" fontWeight={500} color="text.primary">
+                                      Total Samples to be included in GWAS experiment:{" "}
+                                      <Box component="span" fontWeight={700} color="primary.main">
+                                        {filteredResults?.selectedSamples || 0}
+                                      </Box>{" "}
+                                      out of{" "}
+                                      <Box component="span" fontWeight={700} color="text.secondary">
+                                        {filteredResults?.totalSamples || 0}
+                                      </Box>
+                                    </Typography>
+                                  </Box>
 
+                                  {/* Accordions */}
+                                  {Object.entries(filteredResults?.userCounts || {}).map(([userId, count]) => (
+                                    <Tooltip
+                                      key={userId}
+                                      arrow title={userId !== currentUserId ? "You are not allowed to view this collection due to privacy reasons." : ""}
+                                    >
+                                      <Box>
+                                        <Accordion
+                                          disabled={userId !== currentUserId}
+                                          expanded={userId === currentUserId ? undefined : false}
+                                          elevation={0}
+                                          sx={{
+                                            mb: '10px !important',
+                                            border: '1px solid',
+                                            borderRadius: '12px !important',
+                                            borderColor: 'divider',
+                                            overflow: 'hidden',
+                                            '&:before': { display: 'none' },
+                                            '&.Mui-disabled': {
+                                              opacity: 1,
+                                              pointerEvents: 'none',
+                                              bgcolor: 'action.hover',
+                                              borderRadius: 3
+                                            },
+                                            '&.Mui-expanded': {
+                                              transition: 'all 0.3s ease',
+                                            }
+                                          }}
+                                        >
+                                          <AccordionSummary
+                                            expandIcon={userId === currentUserId ? null : <ExpandMoreIcon />}
+                                            sx={{
+                                              px: 3,
+                                              borderRadius: 3,
+                                              '&:hover': { bgcolor: 'action.hover' },
+                                              // Disable rotation only for current user
+                                              ...(userId === currentUserId && {
+                                                '& .MuiAccordionSummary-expandIconWrapper': {
+                                                  transform: 'none !important',
+                                                },
+                                                '& .Mui-expanded .MuiAccordionSummary-expandIconWrapper': {
+                                                  transform: 'none !important',
+                                                },
+                                              }),
+                                            }}
+                                          >
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
+                                              {/* Existing avatar and user info */}
+                                              <Box
+                                                sx={{
+                                                  width: 32,
+                                                  height: 32,
+                                                  borderRadius: '50%',
+                                                  bgcolor: userId === currentUserId ? 'primary.main' : 'grey.300',
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                  border: '1px solid',
+                                                  borderColor: userId === currentUserId ? 'primary.dark' : 'divider',
+                                                  '&::after': userId !== currentUserId ? undefined : {
+                                                    content: '""',
+                                                    width: 14,
+                                                    height: 14,
+                                                    borderRadius: '50%',
+                                                    bgcolor: 'white'
+                                                  }
+                                                }}
+                                              />
+                                              <Box sx={{ flexGrow: 1 }}>
+                                                <Typography
+                                                  variant="subtitle1"
+                                                  fontWeight={600}
+                                                  color={userId === currentUserId ? 'primary.main' : 'text.primary'}
+                                                  sx={{ letterSpacing: '-0.02em' }}
+                                                >
+                                                  {getUserName(userId)}
+                                                </Typography>
+                                                <Typography
+                                                  variant="body2"
+                                                  color={userId === currentUserId ? 'primary.dark' : 'text.secondary'}
+                                                  sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
+                                                >
+                                                  <Box component="span" fontWeight={500}>{count} Samples</Box>
+                                                  <Box component="span" sx={{ color: 'text.disabled' }}>•</Box>
+                                                  <Box component="span">{userId === currentUserId ? 'Your collection' : 'Collaborator'}</Box>
+                                                </Typography>
+                                              </Box>
 
+                                              {userId === currentUserId && (
+                                                <Box
+                                                  sx={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    color: 'text.secondary',
+                                                    px: 1,
+                                                    border: 1,
+                                                    borderRadius: 3,
+                                                    borderColor: 'primary.main',
+                                                    '&:hover': { color: 'text.primary' }
+                                                  }}
+                                                >
+                                                  <Typography variant="subtitle2" fontWeight={500}>
+                                                    Preview
+                                                  </Typography>
+                                                </Box>
+                                              )}
+                                            </Box>
+                                          </AccordionSummary>
 
+                                          <AccordionDetails sx={{ pt: 2, pb: 2, px: 3, position: 'relative', height: '400px', }}>
+                                            {filteredResults.userSamplesList[userId] && filteredResults.userSamplesList[userId].length > 0 ? (
+                                              <Box sx={{
+                                                height: 'calc(100% - 72px)',
+                                                overflowY: 'auto',
+                                                pr: 1,
+                                              }}>
+                                                {filteredResults.userSamplesList[userId].map((sample, index) => (
+                                                  <Box
+                                                    key={index}
+                                                    sx={{
+                                                      display: 'flex',
+                                                      alignItems: 'center',
+                                                      py: 1.5,
+                                                      px: 2,
+                                                      bgcolor: 'background.paper',
+                                                      mb: 1,
+                                                      borderRadius: 3,
+                                                      border: '1px solid',
+                                                      borderColor: 'divider',
+                                                    }}
+                                                  >
+                                                    <Box sx={{
+                                                      width: 8,
+                                                      height: 8,
+                                                      borderRadius: '50%',
+                                                      bgcolor: 'primary.main',
+                                                      mr: 2,
+                                                      flexShrink: 0
+                                                    }} />
+                                                    <Typography
+                                                      variant="body1"
+                                                      fontFamily="monospace"
+                                                      sx={{
+                                                        fontWeight: 500,
+                                                        color: 'text.primary',
+                                                        wordBreak: 'break-word'
+                                                      }}
+                                                    >
+                                                      {sample}
+                                                    </Typography>
+                                                  </Box>
+                                                ))}
+                                              </Box>
+                                            ) : (
+                                              <Typography
+                                                variant="body2"
+                                                color="text.secondary"
+                                                sx={{
+                                                  py: 2,
+                                                  px: 3,
+                                                  bgcolor: 'action.hover',
+                                                  borderRadius: 3,
+                                                  border: '1px solid',
+                                                  borderColor: 'divider',
+                                                  textAlign: 'center'
+                                                }}
+                                              >
+                                                No contributions recorded yet
+                                              </Typography>
+                                            )}
+
+                                            {userId === currentUserId && filteredResults.userSamplesList[userId]?.length > 0 && (
+                                              <Box sx={{
+                                                position: 'absolute',
+                                                bottom: 0,
+                                                left: 0,
+                                                right: 0,
+                                                px: 3,
+                                                pb: 2,
+                                                bgcolor: 'background.paper'
+                                              }}>
+                                                <Button
+                                                  fullWidth
+                                                  variant="contained"
+                                                  size="large"
+                                                  onClick={() => downloadSamples(filteredResults.userSamplesList[userId], 'my_samples.json')}
+                                                  endIcon={<DownloadRounded sx={{ fontSize: '1.25rem' }} />}
+                                                  sx={{
+                                                    py: 1.5,
+                                                    borderRadius: 10,
+                                                    boxShadow: 0,
+                                                    bgcolor: 'primary.main',
+                                                    fontSize: 15,
+                                                    '&:hover': {
+                                                      bgcolor: 'primary.dark'
+                                                    }
+                                                  }}
+                                                >
+                                                  Export Your Samples
+                                                </Button>
+                                              </Box>
+                                            )}
+                                          </AccordionDetails>
+                                        </Accordion>
+                                      </Box>
+                                    </Tooltip>
+                                  ))}
                                 </Box>
+
+
 
                               ) : (
                                 <Typography variant="body2" color="text.secondary">
@@ -1235,39 +1589,255 @@ const CollaborationDetails = () => {
                             }
                           />
                         </ListItem>
-                        <Divider />
+                        )}
                       </>
                     )}
-
                     <>
                       <ListItem disableGutters>
                         {(thresholdDefined && Object.keys(gwasResults).length === 0) && (
                           <ListItemText
-                            primary={<strong>Upload Stat</strong>}
+                            primary={
+                              <Box sx={{
+                                position: 'relative',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                width: '100%',
+                                pr: 4 // Right padding for icon spacing
+                              }}>
+                                <strong>Upload Stat</strong>
+                                <Accordion
+                                  expanded={expanded}
+                                  onChange={() => setExpanded(!expanded)}
+                                  sx={{
+                                    position: 'absolute',
+                                    right: 0,
+                                    m: 0,
+                                    bgcolor: 'transparent',
+                                    boxShadow: 'none',
+                                    '&:before': { display: 'none' },
+                                    '&.Mui-expanded': {
+                                      margin: '0 !important',
+                                      position: 'absolute',
+                                      zIndex: 1
+                                    }
+                                  }}
+                                >
+                                  <AccordionSummary
+                                    expandIcon={
+                                      <Tooltip title="Show Instructions" arrow placement='left'>
+                                        <Box display={'inline-flex'} sx={{gap: 1, border: '1px solid', p:0.5, borderRadius:10,bgcolor:'#e8f1fa', borderColor:'primary.main', alignItems: 'center', alignContent: 'left'}}>
+                                        <Typography variant='subtitle2' sx={{pl: 0.5, color:'primary.main'}}>
+                                          Learn More
+                                        </Typography>
+                                        <InfoIcon sx={{
+                                          fontSize: 20,
+                                          color: 'primary.main',
+                                          '&:hover': {
+                                            color: 'primary.dark',
+                                            cursor: 'pointer'
+                                          }
+                                        }} />
+                                        </Box>
+                                      </Tooltip>
+                                    }
+                                    sx={{
+                                      p: 0,
+                                      minHeight: 'auto !important',
+                                      '& .MuiAccordionSummary-expandIconWrapper': {
+                                        transform: 'none !important'
+                                      },
+                                      '&.Mui-expanded .MuiAccordionSummary-expandIconWrapper': {
+                                        transform: 'none !important'
+                                      },
+                                      '& .MuiAccordionSummary-content': {
+                                        m: '0 !important',
+                                        flexGrow: 0
+                                      },
+                                      '&.Mui-expanded': {
+                                        minHeight: 'auto !important'
+                                      }
+                                    }}
+
+                                  />
+                                </Accordion>
+                              </Box>
+                            }
                             secondary={
                               <>
-                                {/* File Upload Button */}
-                                <Tooltip placement='top' title={statData ? "File already selected" : "Upload file must be in CSV or JSON formatted."}>
+                                <AccordionDetails sx={{
+                                  p: expanded ? 2 : 0,
+                                  bgcolor: '#e8f1fa',
+                                  borderRadius: '11px',
+                                  mt: 1,
+                                  display: expanded ? 'block' : 'none'
+                                }}>
+                                  <Typography variant="body1" sx={{
+                                    pb: 0.5,
+                                    mb: 1,
+                                    color: 'text.primary',
+                                    borderBottom: '1px solid',
+                                    borderColor: 'divider',
+                                    fontWeight: 500
+                                  }}>
+                                    Instructions
+                                  </Typography>
+                                  <Box sx={{ position: 'relative' }}>
+                                    {/* Download Section */}
+                                    <Box sx={{ mb: 3, display: 'flex', position: 'relative' }}>
+                                      <ArrowRightIcon sx={{
+                                        fontSize: '20px',
+                                        color: 'primary.main',
+                                        flexShrink: 0,
+                                        mt: '2px'
+                                      }} />
+                                      <Box sx={{ flexGrow: 1, ml: 1.5 }}>
+                                        <Typography variant="body2" sx={{
+                                          mb: 1.5,
+                                          color: 'text.primary',
+                                          fontWeight: 500
+                                        }}>
+                                          Download Script to Generate Stat Data
+                                        </Typography>
+                                        <Button
+                                          variant="outlined"
+                                          size="small"
+                                          endIcon={<DownloadRounded />}
+                                          sx={{
+                                            borderRadius: 10,
+                                            boxShadow: 'none',
+                                            textTransform: 'none',
+                                            '&:hover': { boxShadow: 'none' }
+                                          }}
+                                        >
+                                          Python Script
+                                        </Button>
+                                        <Typography variant="caption" color="text.secondary" sx={{
+                                          display: 'block',
+                                          mt: 1,
+                                          fontSize: '0.75rem'
+                                        }}>
+                                          Python script for standardized SNP data formatting
+                                        </Typography>
+                                      </Box>
+                                    </Box>
+
+                                    {/* Format Section */}
+                                    <Box sx={{ mb: 3, display: 'flex' }}>
+                                      <ArrowRightIcon sx={{
+                                        fontSize: '20px',
+                                        color: 'primary.main',
+                                        flexShrink: 0,
+                                        mt: '2px'
+                                      }} />
+                                      <Box sx={{ flexGrow: 1, ml: 1.5 }}>
+                                        <Typography variant="body2" sx={{
+                                          mb: 1.5,
+                                          color: 'text.primary',
+                                          fontWeight: 500
+                                        }}>
+                                          Accepted Formats
+                                        </Typography>
+                                        <Box sx={{ display: 'flex', gap: 1.5 }}>
+                                          <Chip
+                                            label="CSV"
+                                            color="primary"
+                                            size="small"
+                                            variant="outlined"
+                                            icon={<CheckCircleIcon fontSize="small" />}
+                                            sx={{ borderRadius: 3, fontWeight: 500 }}
+                                          />
+                                          <Chip
+                                            label="JSON"
+                                            color="primary"
+                                            size="small"
+                                            variant="outlined"
+                                            icon={<CheckCircleIcon fontSize="small" />}
+                                            sx={{ borderRadius: 3, fontWeight: 500 }}
+                                          />
+                                        </Box>
+                                      </Box>
+                                    </Box>
+
+                                    {/* Example Preview */}
+                                    <Box sx={{ mb: 2, display: 'flex' }}>
+                                      <ArrowRightIcon sx={{
+                                        fontSize: '20px',
+                                        color: 'primary.main',
+                                        flexShrink: 0,
+                                        mt: '2px'
+                                      }} />
+                                      <Box sx={{ flexGrow: 1, ml: 1.5 }}>
+                                        <Typography variant="body2" sx={{
+                                          mb: 1.5,
+                                          color: 'text.primary',
+                                          fontWeight: 500
+                                        }}>
+                                          File Structure Example
+                                        </Typography>
+                                        <Box sx={{
+                                          border: '1px solid',
+                                          borderColor: 'primary.main',
+                                          borderRadius: 2,
+                                          overflow: 'hidden',
+                                          bgcolor: 'common.white',
+                                          maxWidth: 400
+                                        }}>
+                                          <img
+                                            src={statSampleImage}
+                                            alt="File format example"
+                                            style={{
+                                              width: '100%',
+                                              objectFit: 'contain',
+                                              padding: 5,
+                                              borderRadius: 10
+                                            }}
+                                          />
+                                        </Box>
+                                        <Typography variant="caption" color="text.secondary" sx={{
+                                          display: 'block',
+                                          mt: 1,
+                                          fontSize: '0.75rem'
+                                        }}>
+                                          Required columns: snp_ids, case, controls
+                                        </Typography>
+                                      </Box>
+                                    </Box>
+                                  </Box>
+                                </AccordionDetails>
+
+                                {/* File Upload Section */}
+                                <Tooltip placement="bottom" arrow title={file ? "File already selected" : "Upload file must be in CSV or JSON format."}>
                                   <span>
-                                    <Button variant="outlined" component="label" fullWidth sx={{ mt: 1, borderRadius: 10, }}>
-                                      Select Stat File
+                                    <Button
+                                      variant="outlined"
+                                      component="label"
+                                      fullWidth
+                                      sx={{ mt: 1, borderRadius: 10 }}
+                                    >
+                                      {file ? file.name : "Select Stat Data"}
                                       <input type="file" hidden onChange={handleFileUpload} />
                                     </Button>
-                                    {statData && (
-                                      <Typography variant="body2" sx={{ mt: 1 }}>
-                                        Selected: {statData.name}
-                                      </Typography>
-                                    )}
                                   </span>
                                 </Tooltip>
+
                                 {/* Submit Button */}
-                                {statData && (
-                                  <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleSubmitStat} >
+                                {file && (
+                                  <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleSubmitStat}>
                                     Submit Stat Data
                                   </Button>
                                 )}
                               </>
                             }
+                            sx={{
+                              '& .MuiListItemText-primary': {
+                                width: '100%',
+                                display: 'block'
+                              },
+                              '& .MuiListItemText-secondary': {
+                                width: '100%'
+                              }
+                            }}
                           />
                         )}
                       </ListItem>
@@ -1275,7 +1845,7 @@ const CollaborationDetails = () => {
                   </List>
                 </Box>
               )}
-              {((isGwasInitiateEnabled || isGwasResultsEnabled)) && (
+              {(isGwasInitiateEnabled || isGwasResultsEnabled) && (
                 <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                   <List>
                     <>
@@ -1292,10 +1862,41 @@ const CollaborationDetails = () => {
                                   width: '100%', // Ensure the Box takes full width of its parent
                                 }}
                               >
-                                {/* GWAS Initiate Button */}
                                 <Box sx={{ flex: 1 }}>
                                   <Tooltip
-                                    title={
+                                    arrow title={
+                                      isGwasResultsEnabled
+                                        ? 'Get GWAS Results'
+                                        : !isGwasInitiateEnabled
+                                          ? 'GWAS Calculation already Initiated or Users yet to upload Stat Data'
+                                          : role === 'receiver'
+                                            ? 'Receiver cannot initiate GWAS calculations'
+                                            : 'Initiate GWAS Calculations'
+                                    }
+                                    placement="bottom"
+                                  >
+                                    <span>
+                                      <Button
+                                        variant={isGwasResultsEnabled ? "outlined" : "contained"}
+                                        color={isGwasResultsEnabled ? "secondary" : "primary"}
+                                        onClick={isGwasResultsEnabled ? handleGwasResults : handleGwasInitiate}
+                                        disabled={
+                                          (!isGwasInitiateEnabled && !isGwasResultsEnabled) ||
+                                          role === 'receiver'
+                                        }
+                                        fullWidth
+                                        sx={{ borderRadius: 20 }}
+                                      >
+                                        {isGwasResultsEnabled ? "Get GWAS Results" : "Initiate GWAS Calculation"}
+                                      </Button>
+                                    </span>
+                                  </Tooltip>
+                                </Box>
+
+                                {/* GWAS Initiate Button */}
+                                {/* <Box sx={{ flex: 1 }}>
+                                  <Tooltip
+                                    arrow title={
                                       !isGwasInitiateEnabled
                                         ? 'GWAS Calculation already Initiated or Users yet to upload Stat Data'
                                         : role === 'receiver'
@@ -1317,12 +1918,12 @@ const CollaborationDetails = () => {
                                       </Button>
                                     </span>
                                   </Tooltip>
-                                </Box>
+                                </Box> */}
 
                                 {/* GWAS Results Button */}
-                                <Box sx={{ flex: 1 }}>
+                                {/* <Box sx={{ flex: 1 }}>
                                   <Tooltip
-                                    title={
+                                    arrow title={
                                       !isGwasResultsEnabled
                                         ? 'Results not available to preview' : role === 'receiver'
                                           ? 'Receiver cannot initiate GWAS results'
@@ -1330,7 +1931,7 @@ const CollaborationDetails = () => {
                                     }
                                     placement="bottom"
                                   >
-                                    {/* <span>
+                                    <span>
                                   <Button
                                     variant="outlined"
                                     color="secondary"
@@ -1345,9 +1946,9 @@ const CollaborationDetails = () => {
                                   >
                                     Get Results
                                   </Button>
-                                </span> */}
+                                </span>
                                   </Tooltip>
-                                </Box>
+                                </Box> */}
                               </Box>
                             }
                           />
@@ -1355,7 +1956,7 @@ const CollaborationDetails = () => {
                       )}
                     </>
                     {(gwasResultsAvailable) && (
-                      <Box sx={{ mt: 2 }}>
+                      <Box>
                         {/* <Typography variant="h6" gutterBottom>
                           <strong>GWAS Experiment</strong>
                         </Typography> */}
@@ -1365,7 +1966,7 @@ const CollaborationDetails = () => {
                           onChange={(event, newValue) => setSelectedTab(newValue)}
                           variant="scrollable"
                           scrollButtons="auto"
-                          sx={{ borderBottom: 1, bgcolor: '#cee7ff91', border: 1, borderRadius: 3, borderColor: '#85b1e6' }}
+                          sx={{ borderBottom: 1, bgcolor: 'white', border: 1, borderRadius: 3, borderColor: '#85b1e6' }}
                         >
                           {placeholderTabs.map((tab, index) => (
                             <Tab key={index} label={tab} />
@@ -1429,20 +2030,20 @@ const CollaborationDetails = () => {
                                       variant="contained"
                                       size="small"
                                       color="primary"
-                                      sx={{ borderRadius: 10, fontSize: 10 }}
+                                      sx={{ borderRadius: 10, fontSize: 10, boxShadow: 0 }}
                                       endIcon={<DownloadRounded />}
                                       onClick={() => handleDownload(userData.userId, userData.sortedSnps)}
                                     >
                                       Download Results
                                     </Button>
                                   </Box>
-                                  <TableContainer sx={{ maxHeight: 400, overflow: 'auto', borderRadius: 2, border: 1, borderColor: '#cccccc', mt: 2 }}>
+                                  <TableContainer sx={{ maxHeight: 400, overflow: 'auto', borderRadius: 2, border: 1, borderColor: '#a3c8ed', mt: 2 }}>
                                     <Table stickyHeader>
                                       <TableHead>
                                         <TableRow>
-                                          <TableCell align="center" sx={{ backgroundColor: '#1876D1', color: 'white', fontWeight: 'bold' }}>SNP</TableCell>
-                                          <TableCell align="center" sx={{ backgroundColor: '#1876D1', color: 'white', fontWeight: 'bold' }}>Chi-Square</TableCell>
-                                          <TableCell align="center" sx={{ backgroundColor: '#1876D1', color: 'white', fontWeight: 'bold' }}>P-Value</TableCell>
+                                          <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>SNP</TableCell>
+                                          <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>Chi-Square</TableCell>
+                                          <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>P-Value</TableCell>
                                         </TableRow>
                                       </TableHead>
                                       <TableBody>
@@ -1472,7 +2073,7 @@ const CollaborationDetails = () => {
               {/* Save and Cancel Buttons */}
               {/* {isEditing && (
                 <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-                  <Tooltip title="Save your changes" placement="top">
+                  <Tooltip arrow title="Save your changes" placement="top">
                     <Button
                       variant="contained"
                       color="primary"
@@ -1484,7 +2085,7 @@ const CollaborationDetails = () => {
                       {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Save'}
                     </Button>
                   </Tooltip>
-                  <Tooltip title="Cancel editing" placement="top">
+                  <Tooltip arrow title="Cancel editing" placement="top">
                     <Button
                       variant="outlined"
                       color="secondary"
@@ -1535,7 +2136,7 @@ const CollaborationDetails = () => {
                       />
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
                         {role === 'sender' && user.status === 'pending' ? (
-                          <Tooltip title="Withdraw this invitation" placement="top">
+                          <Tooltip arrow title="Withdraw this invitation" placement="top">
                             <Button
                               variant="outlined"
                               color="secondary"
@@ -1548,7 +2149,7 @@ const CollaborationDetails = () => {
                           </Tooltip>
                         ) : role === 'receiver' && user.status === 'pending' ? (
                           <>
-                            <Tooltip title="Accept this invitation" placement="top">
+                            <Tooltip arrow title="Accept this invitation" placement="top">
                               <Button
                                 variant="contained"
                                 color="primary"
@@ -1560,7 +2161,7 @@ const CollaborationDetails = () => {
                                 Accept
                               </Button>
                             </Tooltip>
-                            <Tooltip title="Reject this invitation" placement="top">
+                            <Tooltip arrow title="Reject this invitation" placement="top">
                               <Button
                                 variant="outlined"
                                 color="primary"
@@ -1606,7 +2207,7 @@ const CollaborationDetails = () => {
       </Grid>
 
       {/* <Box mt={4}>
-        <Tooltip title="Save your collaboration details" placement="top">
+        <Tooltip arrow title="Save your collaboration details" placement="top">
           <Button
             variant="contained"
             color="primary"
