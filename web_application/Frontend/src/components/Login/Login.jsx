@@ -39,8 +39,9 @@ const Login = ({ onLogin }) => {
     setLoading(true);
 
     try {
+      // const response = await axios.post(`${URL}/api/login`, {
       const response = await axios.post(`${URL}/api/login`, {
-        email: username,
+      email: username,
         password,
       });
 
@@ -107,7 +108,7 @@ const Login = ({ onLogin }) => {
             <Button type="submit" fullWidth variant="contained" color="primary" disabled={loading} sx={{ mt: 3, mb: 2 }}>
               {loading ? <CircularProgress size={24} /> : 'Login'}
             </Button>
-            <GoogleLogin sx={{ mb: 1 }} />
+            {/* <GoogleLogin sx={{ mb: 1 }} /> */}
             <Divider sx={{ mb: 1 }}>or</Divider>
             <Button component={RouterLink} to="/forgot/password" fullWidth variant="text" color="primary" sx={{ mb: 1 }}>
               Forgot Password?

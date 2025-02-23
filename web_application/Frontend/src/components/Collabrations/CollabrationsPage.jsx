@@ -78,7 +78,7 @@ const UserInvitation = ({
   };
 
   return (
-    <Card variant="outlined" sx={{ mb: 2 }}>
+    <Card variant="outlined" sx={{ mb: 2, borderRadius: 3  }}>
       <CardContent>
         <Grid container alignItems="center">
           {/* Information Section */}
@@ -114,7 +114,7 @@ const UserInvitation = ({
                     size="small"
                     startIcon={<CheckCircleIcon />}
                     onClick={handleAccept}
-                    sx={{ mr: 1 }}
+                    sx={{ mr: 1, borderRadius: 10 }}
                   >
                     Accept
                   </Button>
@@ -122,10 +122,11 @@ const UserInvitation = ({
                 <Tooltip title="Reject Invitation">
                   <Button
                     variant="outlined"
-                    color="secondary"
+                    color="primary"
                     size="small"
                     startIcon={<CancelIcon />}
                     onClick={handleReject}
+                    sx={{ borderRadius:10}}
                   >
                     Reject
                   </Button>
@@ -133,31 +134,18 @@ const UserInvitation = ({
               </Box>
             )}
             {type === 'sent' && (
-              invitation.status === 'accepted' ? (
-                <Tooltip title="Revoke Invitation">
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    size="small"
-                    startIcon={<CancelPresentationIcon />}
-                    onClick={handleRevoke}
-                  >
-                    Revoke
-                  </Button>
-                </Tooltip>
-              ) : (
                 <Tooltip title="Withdraw Invitation">
                   <Button
-                    variant="outlined"
+                    variant="contained"
                     color="primary"
                     size="small"
                     startIcon={<UndoIcon />}
                     onClick={handleWithdraw}
+                    sx={{ borderRadius:10}}
                   >
                     Withdraw
                   </Button>
                 </Tooltip>
-              )
             )}
           </Grid>
         </Grid>
@@ -187,7 +175,7 @@ const CollaborationsPage = () => {
             Authorization: `Bearer ${token}`,
           },
         });
-        console.log('invitation data: ',response.data);
+        // console.log('invitation data: ',response.data);
 
         const { user_id, invitations } = response.data;
 
@@ -195,10 +183,10 @@ const CollaborationsPage = () => {
           (invitation) => invitation.status === 'pending' && invitation.receiver_id === user_id
         );
         const sent = invitations.filter(
-          (invitation) => invitation.sender_id === user_id
+          (invitation) => invitation.sender_id === user_id && invitation.status !== 'withdrawn'
         );
         const accepted = invitations.filter(
-          (invitation) => invitation.status === 'accepted' && invitation.sender_id === user_id || invitation.receiver_id === user_id
+          (invitation) => invitation.status === 'accepted' && (invitation.sender_id === user_id || invitation.receiver_id === user_id)
         );
 
         setCurrentUserId(user_id);
@@ -232,8 +220,14 @@ const CollaborationsPage = () => {
       );
       if (response.status === 200) {
         setMessage('Invitation Withdrawn');
+        console.log("Before update:", sentInvitations);
         setOpenSnackbar(true);
         setSentInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
+        // setSentInvitations((prev) => {
+        //   const updated = prev.filter((invitation) => invitation._id !== invitationId);
+        //   console.log("After update:", updated);
+        //   return updated;
+        // });
       }
     } catch (error) {
       console.error('Error withdrawing invitation:', error.response?.data?.message || error.message);
@@ -321,6 +315,7 @@ const CollaborationsPage = () => {
         setOpenSnackbar(true);
         setSentInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
         setAcceptedInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
+        // console.log("acceptedInvitation:", acceptedInvitations);
       }
     } catch (error) {
       console.error('Error revoking invitation:', error);
@@ -351,13 +346,14 @@ const CollaborationsPage = () => {
         Collaborations
       </Typography>
 
-      <Paper sx={{ mb: 4, border: '1px solid #dddddd', boxShadow: 'none' }}>
+      <Paper sx={{ mb: 4, border: '1px solid #dddddd', boxShadow: 'none', borderRadius: 10 }}>
         <Tabs
           value={tabValue}
           onChange={handleTabChange}
           variant="fullWidth"
           indicatorColor="primary"
           textColor="primary"
+          sx={{borderRadius: 10}}
         >
           <Tab label={`Pending (${pendingInvitations.length})`} {...a11yProps(0)} />
           <Tab label={`Accepted (${acceptedInvitations.length})`} {...a11yProps(1)} />
@@ -410,7 +406,7 @@ const CollaborationsPage = () => {
           <Typography variant="body1">No accepted invitations.</Typography>
         ) : (
           acceptedInvitations.map((invitation) => (
-            <Card variant="outlined" sx={{ mb: 2 }} key={invitation._id}>
+            <Card variant="outlined" sx={{ mb: 2, borderRadius: 3 }} key={invitation._id}>
               <CardContent>
                 <Grid container alignItems="center">
                   {/* Information Section */}
@@ -421,7 +417,7 @@ const CollaborationsPage = () => {
                       </Avatar>
                       
                       <Box>
-                      <Tooltip title={`${invitation.collab_name} initiated by ${invitation.sender_name}`} placement='right'>
+                      <Tooltip arrow title={`${invitation.collab_name} initiated by ${invitation.sender_name}`} placement='right'>
                         <Typography
                           variant="h6"
                           component={RouterLink}
@@ -443,12 +439,13 @@ const CollaborationsPage = () => {
                   <Grid item xs={12} sm={4} sx={{ textAlign: { xs: 'left', sm: 'right' }, mt: { xs: 2, sm: 0 } }}>
                     {invitation.sender_id === currentUserId && (
                       <Button
-                        variant="contained"
+                        variant="outlined"
                         color="primary"
                         size="small"
-                        onClick={() => navigate('/session')}
+                        sx={{borderRadius:10}}
+                        onClick={() => navigate(`/collaboration/${invitation.collab_uuid}`)}
                       >
-                        Create a Session
+                        View Details
                       </Button>
                     )}
                     {invitation.receiver_id === currentUserId && (
@@ -458,6 +455,7 @@ const CollaborationsPage = () => {
                           color="secondary"
                           size="small"
                           startIcon={<CancelPresentationIcon />}
+                          sx={{borderRadius:10}}
                           onClick={() =>
                             handleRevoke(invitation._id, invitation.receiver_id, invitation.sender_id, invitation.collab_uuid)
                           }

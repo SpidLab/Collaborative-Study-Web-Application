@@ -1,18 +1,21 @@
 import React, { useState } from 'react';
 import { TextField, Button, Container, Typography, Box, Paper, IconButton } from '@mui/material';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+// import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import axios from 'axios';
 import URL from '../../config';
 import { CircularProgress } from '@mui/material';
+import InfoIcon from '@mui/icons-material/Info';
+
 
 const UploadForm = () => {
     const [field1, setField1] = useState('');
     const [field2, setField2] = useState('');
-    const [csvFile, setCSVFile] = useState(null);
-    const [fileName, setFileName] = useState('');
+    // const [csvFile, setCSVFile] = useState(null);
+    // const [fileName, setFileName] = useState('');
     const getToken = () => {
         return localStorage.getItem('token');
     };
+    const token = getToken();
 
     const [loading, setLoading] = useState(false);
 
@@ -24,23 +27,22 @@ const UploadForm = () => {
         setField2(event.target.value);
     };
 
-    const handleFileChange = (event) => {
-        const file = event.target.files[0];
-        setCSVFile(file);
-        setFileName(file.name);
-    };
+    // const handleFileChange = (event) => {
+    //     const file = event.target.files[0];
+    //     setCSVFile(file);
+    //     setFileName(file.name);
+    // };
 
-    const handleDrop = (event) => {
-        event.preventDefault();
-        const file = event.dataTransfer.files[0];
-        setCSVFile(file);
-        setFileName(file.name);
-    };
+    // const handleDrop = (event) => {
+    //     event.preventDefault();
+    //     const file = event.dataTransfer.files[0];
+    //     setCSVFile(file);
+    //     setFileName(file.name);
+    // };
 
-    const handleDragOver = (event) => {
-        event.preventDefault();
-    };
-    const token = getToken();
+    // const handleDragOver = (event) => {
+    //     event.preventDefault();
+    // };
             
     const handleSubmit = async (event) => {
         event.preventDefault();
@@ -48,15 +50,15 @@ const UploadForm = () => {
 
         try {
             const formData = new FormData();
-            formData.append('field1', field1);
-            formData.append('field2', field2);
-            if (csvFile) {
-                formData.append('file', csvFile);
-            } else {
-                throw new Error('No file selected.');
-            }
+            formData.append('phenotype', field1);
+            formData.append('number_of_samples', field2);
+            // if (csvFile) {
+            //     formData.append('file', csvFile);
+            // } else {
+            //     throw new Error('No file selected.');
+            // }
 
-            const response = await axios.post(`${URL}/api/upload_csv`, formData, {
+            const response = await axios.post(`${URL}/api/upload_csv_qc`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                     'Authorization': `Bearer ${token}`
@@ -67,8 +69,8 @@ const UploadForm = () => {
                 alert('Dataset uploaded successfully.');
                 setField1('');
                 setField2('');
-                setCSVFile(null);
-                setFileName('');
+                // setCSVFile(null);
+                // setFileName('');
             } else {
                 throw new Error('Upload failed.');
             }
@@ -81,7 +83,7 @@ const UploadForm = () => {
     };
 
     return (
-        <Container component="div" maxWidth="sm" sx={{ padding: 4, borderRadius: 2 }}>
+        <Container component="div" maxWidth="sm" sx={{ padding: 4 }}>
             <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'light' }}>
                 Dataset Metadata Upload
             </Typography>
@@ -95,6 +97,9 @@ const UploadForm = () => {
                     onChange={handleField1Change}
                     variant="outlined"
                     margin="normal"
+                    InputProps={{
+                        sx: {borderRadius: 2, borderColor: 'divider'}
+                      }}
                 />
                 <TextField
                     fullWidth
@@ -105,8 +110,11 @@ const UploadForm = () => {
                     onChange={handleField2Change}
                     variant="outlined"
                     margin="normal"
+                    InputProps={{
+                        sx: {borderRadius: 2, borderColor: 'divider'}
+                      }}
                 />
-                <Box
+                {/* <Box
                     sx={{
                         border: '2px dashed #ccc',
                         borderRadius: '8px',
@@ -138,7 +146,7 @@ const UploadForm = () => {
                             {fileName || 'Upload Noisy Dataset'}
                         </Typography>
                     </label>
-                </Box>
+                </Box> */}
                 {loading ? (
                     <Box display="flex" justifyContent="center" alignItems="center" mt={2} sx={{
                         backgroundColor: '#fafafa',
@@ -156,6 +164,10 @@ const UploadForm = () => {
                         Upload Dataset
                     </Button>
                 )}
+                <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2}} display={'flex'}>
+                    <InfoIcon sx={{color: 'primary.main', fontSize: 20}}/>
+                    <Typography variant="body2">You will be required to upload a dataset file when initiating or participating in a collaboration.</Typography>
+                </Box>
             </form>
         </Container>
     );

@@ -15,7 +15,7 @@ def main():
         with app.test_client() as client:
             response = client.post(
                 f"/api/datasets/{uuid}/qc-results",
-                data=json.dumps({"threshold": 0.1}),  # Send test threshold value
+                data=json.dumps({"threshold": 0.2}),  # Send test threshold value
                 content_type="application/json"
             )
 

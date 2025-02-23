@@ -14,13 +14,20 @@ import Profile from "./components/Profile/Profile";
 import StartCollaboration from "./components/Collabrations/StartCollaboration";
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    const token = localStorage.getItem('token');
+    return !!token;
+  });
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    setIsLoggedIn(!!token); 
-  }, []);
-
+    if (token) {
+      setIsLoggedIn(true);
+    } else {
+      setIsLoggedIn(false);
+    }
+  }, []);  
   const handleLogin = () => {
     setIsLoggedIn(true);
   };
