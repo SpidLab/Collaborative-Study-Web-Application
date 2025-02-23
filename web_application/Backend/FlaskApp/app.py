@@ -26,7 +26,6 @@ from fuzzywuzzy import process
 import uuid
 from stats import calc_chi_pvalue
 # from stats import calc_chi_pvalue
-# from stats import calc_chi_pvalue
 
 app = Flask(__name__)
 load_dotenv(find_dotenv())
@@ -1040,7 +1039,6 @@ def get_collaboration_details(uuid):
         user_id = str(current_user.id)
 
         is_sender = collaboration['creator_id'] == ObjectId(user_id)
-        sender_id = str(collaboration['creator_id'])  
         sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
         sender_name = sender_user["name"] if sender_user else "Unknown"
          
@@ -1084,8 +1082,7 @@ def get_collaboration_details(uuid):
             'experiments': collaboration.get('experiments', []),
             'phenotype': collaboration.get('phenotype', None),
             'samples': collaboration.get('samples', None),
-            'is_sender': is_sender,
-            'sender_id': sender_id,
+            'sender_id': is_sender,
             'sender_name': sender_name,
             'invited_users': invited_users_details,
             'datasets': creator_dataset,
@@ -1839,6 +1836,16 @@ def get_filtered_qc_results(collab_uuid):
         # Reference to MongoDB collection
         collaboration_collection = db["collaborations"]
 
+        # Check if threshold was already set in the database
+        existing_threshold = collaboration_data.get("threshold")
+
+        if existing_threshold is not None:
+            # First, remove 'stats' and 'chi_square_results' if threshold was already set
+            collaboration_collection.update_one(
+                {"uuid": collab_uuid},
+                {"$unset": {"stats": "", "chi_square_results": ""}}
+            )
+
         # Update threshold in the database
         threshold_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
@@ -1850,12 +1857,10 @@ def get_filtered_qc_results(collab_uuid):
 
         # Get full QC results
         full_qc_results = collaboration_data.get("full_qc", [])
-
         filtered_results = {}
 
         # Filter results based on the threshold and phi value
         for result in full_qc_results:
-            # condition changed: We need all the phi_values that are under the Threshold defined
             if result["phi_value"] < threshold:
                 user1, sample1 = result["user1"], result["sample1"]
                 user2, sample2 = result["user2"], result["sample2"]
@@ -1903,34 +1908,46 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
 
         # Extract SNP data from the stats field
         stats = collaboration.get('stats', {})
-
         if not stats:
             return {"error": "No SNP data found in the stats field"}, 400
 
         # Debug: Log stats structure
         print(f"Stats structure: {stats}")
 
-        # Store chi-square results per user
+        # Store chi-square results
         chi_square_results = {}
+        aggregated_snp_data = {}  # To store SNP data across all users
 
         for user_id, user_stats in stats.items():
-            user_snp_stats = []
+            user_snp_stats = {}
 
             for snp_id, snp_data in user_stats.items():
-                # Ensure data is well-formed before proceeding
+                # Extract case and control counts
                 case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
                 control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
 
-                user_snp_stats.append({snp_id: [case_counts, control_counts]})
+                user_snp_stats[snp_id] = [case_counts, control_counts]
+
+                # Aggregate SNP data across users
+                if snp_id not in aggregated_snp_data:
+                    aggregated_snp_data[snp_id] = {}
+                if user_id not in aggregated_snp_data[snp_id]:
+                    aggregated_snp_data[snp_id][user_id] = np.zeros((2, 3))
+                aggregated_snp_data[snp_id][user_id][0] += np.array(case_counts)
+                aggregated_snp_data[snp_id][user_id][1] += np.array(control_counts)
 
             # Compute chi-square results for this user
-            gwas_result = calc_chi_pvalue(user_snp_stats)
+            chi_square_results[user_id] = calc_chi_pvalue(user_snp_stats)
 
-            # Include both chi-square value and p-value in results
-            chi_square_results[user_id] = {
-                snp_id: {"chi_square": chi_value, "p_value": p_value}
-                for snp_id, (chi_value, p_value) in gwas_result.items()
-            }
+        # Compute chi-square results for the aggregated table
+        aggregated_results = {}
+        for snp_id, user_tables in aggregated_snp_data.items():
+            total_table = np.zeros((2, 3))
+            for user_table in user_tables.values():
+                total_table += user_table
+            aggregated_results[snp_id] = calc_chi_pvalue({snp_id: total_table})[snp_id]
+
+        chi_square_results["aggregated"] = aggregated_results
 
         # Store the structured chi-square results in the collaboration document
         db['collaborations'].update_one(
@@ -1953,16 +1970,8 @@ def calculate_chi_square():
         if not collaboration_uuid:
             return jsonify({"error": "UUID is required"}), 400
 
-        # Debug: Log received UUID
-        print(f"Received UUID: {collaboration_uuid}")
-
-        # Call the function
         result = calculate_and_store_chi_square_results(collaboration_uuid)
 
-        # Debug: Log function output
-        print(f"Function Output: {result}")
-
-        # Ensure proper response format
         if isinstance(result, tuple) and isinstance(result[0], dict) and isinstance(result[1], int):
             return jsonify(result[0]), result[1]
 
@@ -1972,25 +1981,8 @@ def calculate_chi_square():
         print(f"Unexpected error: {str(e)}")
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
-@app.route('/api/calculate_chi_square_results/<collab_uuid>', methods=['GET'])
-def get_chi_square_results(collab_uuid):
-    try:
-        # Fetch the chi-square results from the database (after calculation)
-        collaboration = db['collaborations'].find_one({"uuid": collab_uuid})
-        chi_square_results = collaboration.get('chi_square_results', {})
-
-        if not chi_square_results:
-            return jsonify({"error": "Chi-square results not found"}), 404
-
-        return jsonify({"chi_square_results": chi_square_results}), 200
-
-    except Exception as e:
-        print(f"Unexpected error: {str(e)}")
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
-
-
-
 if __name__ == '__main__':
     app.run(debug=True)
 
+#----- Below code is older version ------
 #----- Below code is older version ------

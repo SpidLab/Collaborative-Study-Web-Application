@@ -8,27 +8,23 @@ def calc_chi_pvalue(snp_stats):
     Calculate the chi-square test statistic and p-value for GWAS SNPs.
 
     Args:
-        snp_stats: A list of dictionaries, each containing SNP IDs as keys and
-                   contingency tables [[case counts (0, 1, 2)], [control counts (0, 1, 2)]] as values.
+        snp_stats: A dictionary where keys are SNP IDs and values are
+                   contingency tables [[case counts (0, 1, 2)], [control counts (0, 1, 2)]].
 
     Returns:
         gwas_result: A dictionary where keys are SNP IDs and values are (chi-square, p-value).
     """
     gwas_result = {}
 
-    for party_data in snp_stats:
-        for snp_id, counts in party_data.items():
-            print(f"Processing SNP: {snp_id}")
+    for snp_id, counts in snp_stats.items():
+        print(f"Processing SNP: {snp_id}")
 
-            aggregated_table = np.zeros((2, 3))  # 2 rows (case, control), 3 columns (0, 1, 2)
+        aggregated_table = np.array(counts)  # Convert list to numpy array
 
-            case_counts, control_counts = counts
-            aggregated_table[0] = case_counts
-            aggregated_table[1] = control_counts
+        # Perform chi-square test
+        chi2, p_value, _, _ = chi2_contingency(aggregated_table)
 
-            chi2, p_value, _, _ = chi2_contingency(aggregated_table)
-
-            gwas_result[snp_id] = (chi2, p_value)
+        gwas_result[snp_id] = {"chi_square": chi2, "p_value": p_value}
 
     return gwas_result
 
