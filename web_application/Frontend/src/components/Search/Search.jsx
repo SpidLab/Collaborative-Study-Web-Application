@@ -234,7 +234,10 @@ function SearchPage({ onUserSelect, resetTrigger }) {
             variant="outlined"
             value={phenotype}
             onChange={(e) => setPhenotype(e.target.value)}
-            sx={{ marginBottom: 2 }}
+            sx={{ mb: 2 }}
+            InputProps={{
+              sx: {borderRadius: 2, borderColor: 'divider'}
+            }}
           />
         </Grid>
         <Grid item xs={12} sm={4}>
@@ -244,19 +247,21 @@ function SearchPage({ onUserSelect, resetTrigger }) {
             variant="outlined"
             value={minSamples}
             onChange={(e) => setMinSamples(e.target.value)}
-            sx={{ marginBottom: 2 }}
+            sx={{ mb: 2 }}
             type="number" // Added type for better UX
-            inputProps={{ min: 0 }}
+            InputProps={{
+              sx: {borderRadius: 2, borderColor: 'divider'}
+            }}
           />
         </Grid>
         <Grid item xs={12} sm={4} md={4}>
           <Button
-            variant="contained"
+            variant="outlined"
             color="primary"
             startIcon={<SearchIcon />}
             onClick={handleSearch}
             fullWidth
-            sx={{ padding: 2, fontSize: '1rem', marginBottom: 2 }}
+            sx={{ padding: 1.5, fontSize: '1rem', mb: 2, borderRadius: 2 }}
           >
             Search
           </Button>
@@ -294,7 +299,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
               ))
             ) : (
               <Typography variant="body1" color="textSecondary" sx={{ padding: 4 }}>
-                No results found. Please refine your search.
+                Discover collaborators to partner with on your new experiment.
               </Typography>
             )}
           </Grid>

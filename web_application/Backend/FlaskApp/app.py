@@ -1039,35 +1039,62 @@ def get_collaboration_details(uuid):
         user_id = str(current_user.id)
 
         is_sender = collaboration['creator_id'] == ObjectId(user_id)
+        sender_id = str(collaboration['creator_id'])  
         sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
         sender_name = sender_user["name"] if sender_user else "Unknown"
+         
 
         invited_users_details = []
         for invited_user in collaboration.get('invited_users', []):
             receiver_user = db.users.find_one({"_id": ObjectId(invited_user["user_id"])})
             receiver_name = receiver_user["name"] if receiver_user else "Unknown"
-            phenotype = invited_user["phenotype"]
             status = invited_user["status"]
+            user_dataset_id= str(invited_user["user_dataset_id"])
+
+            invited_user_dataset = db.datasets.find_one({'_id': ObjectId(user_dataset_id)})
+            invited_user_dataset_uploaded = True if invited_user_dataset and len(invited_user_dataset.get('data', [])) > 0 else False
+
+            phenotype = invited_user_dataset.get('phenotype') if invited_user_dataset else None
+            number_of_samples = invited_user_dataset.get('number_of_samples') if invited_user_dataset else None
 
             invited_users_details.append({
                 'user_id': str(invited_user["user_id"]),
                 'name': receiver_name,
+                'status': status,
+                'user_dataset_id': user_dataset_id,
+                'is_dataset_uploaded': invited_user_dataset_uploaded,
                 'phenotype': phenotype,
-                'status': status
+                'number_of_samples': number_of_samples
             })
+    
 
+        
+
+        # To fetch the data of creator/initator
         dataset = db.datasets.find_one(
             {'_id': ObjectId(collaboration["creator_dataset_id"])},
             {'phenotype': 1, 'number_of_samples': 1}
         )
 
-        phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
-        number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
-
+        # To fetch the data of invited_user/collaborator
+        # invited_dataset = db.datasets.find_one(
+        #     {'_id': ObjectId(collaboration["user_dataset_id"])},
+        #     {'phenotype': 1, 'number_of_samples': 1}
+        # )
+        # Making multiple queries can be optimised but using for time being
+        creator_phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
+        creator_number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
         creator_dataset = {
-            'phenotype': phenotype,
-            'samples': number_of_samples
+            'phenotype': creator_phenotype,
+            'samples': creator_number_of_samples
         }
+
+        # invited_user_phenotype = invited_dataset.get('phenotype', 'N/A') if invited_dataset else 'N/A'
+        # invited_user_number_of_samples = invited_dataset.get('number_of_samples', '0') if invited_dataset else '0'
+        # invited_user_dataset = {
+        #     'phenotype': invited_user_phenotype,
+        #     'samples': invited_user_number_of_samples
+        # }
 
         collaboration_details = {
             'uuid': collaboration['uuid'],
@@ -1075,10 +1102,11 @@ def get_collaboration_details(uuid):
             'experiments': collaboration.get('experiments', []),
             'phenotype': collaboration.get('phenotype', None),
             'samples': collaboration.get('samples', None),
-            'sender_id': is_sender,
+            'is_sender': is_sender,
+            'sender_id': sender_id,
             'sender_name': sender_name,
             'invited_users': invited_users_details,
-            'datasets': creator_dataset
+            'creator_datasets': creator_dataset,
         }
 
         return jsonify(collaboration_details), 200
@@ -1152,6 +1180,77 @@ def update_collaboration_details(uuid):
         print(f"Error occurred: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+# @app.route('/api/upload_csv_qc', methods=['POST'])
+# def upload_csv_qc():
+#     try:
+#         auth_header = request.headers.get('Authorization')
+#         if not auth_header:
+#             logging.error("Authorization header missing")
+#             return jsonify({"error": "Authorization header missing"}), 401
+
+#         token = auth_header.split()[1]
+#         current_user = User.verify_auth_token(token)
+
+#         if not current_user:
+#             logging.error("Invalid token or user not found")
+#             return jsonify({"error": "Invalid token or user not found"}), 401
+
+#         user_id = current_user.id
+
+#         # Check if the post request has the file part
+#         if 'file' not in request.files:
+#             logging.error('No file part in the request')
+#             return jsonify({'message': 'No file part in the request'}), 400
+
+#         file = request.files['file']
+
+#         # If the user does not select a file, the browser submits an empty file without a filename
+#         if file.filename == '':
+#             logging.error('No selected file')
+#             return jsonify({'message': 'No selected file'}), 400
+
+#         if file and file.filename.endswith('.csv'):
+#             phenotype = request.form.get('field1')
+#             number_of_samples = request.form.get('field2')
+
+#             try:
+#                 # Read the file directly into a DataFrame, setting the first column as sample_id
+#                 df = pd.read_csv(file, index_col=0)
+#                 df.index.name = 'sample_id'  # Set the index name
+
+#                 # Check if DataFrame is not empty
+#                 if not df.empty:
+#                     data = {}
+
+#                     # Store each row in the data dictionary using sample_id as the key
+#                     for sample_id, row in df.iterrows():
+#                         data[str(sample_id)] = row.to_dict()
+
+#                     # Insert records into the datasets collection
+#                     db['datasets'].insert_one({
+#                         "user_id": str(user_id),
+#                         "phenotype": str(phenotype),
+#                         "number_of_samples": str(number_of_samples),
+#                         "data": data
+#                     })
+#                 else:
+#                     logging.error('CSV file is empty')
+#                     return jsonify({'message': 'CSV file is empty'}), 400
+
+#             except Exception as e:
+#                 logging.error(f'Error reading CSV or inserting into DB: {str(e)}')
+#                 logging.error(traceback.format_exc())
+#                 return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+
+#             return jsonify({'message': 'CSV file processed successfully'}), 200
+#         else:
+#             logging.error('Unsupported file type')
+#             return jsonify({'message': 'Unsupported file type'}), 400
+#     except Exception as e:
+#         logging.error(f'Unexpected error: {str(e)}')
+#         logging.error(traceback.format_exc())
+#         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+
 @app.route('/api/upload_csv_qc', methods=['POST'])
 def upload_csv_qc():
     try:
@@ -1169,59 +1268,93 @@ def upload_csv_qc():
 
         user_id = current_user.id
 
-        # Check if the post request has the file part
-        if 'file' not in request.files:
-            logging.error('No file part in the request')
-            return jsonify({'message': 'No file part in the request'}), 400
+        # Get metadata fields from the form data
+        phenotype = request.form.get('phenotype')
+        number_of_samples = request.form.get('number_of_samples')
+
+        if not phenotype or not number_of_samples:
+            return jsonify({"error": "Missing required fields"}), 400
+
+        # Create a new dataset record in the database (without data at this stage)
+        dataset = {
+            "user_id": str(user_id),
+            "phenotype": phenotype,
+            "number_of_samples": number_of_samples,
+            "data": {}  # No data at the moment, will be updated later with CSV
+        }
+
+        # Insert into the database
+        result = db['datasets'].insert_one(dataset)
+        dataset_id = str(result.inserted_id)
+
+        print('Data from frontend:', request.form)
+
+        return jsonify({"message": "Metadata uploaded successfully", "dataset_id": dataset_id}), 200
+
+    except Exception as e:
+        logging.error(f'Unexpected error: {str(e)}')
+        return jsonify({'message': 'An error occurred while processing the metadata', 'error': str(e)}), 500
+
+@app.route('/api/update_qc_data', methods=['POST'])
+def update_qc_data():
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            logging.error("Authorization header missing")
+            return jsonify({"error": "Authorization header missing"}), 401
+
+        token = auth_header.split()[1]
+        current_user = User.verify_auth_token(token)
+
+        if not current_user:
+            logging.error("Invalid token or user not found")
+            return jsonify({"error": "Invalid token or user not found"}), 401
+
+        user_id = current_user.id
+
+        # Get the dataset ID and file from the request
+        dataset_id = request.form.get('dataset_id')  # Expecting dataset_id in JSON payload
+        if not dataset_id:
+            return jsonify({"error": "Dataset ID is required"}), 400
 
         file = request.files['file']
 
-        # If the user does not select a file, the browser submits an empty file without a filename
-        if file.filename == '':
-            logging.error('No selected file')
-            return jsonify({'message': 'No selected file'}), 400
+        if not file or file.filename == '':
+            return jsonify({"error": "CSV file is required"}), 400
 
-        if file and file.filename.endswith('.csv'):
-            phenotype = request.form.get('field1')
-            number_of_samples = request.form.get('field2')
+        if not file.filename.endswith('.csv'):
+            return jsonify({"error": "Only CSV files are supported"}), 400
 
-            try:
-                # Read the file directly into a DataFrame, setting the first column as sample_id
-                df = pd.read_csv(file, index_col=0)
-                df.index.name = 'sample_id'  # Set the index name
+        # Read the file directly into a DataFrame, setting the first column as sample_id
+        df = pd.read_csv(file, index_col=0)
+        df.index.name = 'sample_id'  # Set the index name
 
-                # Check if DataFrame is not empty
-                if not df.empty:
-                    data = {}
+        if not df.empty:
+            data = {}
 
-                    # Store each row in the data dictionary using sample_id as the key
-                    for sample_id, row in df.iterrows():
-                        data[str(sample_id)] = row.to_dict()
+            # Store each row in the data dictionary using sample_id as the key
+            for sample_id, row in df.iterrows():
+                data[str(sample_id)] = row.to_dict()
 
-                    # Insert records into the datasets collection
-                    db['datasets'].insert_one({
-                        "user_id": str(user_id),
-                        "phenotype": str(phenotype),
-                        "number_of_samples": str(number_of_samples),
-                        "data": data
-                    })
-                else:
-                    logging.error('CSV file is empty')
-                    return jsonify({'message': 'CSV file is empty'}), 400
+        # Get the dataset from the DB
+        dataset = db['datasets'].find_one({"_id": ObjectId(dataset_id)})
+        if not dataset:
+            return jsonify({"error": "Dataset not found"}), 404
 
-            except Exception as e:
-                logging.error(f'Error reading CSV or inserting into DB: {str(e)}')
-                logging.error(traceback.format_exc())
-                return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
-            return jsonify({'message': 'CSV file processed successfully'}), 200
-        else:
-            logging.error('Unsupported file type')
-            return jsonify({'message': 'Unsupported file type'}), 400
+        # Update the dataset in the DB with the new data
+        db['datasets'].update_one(
+            {"_id": ObjectId(dataset_id)},
+            {"$set": {"data": data}}
+        )
+
+        return jsonify({"message": "Dataset updated successfully"}), 200
+
     except Exception as e:
-        logging.error(f'Unexpected error: {str(e)}')
-        logging.error(traceback.format_exc())
-        return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+        logging.error(f'Error updating dataset with CSV data: {str(e)}')
+        return jsonify({"error": "An error occurred while processing the CSV file", "details": str(e)}), 500
+
+
 
 @app.route('/api/upload_csv_stats', methods=['POST'])
 def upload_csv_stats():
@@ -1867,9 +2000,24 @@ def calculate_chi_square():
     except Exception as e:
         print(f"Unexpected error: {str(e)}")
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    
+
+@app.route('/api/calculate_chi_square_results/<collab_uuid>', methods=['GET'])
+def get_chi_square_results(collab_uuid):
+    try:
+        # Fetch the chi-square results from the database (after calculation)
+        collaboration = db['collaborations'].find_one({"uuid": collab_uuid})
+        chi_square_results = collaboration.get('chi_square_results', {})
+
+        if not chi_square_results:
+            return jsonify({"error": "Chi-square results not found"}), 404
+
+        return jsonify({"chi_square_results": chi_square_results}), 200
+
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-#----- Below code is older version ------
-#----- Below code is older version ------
