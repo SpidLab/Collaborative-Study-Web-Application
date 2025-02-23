@@ -56,7 +56,7 @@ const HomePage = () => {
         Welcome Back, {userName}
       </Typography>
       <Grid container spacing={4} justifyContent="center">
-        <Grid item xs={12}>
+        {/* <Grid item xs={12}>
           <Box sx={{ border: '1px solid #ccc', p: 2, m: 2, borderRadius: 2 }}>
             <SearchPage />
           </Box>
@@ -65,9 +65,9 @@ const HomePage = () => {
           <Box sx={{ border: '1px solid #ccc', p: 2, m: 2, borderRadius: 2, height: '550px', overflow: 'auto' }}>
             <UploadForm />
           </Box>
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <Box sx={{ border: '1px solid #ccc', p: 2, m: 2, borderRadius: 2, height: '550px', overflow: 'auto' }}>
+        </Grid> */}
+        <Grid item xs={12} sm={12}>
+          <Box sx={{ borderRadius: 2, overflow: 'auto' }}>
             <CollaborationsPage />
           </Box>
         </Grid>

@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails
+  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Checkbox, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material';
-import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, DownloadRounded } from '@mui/icons-material';
+import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, DownloadRounded, RadioButtonUncheckedRounded } from '@mui/icons-material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import axios from 'axios';
 import URL from '../../config';
@@ -13,8 +13,6 @@ import statSampleImage from "../../assets/Stat Sample.png";
 import InfoIcon from '@mui/icons-material/Info';
 
 
-
-
 const CollaborationDetails = () => {
   const { uuid } = useParams();
   const [collaboration, setCollaboration] = useState(null);
@@ -22,7 +20,8 @@ const CollaborationDetails = () => {
   const [experimentName, setExperimentName] = useState('');
   const [experimentList, setExperimentList] = useState([]);
   const [phenoType, setPhenotype] = useState('');
-  const [samples, setSamples] = useState('');
+  const [creator, setCreator] = useState('');
+  // const [samples, setSamples] = useState('');
   const [file, setFile] = useState(null);
   const [role, setRole] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -32,6 +31,7 @@ const CollaborationDetails = () => {
   const [collaborationUuid, setCollaborationUuid] = useState('');
   const [threshold, setThreshold] = useState(null);
   const [thresholdDefined, setThresholdDefined] = useState();
+  const [newThreshold, setNewThreshold] = useState(null);
   const [activeStep, setActiveStep] = useState(0);
   const [progressActiveStep, setProgressActiveStep] = useState(0);
   const [isQcInitiateLoading, setIsQcInitiateLoading] = useState(false);
@@ -51,7 +51,7 @@ const CollaborationDetails = () => {
   const [originalExperimentList, setOriginalExperimentList] = useState([]);
   const [originalPhenoType, setOriginalPhenoType] = useState('');
   const [originalSamples, setOriginalSamples] = useState('');
-  const [selectedTab, setSelectedTab] = useState(0);
+  const [selectedTab, setSelectedTab] = useState(0); // for GWAS results
 
   const determineUserRole = (data) => {
     if (data.is_sender) {
@@ -61,6 +61,7 @@ const CollaborationDetails = () => {
     }
   };
   const steps = ['QC Calculation', 'Stat Data Upload'];
+
 
   useEffect(() => {
     const fetchCollaborationDetails = async () => {
@@ -74,8 +75,9 @@ const CollaborationDetails = () => {
         setCollaboration(response.data);
         setCollabName(response.data.name);
         setExperimentList(response.data.experiments || []);
-        setPhenotype(response.data.datasets.phenotype || []);
-        setSamples(response.data.datasets.samples || '');
+        setPhenotype(response.data.creator_datasets.phenotype || []);
+        setCreator(response.data.creator_datasets || []);
+        // setSamples(response.data.creator_datasets.samples || '');
         setCollaborationUuid(response.data.uuid);
         setSenderInfo({ is_sender: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
         setInvitedUsers(response.data.invited_users || []);
@@ -91,6 +93,7 @@ const CollaborationDetails = () => {
     };
     fetchCollaborationDetails();
   }, [uuid]);
+
 
   console.log('QC Data:', collaboration);
 
@@ -169,7 +172,7 @@ const CollaborationDetails = () => {
         },
       });
 
-      if(response === 200){
+      if (response === 200) {
         checkQcStatus();
       }
 
@@ -317,7 +320,7 @@ const CollaborationDetails = () => {
   const handleSubmitThreshold = async () => {
     try {
       const response = await axios.post(`${URL}/api/datasets/${uuid}/qc-results`, {
-        threshold: threshold,
+        threshold: newThreshold,
       },
         {
           headers: {
@@ -325,15 +328,16 @@ const CollaborationDetails = () => {
           },
         }
       );
-      setThresholdDefined(true);
+      setThresholdDefined(false);
+      setThreshold(newThreshold);
 
       setSnackbar({
         open: true,
-        message: 'Threshold applied and QC results filtered successfully!',
+        message: 'Threshold applied and QC results in process.',
         severity: 'success',
       });
     } catch (error) {
-      console.error('Error submitting threshold and filtering:', error);
+      console.error('Error submitting threshold:', error);
 
       setSnackbar({
         open: true,
@@ -360,8 +364,9 @@ const CollaborationDetails = () => {
         // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
         if (response.data.threshold !== null) {
           setThreshold(response.data.threshold);
+          setNewThreshold(response.data.threshold);
           setThresholdDefined(true);
-          console.log("is threshold value define", thresholdDefined);
+          console.log("is threshold value define", threshold);
         } else {
           setThresholdDefined(false)
         }
@@ -389,7 +394,7 @@ const CollaborationDetails = () => {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
       });
-      // console.log("results", response);
+      console.log('GWAS Results:', response.data);
       if (response.status === 200) {
         setGwasResults(response.data.chi_square_results);
         setGwasResultsAvailable(true);
@@ -461,7 +466,6 @@ const CollaborationDetails = () => {
         },
       });
 
-      // console.log(response.data);
 
       if (response.status === 200) {
         setSnackbar({ open: true, message: 'Results are available.', severity: 'success' });
@@ -642,6 +646,8 @@ const CollaborationDetails = () => {
   //   setFilteredResults({ userCounts, filteredData });
   // }, [threshold, qcResults]);
 
+  // console.log('Creators Datasets Number of Samples', collaboration.creator_datasets.samples);
+  // console.log('Collabortator Datasets Number of Samples', invitedUsers[0].number_of_samples);
   const getUserName = (userId) => {
     if (senderInfo.id === userId) return senderInfo.name; // Check if sender matches
     const invitedUser = invitedUsers?.find(user => user.user_id === userId);
@@ -654,6 +660,7 @@ const CollaborationDetails = () => {
       : invitedUsers?.[0]?.user_id || null;
   };
   const currentUserId = getCurrentUserId(role);
+  console.log(currentUserId);
 
 
   const getGroupedSampleCounts = (qcResults, threshold) => {
@@ -709,16 +716,43 @@ const CollaborationDetails = () => {
     }
   }, [qcResults, threshold]);
 
+  // const downloadSamples = (samples, filename) => {
+  //   try {
+  //     if (!samples || samples.length === 0) {
+  //       alert("No samples to download.");
+  //       return;
+  //     }
+
+  //     const jsonContent = JSON.stringify(samples, null, 2);
+  //     const blob = new Blob([jsonContent], { type: "application/json" });
+
+  //     const link = document.createElement("a");
+  //     const url = window.URL.createObjectURL(blob);
+  //     link.href = url;
+  //     link.download = filename;
+  //     document.body.appendChild(link);
+  //     link.click();
+  //     window.URL.revokeObjectURL(url);
+  //     document.body.removeChild(link);
+  //   } catch (error) {
+  //     console.error("Download error:", error);
+  //     alert(`Download failed: ${error.message}`);
+  //   }
+  // };
+
+  console.log('Number of samples Creator:', creator?.samples, invitedUsers[0]?.number_of_samples, invitedUsers[0]?.name, senderInfo?.name);
   const downloadSamples = (samples, filename) => {
     try {
       if (!samples || samples.length === 0) {
         alert("No samples to download.");
         return;
       }
-
-      const jsonContent = JSON.stringify(samples, null, 2);
+  
+      // Wrap the samples in a list property
+      const jsonContent = JSON.stringify({ "Sample IDs": samples }, null, 2);
+      
       const blob = new Blob([jsonContent], { type: "application/json" });
-
+  
       const link = document.createElement("a");
       const url = window.URL.createObjectURL(blob);
       link.href = url;
@@ -732,12 +766,12 @@ const CollaborationDetails = () => {
       alert(`Download failed: ${error.message}`);
     }
   };
-
+  
 
   const handleSliderChange = (event, newValue) => {
-    setThresholdDefined(false);
-    setThreshold(newValue);
+    setNewThreshold(newValue);
   };
+
   // utility functions for Data Export
   const convertToCSV = (data) => {
     const headers = ['SNP ID,Chi-Square,P-Value'];
@@ -792,8 +826,7 @@ const CollaborationDetails = () => {
 
   const userAcceptedInvitation = invitedUsers.length > 0 && invitedUsers.every(user => user.status === 'accepted');
   // check if sender and all user accepted the invitation and invited user has uploaded the dataset and qc results are not available
-  const isQcInitiateEnabled = role === 'sender' && userAcceptedInvitation && collaboration.user_dataset_uploaded && !qcResultsAvailable;
-
+  const isQcInitiateEnabled = role === 'sender' && userAcceptedInvitation && invitedUsers[0].is_dataset_uploaded && !qcResultsAvailable;
 
   const isQcResultsEnabled = !isQcInitiateEnabled && qcResultsAvailable;
 
@@ -828,7 +861,7 @@ const CollaborationDetails = () => {
     description: !qcResultsAvailable ? 'QC Calculation, results are not available' : 'QC results are available, waiting for initator to confirm the Threshold'
   },
   {
-    label: 'Upload Stat Data',
+    label: 'Stat Data',
     description: 'Upload Stat Data for GWAS experiment'
   },
   {
@@ -839,12 +872,12 @@ const CollaborationDetails = () => {
 
   const getActiveStep = () => {
     // if all user accept the invitation it moves forward else not
-    if (!(userAcceptedInvitation && collaboration.user_dataset_uploaded)) {
+    if (!(userAcceptedInvitation && invitedUsers[0].is_dataset_uploaded)) {
       setProgressActiveStep(0);
       return;
     }
     // if QC Results not avaialble, it stays here
-    if (isQcInitiateEnabled) {
+    if (isQcInitiateEnabled && !qcResultsAvailable) {
       setProgressActiveStep(1);
       return;
     }
@@ -867,7 +900,16 @@ const CollaborationDetails = () => {
   }, [invitedUsers, qcResultsAvailable, thresholdDefined, gwasResultsAvailable, displayQcResults]);
 
   // Experiments Tabs:
-  const placeholderTabs = ['Chi-Square', 'Odd-Even Ratio', 'GWAS Experiment 3', 'GWAS Experiment 4', 'GWAS Experiment 5'];
+  const placeholderTabs = ['Chi-Square', 'Odd Ratio', 'GWAS Experiment 3', 'GWAS Experiment 4', 'GWAS Experiment 5'];
+
+  const handleExperimentChange = (index) => {
+    if (index === 0) {
+      setdisplayQcResults(false);
+    } else {
+      setdisplayQcResults(true);
+    }
+  }
+
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -907,7 +949,7 @@ const CollaborationDetails = () => {
               </Box> */}
 
               {/* List of Details */}
-              <Box sx={{ bgcolor: '#f9fdff', p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+              <Box sx={{ bgcolor: '#ffffff', p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                 <List sx={{ pt: 0, pb: 0 }}>
                   {/* Collaboration Name */}
                   {role === 'sender' ? (
@@ -981,7 +1023,8 @@ const CollaborationDetails = () => {
                       }
                     />
                   </ListItem>
-                  <Divider />
+                  <Divider sx={{ borderColor: 'primary.main' }} />
+
 
                   {/* Phenotype */}
                   <ListItem disableGutters>
@@ -1005,34 +1048,27 @@ const CollaborationDetails = () => {
                       }
                     />
                   </ListItem>
-                  <Divider />
+                  <Divider sx={{ borderColor: 'primary.main' }} />
 
                   <ListItem disableGutters>
                     <ListItemText
-                      primary={<Tooltip arrow title='Number of Samples from Initiator data' placement='right'><strong>Number of Samples</strong></Tooltip>}
+                      primary={<Tooltip arrow title='Samples to be included in this collaboration' placement='right'><strong>Number of Samples</strong></Tooltip>}
                       secondary={
-                        role === 'sender' ? (
-                          isEditing ? (
-                            <TextField
-                              variant="outlined"
-                              fullWidth
-                              value={samples}
-                              onChange={(e) => setSamples(e.target.value)}
-                            />
-                          ) : (
-                            <Typography variant="body2">{samples}</Typography>
-                          )
-                        ) : (
-                          <Typography variant="body2">{samples}</Typography>
-                        )
+
+                        <Box display={'inline-flex'} gap={2} sx={{ color: 'text.primary' }}>
+                          <Typography variant="body2">{senderInfo?.name} : {creator?.samples}</Typography>
+                          <Typography variant="body2">{invitedUsers[0]?.name}: {invitedUsers[0]?.number_of_samples}</Typography>
+                        </Box>
+
                       }
                     />
                   </ListItem>
                 </List>
               </Box>
-              {/*Quality Control Data Upload - After user accepts the request, upload the data for their phenotype*/}
-              {(userAcceptedInvitation && !collaboration.user_dataset_uploaded) && role === 'receiver' && (
-                <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+
+              {/*Quality Control Data Upload - After user accepts the request, upload the data for their phenotype color: #f9_fdff*/}
+              {(userAcceptedInvitation && !invitedUsers[0].is_dataset_uploaded) && role === 'receiver' && (
+                <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                   <List>
                     <ListItem sx={{ width: '100%', display: 'block' }}>
                       <ListItemText
@@ -1060,7 +1096,7 @@ const CollaborationDetails = () => {
                             <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleQcUpload}>
                               Upload QC Data
                             </Button>
-                            <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
+                            <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
                               <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
                               <Typography variant="body2">{file.name} will be linked to {invitedUsers[0].phenotype} for this collaboration.</Typography>
                             </Box>
@@ -1073,13 +1109,52 @@ const CollaborationDetails = () => {
                 </Box>
               )}
               {(isQcInitiateEnabled || isQcResultsEnabled) && (
-                <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
-                  <List sx={{ pt: 0, pb: 0 }}>
-                    <ListItem disableGutters sx={{ display: 'block' }}>
+                <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                  <List sx={{ py: 0 }}>
+                    <ListItem disableGutters sx={{ display: 'block', pt: 0, pb: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Typography variant="h2" sx={{ flexGrow: 1, fontSize: 20, fontWeight: 'bold' }}>
+                          Quality Control
+                        </Typography>
+                        <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
+                      </Box>
                       {role !== 'receiver' && (
                         <ListItemText
                           sx={{ width: '100%', display: 'block' }}
-                          primary={<Typography variant="h6" fontWeight="bold">Quality Control</Typography>}
+                          primary={
+                            <Box display="flex" gap={2} sx={{ my: 3 }}>
+                              {["None", "Sample Relatedness", "Population Stratification"].map((label, index) => (
+                                <Box
+                                  key={index}
+                                  display="flex"
+                                  alignItems="center"
+                                  sx={{
+                                    pr: 1.5,
+                                    borderRadius: 10,
+                                    border: '1px solid',
+                                    borderColor: 'primary.main',
+                                    boxShadow: "0px",
+                                    cursor: "pointer",
+                                    transition: "background 0.3s",
+                                    "&:hover": { backgroundColor: "#e8f1fa" },
+                                  }}
+                                >
+                                  <Checkbox
+                                    defaultChecked={index === 1} // First one checked by default
+                                    // onChange={() => handleExperimentChange(index)}
+                                    icon={<RadioButtonUncheckedRounded />}
+                                    checkedIcon={<CheckCircleIcon />}
+                                    sx={{
+                                      color: "#1976d2",
+                                      "&.Mui-checked": { color: "#1565c0" },
+                                      "& .MuiSvgIcon-root": { borderRadius: "50%" }, // Make checkbox circular
+                                    }}
+                                  />
+                                  <Typography variant="body1" sx={{ fontSize: 14 }}>{label}</Typography>
+                                </Box>
+                              ))}
+                            </Box>
+                          }
                           secondary={
                             <Box
                               sx={{
@@ -1089,8 +1164,7 @@ const CollaborationDetails = () => {
                                 width: '100%', // Ensure the Box takes full width of its parent
                               }}
                             >
-
-                              <Box sx={{ flex: 1 }}>
+                              <Box sx={{ flex: 1, mt: 1 }}>
                                 <Tooltip
                                   arrow title={
                                     isQcInitiateLoading || isQcResultsEnabled
@@ -1198,83 +1272,7 @@ const CollaborationDetails = () => {
                           }
                         />
                       )}
-                      {role === 'receiver' && (
-                        <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 2 }}>
-                          <Box
-                            sx={{
-                              display: 'flex',
-                              width: '100%',
-                              backgroundColor: '#E3F2E4', // Light green background for incomplete steps
-                              borderRadius: 50,
-                              height: 40,
-                              overflow: 'hidden',
-                              position: 'relative',
-                            }}
-                          >
-                            {/* Left section: Initiator Pending */}
-                            <Tooltip
-                              arrow title={activeStep === 0 ? 'Initiator yet to do perform Quality Control Calculation' : 'Quality Control results avilable, contact Initiator for more information'}
-                              placement="top"
-                            >
-
-                              <Box
-                                sx={{
-                                  width: '50%',
-                                  backgroundColor:
-                                    activeStep === 0
-                                      ? 'success.main' // Active step color
-                                      : activeStep > 0
-                                        ? '#E3F2E4' // Completed step background
-                                        : 'grey.300', // Incomplete step background (grey)
-                                  display: 'flex',
-                                  justifyContent: 'center',
-                                  alignItems: 'center',
-                                  color: activeStep === 0 ? 'white' : activeStep > 0 ? 'success.main' : 'text.secondary',
-                                  borderRadius: '50px 0px 0px 50px',
-                                  transition: 'background-color 0.3s ease',
-                                }}
-                              >
-                                {/* If step is completed, show checkmark icon */}
-                                {activeStep > 0 ? (
-                                  <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1, fontSize: 20 }} />
-                                ) : null}
-                                <Typography variant="body2">{steps[0]}</Typography>
-                              </Box>
-                            </Tooltip>
-                            {/* Right section: Stat Data Upload */}
-                            <Tooltip
-                              arrow title={activeStep === 1 ? 'You can now upload the Stat for GWAS Experiment' : 'GWAS Results Available, contact Initiator to learn more'}
-                              placement="top"
-                            >
-
-                              <Box
-                                sx={{
-                                  width: '50%',
-                                  backgroundColor:
-                                    activeStep === 1
-                                      ? 'success.main' // Active step color
-                                      : activeStep > 1
-                                        ? '#E3F2E4' // Completed step background
-                                        : 'grey.300', // Incomplete step background (grey)
-                                  display: 'flex',
-                                  justifyContent: 'center',
-                                  alignItems: 'center',
-                                  color: activeStep === 1 ? 'white' : activeStep > 1 ? 'success.main' : 'text.secondary',
-                                  borderRadius: '0px 50px 50px 0px',
-                                  transition: 'background-color 0.3s ease',
-                                }}
-                              >
-                                {/* If step is completed, show checkmark icon */}
-                                {activeStep > 1 ? (
-                                  <CheckCircleIcon sx={{ color: 'success.main', marginRight: 1, fontSize: 20 }} />
-                                ) : null}
-                                <Typography variant="body2">{steps[1]}</Typography>
-                              </Box>
-                            </Tooltip>
-                          </Box>
-                        </Box>
-
-                      )}
+                      {/*Place holder for Progress Bar at Receiver's End*/}
                     </ListItem>
                     {(displayQcResults && (role === 'sender' || role === 'receiver')) && (
                       <>
@@ -1286,7 +1284,7 @@ const CollaborationDetails = () => {
                                 secondary={
                                   <Box sx={{ mt: 1 }}>
                                     <Slider
-                                      value={threshold}
+                                      value={newThreshold}
                                       onChange={handleSliderChange}
                                       aria-labelledby="threshold-slider"
                                       valueLabelDisplay="auto"
@@ -1322,13 +1320,19 @@ const CollaborationDetails = () => {
                                         },
                                       }}
                                     />
-
-                                    <Typography variant="body2" gutterBottom>
-                                      Current Threshold: {threshold}
-                                    </Typography>
-                                    <Tooltip arrow title={thresholdDefined ? 'Threshold Defined' : 'Confirm your selected threshold value'} placement="bottom">
-                                      <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }} disabled={thresholdDefined}>
-                                        {thresholdDefined ? 'Threshold Defined' : 'Confirm Threshold Value'}
+                                    <Box sx={{ mb: 1 }}>
+                                      <Typography variant="body2" gutterBottom>
+                                        Current Threshold: {threshold}
+                                      </Typography>
+                                      {((newThreshold !== threshold) &&
+                                        <Typography variant="body2" gutterBottom>
+                                          New Threshold: {newThreshold}
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                    <Tooltip arrow title={newThreshold === threshold ? 'Threshold Defined' : 'Confirm your selected threshold value'} placement="bottom">
+                                      <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }} disabled={newThreshold === threshold}>
+                                        {(newThreshold === threshold) ? 'Threshold Defined' : `Confirm Threshold`}
                                       </Button>
                                     </Tooltip>
                                     {/* {matrix.length > 0 ? (
@@ -1344,515 +1348,531 @@ const CollaborationDetails = () => {
                                 }
                               />
                             </ListItem>
-                            <Divider />
+                            <Divider sx={{ borderColor: 'primary.main' }} />
                           </>
                         )}
 
                         {/* QC Results Section */}
                         {thresholdDefined && (
-                        <ListItem disableGutters sx={{ mt: 2 }}>
-                          <ListItemText
-                            primary={<strong>QC Results</strong>}
-                            secondary={
-                              qcResults ? (
-                                <Box>
-                                  {/* Total Samples Typography Block */}
-                                  <Box sx={{ mb: 2 }}>
-                                    <Typography variant="body1" fontWeight={500} color="text.primary">
-                                      Total Samples to be included in GWAS experiment:{" "}
-                                      <Box component="span" fontWeight={700} color="primary.main">
-                                        {filteredResults?.selectedSamples || 0}
-                                      </Box>{" "}
-                                      out of{" "}
-                                      <Box component="span" fontWeight={700} color="text.secondary">
-                                        {filteredResults?.totalSamples || 0}
-                                      </Box>
-                                    </Typography>
-                                  </Box>
+                          <ListItem disableGutters sx={{ mt: 1 }}>
+                            <ListItemText
+                              primary={<strong>QC Results</strong>}
+                              secondary={
+                                qcResults ? (
+                                  <Box>
+                                    {/* Total Samples Typography Block */}
+                                    <Box sx={{ mb: 2 }}>
+                                      <Typography variant="body1" fontWeight={500} color="text.primary">
+                                        Total Samples to be included in GWAS experiment:{" "}
+                                        <Box component="span" fontWeight={700} color="primary.main">
+                                          {filteredResults?.selectedSamples || 0}
+                                        </Box>{" "}
+                                        out of{" "}
+                                        <Box component="span" fontWeight={700} color="text.secondary">
+                                          {filteredResults?.totalSamples || 0}
+                                        </Box>
+                                      </Typography>
+                                    </Box>
 
-                                  {/* Accordions */}
-                                  {Object.entries(filteredResults?.userCounts || {}).map(([userId, count]) => (
-                                    <Tooltip
-                                      key={userId}
-                                      arrow title={userId !== currentUserId ? "You are not allowed to view this collection due to privacy reasons." : ""}
-                                    >
-                                      <Box>
-                                        <Accordion
-                                          disabled={userId !== currentUserId}
-                                          expanded={userId === currentUserId ? undefined : false}
-                                          elevation={0}
-                                          sx={{
-                                            mb: '10px !important',
-                                            border: '1px solid',
-                                            borderRadius: '12px !important',
-                                            borderColor: 'divider',
-                                            overflow: 'hidden',
-                                            '&:before': { display: 'none' },
-                                            '&.Mui-disabled': {
-                                              opacity: 1,
-                                              pointerEvents: 'none',
-                                              bgcolor: 'action.hover',
-                                              borderRadius: 3
-                                            },
-                                            '&.Mui-expanded': {
-                                              transition: 'all 0.3s ease',
-                                            }
-                                          }}
-                                        >
-                                          <AccordionSummary
-                                            expandIcon={userId === currentUserId ? null : <ExpandMoreIcon />}
+                                    {/* Accordions */}
+                                    {Object.entries(filteredResults?.userCounts || {}).map(([userId, count]) => (
+                                      <Tooltip
+                                        key={userId}
+                                        arrow title={userId !== currentUserId ? "You are not allowed to view this collection due to privacy reasons." : ""}
+                                      >
+                                        <Box>
+                                          <Accordion
+                                            disabled={userId !== currentUserId}
+                                            expanded={userId === currentUserId ? undefined : false}
+                                            elevation={0}
                                             sx={{
-                                              px: 3,
-                                              borderRadius: 3,
-                                              '&:hover': { bgcolor: 'action.hover' },
-                                              // Disable rotation only for current user
-                                              ...(userId === currentUserId && {
-                                                '& .MuiAccordionSummary-expandIconWrapper': {
-                                                  transform: 'none !important',
-                                                },
-                                                '& .Mui-expanded .MuiAccordionSummary-expandIconWrapper': {
-                                                  transform: 'none !important',
-                                                },
-                                              }),
+                                              mb: '10px !important',
+                                              border: '1px solid',
+                                              borderRadius: '12px !important',
+                                              borderColor: 'divider',
+                                              overflow: 'hidden',
+                                              '&:before': { display: 'none' },
+                                              '&.Mui-disabled': {
+                                                opacity: 1,
+                                                pointerEvents: 'none',
+                                                bgcolor: 'action.hover',
+                                                borderRadius: 3
+                                              },
+                                              '&.Mui-expanded': {
+                                                transition: 'all 0.3s ease',
+                                              }
                                             }}
                                           >
-                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
-                                              {/* Existing avatar and user info */}
-                                              <Box
-                                                sx={{
-                                                  width: 32,
-                                                  height: 32,
-                                                  borderRadius: '50%',
-                                                  bgcolor: userId === currentUserId ? 'primary.main' : 'grey.300',
-                                                  display: 'flex',
-                                                  alignItems: 'center',
-                                                  justifyContent: 'center',
-                                                  border: '1px solid',
-                                                  borderColor: userId === currentUserId ? 'primary.dark' : 'divider',
-                                                  '&::after': userId !== currentUserId ? undefined : {
-                                                    content: '""',
-                                                    width: 14,
-                                                    height: 14,
-                                                    borderRadius: '50%',
-                                                    bgcolor: 'white'
-                                                  }
-                                                }}
-                                              />
-                                              <Box sx={{ flexGrow: 1 }}>
-                                                <Typography
-                                                  variant="subtitle1"
-                                                  fontWeight={600}
-                                                  color={userId === currentUserId ? 'primary.main' : 'text.primary'}
-                                                  sx={{ letterSpacing: '-0.02em' }}
-                                                >
-                                                  {getUserName(userId)}
-                                                </Typography>
-                                                <Typography
-                                                  variant="body2"
-                                                  color={userId === currentUserId ? 'primary.dark' : 'text.secondary'}
-                                                  sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
-                                                >
-                                                  <Box component="span" fontWeight={500}>{count} Samples</Box>
-                                                  <Box component="span" sx={{ color: 'text.disabled' }}>•</Box>
-                                                  <Box component="span">{userId === currentUserId ? 'Your collection' : 'Collaborator'}</Box>
-                                                </Typography>
-                                              </Box>
-
-                                              {userId === currentUserId && (
+                                            <AccordionSummary
+                                              expandIcon={userId === currentUserId ? null : <ExpandMoreIcon />}
+                                              sx={{
+                                                px: 3,
+                                                borderRadius: 3,
+                                                '&:hover': { bgcolor: 'action.hover' },
+                                                // Disable rotation only for current user
+                                                ...(userId === currentUserId && {
+                                                  '& .MuiAccordionSummary-expandIconWrapper': {
+                                                    transform: 'none !important',
+                                                  },
+                                                  '& .Mui-expanded .MuiAccordionSummary-expandIconWrapper': {
+                                                    transform: 'none !important',
+                                                  },
+                                                }),
+                                              }}
+                                            >
+                                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
+                                                {/* Existing avatar and user info */}
                                                 <Box
                                                   sx={{
+                                                    width: 32,
+                                                    height: 32,
+                                                    borderRadius: '50%',
+                                                    bgcolor: userId === currentUserId ? 'primary.main' : 'grey.300',
                                                     display: 'flex',
                                                     alignItems: 'center',
-                                                    color: 'text.secondary',
-                                                    px: 1,
-                                                    border: 1,
-                                                    borderRadius: 3,
-                                                    borderColor: 'primary.main',
-                                                    '&:hover': { color: 'text.primary' }
-                                                  }}
-                                                >
-                                                  <Typography variant="subtitle2" fontWeight={500}>
-                                                    Preview
-                                                  </Typography>
-                                                </Box>
-                                              )}
-                                            </Box>
-                                          </AccordionSummary>
-
-                                          <AccordionDetails sx={{ pt: 2, pb: 2, px: 3, position: 'relative', height: '400px', }}>
-                                            {filteredResults.userSamplesList[userId] && filteredResults.userSamplesList[userId].length > 0 ? (
-                                              <Box sx={{
-                                                height: 'calc(100% - 72px)',
-                                                overflowY: 'auto',
-                                                pr: 1,
-                                              }}>
-                                                {filteredResults.userSamplesList[userId].map((sample, index) => (
-                                                  <Box
-                                                    key={index}
-                                                    sx={{
-                                                      display: 'flex',
-                                                      alignItems: 'center',
-                                                      py: 1.5,
-                                                      px: 2,
-                                                      bgcolor: 'background.paper',
-                                                      mb: 1,
-                                                      borderRadius: 3,
-                                                      border: '1px solid',
-                                                      borderColor: 'divider',
-                                                    }}
-                                                  >
-                                                    <Box sx={{
-                                                      width: 8,
-                                                      height: 8,
+                                                    justifyContent: 'center',
+                                                    border: '1px solid',
+                                                    borderColor: userId === currentUserId ? 'primary.dark' : 'divider',
+                                                    '&::after': userId !== currentUserId ? undefined : {
+                                                      content: '""',
+                                                      width: 14,
+                                                      height: 14,
                                                       borderRadius: '50%',
-                                                      bgcolor: 'primary.main',
-                                                      mr: 2,
-                                                      flexShrink: 0
-                                                    }} />
-                                                    <Typography
-                                                      variant="body1"
-                                                      fontFamily="monospace"
-                                                      sx={{
-                                                        fontWeight: 500,
-                                                        color: 'text.primary',
-                                                        wordBreak: 'break-word'
-                                                      }}
-                                                    >
-                                                      {sample}
-                                                    </Typography>
-                                                  </Box>
-                                                ))}
-                                              </Box>
-                                            ) : (
-                                              <Typography
-                                                variant="body2"
-                                                color="text.secondary"
-                                                sx={{
-                                                  py: 2,
-                                                  px: 3,
-                                                  bgcolor: 'action.hover',
-                                                  borderRadius: 3,
-                                                  border: '1px solid',
-                                                  borderColor: 'divider',
-                                                  textAlign: 'center'
-                                                }}
-                                              >
-                                                No contributions recorded yet
-                                              </Typography>
-                                            )}
-
-                                            {userId === currentUserId && filteredResults.userSamplesList[userId]?.length > 0 && (
-                                              <Box sx={{
-                                                position: 'absolute',
-                                                bottom: 0,
-                                                left: 0,
-                                                right: 0,
-                                                px: 3,
-                                                pb: 2,
-                                                bgcolor: 'background.paper'
-                                              }}>
-                                                <Button
-                                                  fullWidth
-                                                  variant="contained"
-                                                  size="large"
-                                                  onClick={() => downloadSamples(filteredResults.userSamplesList[userId], 'my_samples.json')}
-                                                  endIcon={<DownloadRounded sx={{ fontSize: '1.25rem' }} />}
-                                                  sx={{
-                                                    py: 1.5,
-                                                    borderRadius: 10,
-                                                    boxShadow: 0,
-                                                    bgcolor: 'primary.main',
-                                                    fontSize: 15,
-                                                    '&:hover': {
-                                                      bgcolor: 'primary.dark'
+                                                      bgcolor: 'white'
                                                     }
                                                   }}
-                                                >
-                                                  Export Your Samples
-                                                </Button>
+                                                />
+                                                <Box sx={{ flexGrow: 1 }}>
+                                                  <Typography
+                                                    variant="subtitle1"
+                                                    fontWeight={600}
+                                                    color={userId === currentUserId ? 'primary.main' : 'text.primary'}
+                                                    sx={{ letterSpacing: '-0.02em' }}
+                                                  >
+                                                    {getUserName(userId)}
+                                                  </Typography>
+                                                  <Typography
+                                                    variant="body2"
+                                                    color={userId === currentUserId ? 'primary.dark' : 'text.secondary'}
+                                                    sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
+                                                  >
+                                                    <Box component="span" fontWeight={500}>{count} Samples</Box>
+                                                    <Box component="span" sx={{ color: 'text.disabled' }}>•</Box>
+                                                    <Box component="span">{userId === currentUserId ? 'Your collection' : 'Collaborator'}</Box>
+                                                  </Typography>
+                                                </Box>
+
+                                                {userId === currentUserId && (
+                                                  <>
+                                                    {userId === currentUserId && filteredResults.userSamplesList[userId]?.length > 0 && (
+                                                      <Box>
+                                                        <Button
+                                                          fullWidth
+                                                          variant="contained"
+                                                          size="small"
+                                                          onClick={() => downloadSamples(filteredResults.userSamplesList[userId], 'my_samples.json')}
+                                                          endIcon={<DownloadRounded sx={{ fontSize: '10px' }} />}
+                                                          sx={{
+                                                            borderRadius: 10,
+                                                            boxShadow: 0,
+                                                            bgcolor: 'primary.main',
+                                                            fontSize: 10,
+                                                            '&:hover': {
+                                                              bgcolor: 'primary.dark'
+                                                            }
+                                                          }}
+                                                        >
+                                                          Export Your Samples
+                                                        </Button>
+                                                      </Box>
+                                                    )}
+                                                    <Box
+                                                      sx={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                      }}
+                                                    >
+                                                      <Button
+                                                        fullWidth
+                                                        variant="outlined"
+                                                        size="small"
+                                                        sx={{
+                                                          borderRadius: 10,
+                                                          boxShadow: 0,
+                                                          fontSize: 10,
+                                                        }}
+                                                      >
+                                                        Preview
+                                                      </Button>
+                                                    </Box>
+                                                  </>
+                                                )}
                                               </Box>
-                                            )}
-                                          </AccordionDetails>
-                                        </Accordion>
-                                      </Box>
-                                    </Tooltip>
-                                  ))}
-                                </Box>
+                                            </AccordionSummary>
+
+                                            <AccordionDetails sx={{ pt: 2, pb: 2, px: 3, height: '400px', }}>
+                                              {filteredResults.userSamplesList[userId] && filteredResults.userSamplesList[userId].length > 0 ? (
+                                                <Box sx={{
+                                                  height: 'calc(100%)',
+                                                  overflowY: 'auto',
+                                                  pr: 1,
+                                                }}>
+                                                  {filteredResults.userSamplesList[userId].map((sample, index) => (
+                                                    <Box
+                                                      key={index}
+                                                      sx={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        py: 1.5,
+                                                        px: 2,
+                                                        bgcolor: 'background.paper',
+                                                        mb: 1,
+                                                        borderRadius: 3,
+                                                        border: '1px solid',
+                                                        borderColor: 'divider',
+                                                      }}
+                                                    >
+                                                      <Box sx={{
+                                                        width: 8,
+                                                        height: 8,
+                                                        borderRadius: '50%',
+                                                        bgcolor: 'primary.main',
+                                                        mr: 2,
+                                                        flexShrink: 0
+                                                      }} />
+                                                      <Typography
+                                                        variant="body1"
+                                                        fontFamily="monospace"
+                                                        sx={{
+                                                          fontWeight: 500,
+                                                          color: 'text.primary',
+                                                          wordBreak: 'break-word'
+                                                        }}
+                                                      >
+                                                        {sample}
+                                                      </Typography>
+                                                    </Box>
+                                                  ))}
+                                                </Box>
+                                              ) : (
+                                                <Typography
+                                                  variant="body2"
+                                                  color="text.secondary"
+                                                  sx={{
+                                                    py: 2,
+                                                    px: 3,
+                                                    bgcolor: 'action.hover',
+                                                    borderRadius: 3,
+                                                    border: '1px solid',
+                                                    borderColor: 'divider',
+                                                    textAlign: 'center'
+                                                  }}
+                                                >
+                                                  No contributions recorded yet
+                                                </Typography>
+                                              )}
+
+
+                                            </AccordionDetails>
+                                          </Accordion>
+                                        </Box>
+                                      </Tooltip>
+                                    ))}
+                                  </Box>
 
 
 
-                              ) : (
-                                <Typography variant="body2" color="text.secondary">
-                                  No QC results to display.
-                                </Typography>
-                              )
-                            }
-                          />
-                        </ListItem>
+                                ) : (
+                                  <Typography variant="body2" color="text.secondary">
+                                    No QC results to display.
+                                  </Typography>
+                                )
+                              }
+                            />
+                          </ListItem>
                         )}
                       </>
                     )}
                     <>
                       <ListItem disableGutters>
-                        {(thresholdDefined && Object.keys(gwasResults).length === 0) && (
-                          <ListItemText
-                            primary={
-                              <Box sx={{
-                                position: 'relative',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                width: '100%',
-                                pr: 4 // Right padding for icon spacing
-                              }}>
-                                <strong>Upload Stat</strong>
-                                <Accordion
-                                  expanded={expanded}
-                                  onChange={() => setExpanded(!expanded)}
-                                  sx={{
-                                    position: 'absolute',
-                                    right: 0,
-                                    m: 0,
-                                    bgcolor: 'transparent',
-                                    boxShadow: 'none',
-                                    '&:before': { display: 'none' },
-                                    '&.Mui-expanded': {
-                                      margin: '0 !important',
-                                      position: 'absolute',
-                                      zIndex: 1
-                                    }
-                                  }}
-                                >
-                                  <AccordionSummary
-                                    expandIcon={
-                                      <Tooltip title="Show Instructions" arrow placement='left'>
-                                        <Box display={'inline-flex'} sx={{gap: 1, border: '1px solid', p:0.5, borderRadius:10,bgcolor:'#e8f1fa', borderColor:'primary.main', alignItems: 'center', alignContent: 'left'}}>
-                                        <Typography variant='subtitle2' sx={{pl: 0.5, color:'primary.main'}}>
-                                          Learn More
-                                        </Typography>
-                                        <InfoIcon sx={{
-                                          fontSize: 20,
-                                          color: 'primary.main',
-                                          '&:hover': {
-                                            color: 'primary.dark',
-                                            cursor: 'pointer'
-                                          }
-                                        }} />
-                                        </Box>
-                                      </Tooltip>
-                                    }
+                        {(displayQcResults && thresholdDefined && Object.keys(gwasResults).length === 0) && (
+                          <>
+                            <Divider sx={{ borderColor: 'primary.main', mb: 2 }} />
+                            <ListItemText
+                              primary={
+                                <Box sx={{
+                                  position: 'relative',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  width: '100%',
+                                  pr: 4 // Right padding for icon spacing
+                                }}>
+                                  <strong>Upload Stat</strong>
+                                  <Accordion
+                                    expanded={expanded}
+                                    onChange={() => setExpanded(!expanded)}
                                     sx={{
-                                      p: 0,
-                                      minHeight: 'auto !important',
-                                      '& .MuiAccordionSummary-expandIconWrapper': {
-                                        transform: 'none !important'
-                                      },
-                                      '&.Mui-expanded .MuiAccordionSummary-expandIconWrapper': {
-                                        transform: 'none !important'
-                                      },
-                                      '& .MuiAccordionSummary-content': {
-                                        m: '0 !important',
-                                        flexGrow: 0
-                                      },
+                                      position: 'absolute',
+                                      right: 0,
+                                      m: 0,
+                                      bgcolor: 'transparent',
+                                      boxShadow: 'none',
+                                      '&:before': { display: 'none' },
                                       '&.Mui-expanded': {
-                                        minHeight: 'auto !important'
+                                        margin: '0 !important',
+                                        position: 'absolute',
+                                        zIndex: 1
                                       }
                                     }}
+                                  >
+                                    <AccordionSummary
+                                      expandIcon={
+                                        <Tooltip title="Show Instructions" arrow placement='left'>
+                                          <Box display={'inline-flex'} sx={{ gap: 1 }}>
+                                            <Button
+                                              fullWidth
+                                              variant="contained"
+                                              size="small"
+                                              endIcon={<InfoIcon />}
+                                              sx={{
+                                                borderRadius: 10,
+                                                boxShadow: 0,
+                                                fontSize: 10,
+                                                bgcolor: '#e8f1fa',
+                                                color: 'primary.main',
+                                                '&:hover':{color:'white'}
+                                              }}
+                                            >
+                                              Learn More
+                                            </Button>
+                                          </Box>
+                                        </Tooltip>
+                                      }
+                                      sx={{
+                                        p: 0,
+                                        minHeight: 'auto !important',
+                                        '& .MuiAccordionSummary-expandIconWrapper': {
+                                          transform: 'none !important'
+                                        },
+                                        '&.Mui-expanded .MuiAccordionSummary-expandIconWrapper': {
+                                          transform: 'none !important'
+                                        },
+                                        '& .MuiAccordionSummary-content': {
+                                          m: '0 !important',
+                                          flexGrow: 0
+                                        },
+                                        '&.Mui-expanded': {
+                                          minHeight: 'auto !important'
+                                        }
+                                      }}
 
-                                  />
-                                </Accordion>
-                              </Box>
-                            }
-                            secondary={
-                              <>
-                                <AccordionDetails sx={{
-                                  p: expanded ? 2 : 0,
-                                  bgcolor: '#e8f1fa',
-                                  borderRadius: '11px',
-                                  mt: 1,
-                                  display: expanded ? 'block' : 'none'
-                                }}>
-                                  <Typography variant="body1" sx={{
-                                    pb: 0.5,
-                                    mb: 1,
-                                    color: 'text.primary',
-                                    borderBottom: '1px solid',
-                                    borderColor: 'divider',
-                                    fontWeight: 500
-                                  }}>
-                                    Instructions
-                                  </Typography>
-                                  <Box sx={{ position: 'relative' }}>
-                                    {/* Download Section */}
-                                    <Box sx={{ mb: 3, display: 'flex', position: 'relative' }}>
-                                      <ArrowRightIcon sx={{
-                                        fontSize: '20px',
-                                        color: 'primary.main',
-                                        flexShrink: 0,
-                                        mt: '2px'
-                                      }} />
-                                      <Box sx={{ flexGrow: 1, ml: 1.5 }}>
-                                        <Typography variant="body2" sx={{
-                                          mb: 1.5,
-                                          color: 'text.primary',
-                                          fontWeight: 500
-                                        }}>
-                                          Download Script to Generate Stat Data
-                                        </Typography>
-                                        <Button
-                                          variant="outlined"
-                                          size="small"
-                                          endIcon={<DownloadRounded />}
-                                          sx={{
-                                            borderRadius: 10,
-                                            boxShadow: 'none',
-                                            textTransform: 'none',
-                                            '&:hover': { boxShadow: 'none' }
-                                          }}
-                                        >
-                                          Python Script
-                                        </Button>
-                                        <Typography variant="caption" color="text.secondary" sx={{
-                                          display: 'block',
-                                          mt: 1,
-                                          fontSize: '0.75rem'
-                                        }}>
-                                          Python script for standardized SNP data formatting
-                                        </Typography>
-                                      </Box>
-                                    </Box>
-
-                                    {/* Format Section */}
-                                    <Box sx={{ mb: 3, display: 'flex' }}>
-                                      <ArrowRightIcon sx={{
-                                        fontSize: '20px',
-                                        color: 'primary.main',
-                                        flexShrink: 0,
-                                        mt: '2px'
-                                      }} />
-                                      <Box sx={{ flexGrow: 1, ml: 1.5 }}>
-                                        <Typography variant="body2" sx={{
-                                          mb: 1.5,
-                                          color: 'text.primary',
-                                          fontWeight: 500
-                                        }}>
-                                          Accepted Formats
-                                        </Typography>
-                                        <Box sx={{ display: 'flex', gap: 1.5 }}>
-                                          <Chip
-                                            label="CSV"
-                                            color="primary"
-                                            size="small"
-                                            variant="outlined"
-                                            icon={<CheckCircleIcon fontSize="small" />}
-                                            sx={{ borderRadius: 3, fontWeight: 500 }}
-                                          />
-                                          <Chip
-                                            label="JSON"
-                                            color="primary"
-                                            size="small"
-                                            variant="outlined"
-                                            icon={<CheckCircleIcon fontSize="small" />}
-                                            sx={{ borderRadius: 3, fontWeight: 500 }}
-                                          />
-                                        </Box>
-                                      </Box>
-                                    </Box>
-
-                                    {/* Example Preview */}
-                                    <Box sx={{ mb: 2, display: 'flex' }}>
-                                      <ArrowRightIcon sx={{
-                                        fontSize: '20px',
-                                        color: 'primary.main',
-                                        flexShrink: 0,
-                                        mt: '2px'
-                                      }} />
-                                      <Box sx={{ flexGrow: 1, ml: 1.5 }}>
-                                        <Typography variant="body2" sx={{
-                                          mb: 1.5,
-                                          color: 'text.primary',
-                                          fontWeight: 500
-                                        }}>
-                                          File Structure Example
-                                        </Typography>
-                                        <Box sx={{
-                                          border: '1px solid',
-                                          borderColor: 'primary.main',
-                                          borderRadius: 2,
-                                          overflow: 'hidden',
-                                          bgcolor: 'common.white',
-                                          maxWidth: 400
-                                        }}>
-                                          <img
-                                            src={statSampleImage}
-                                            alt="File format example"
-                                            style={{
-                                              width: '100%',
-                                              objectFit: 'contain',
-                                              padding: 5,
-                                              borderRadius: 10
-                                            }}
-                                          />
-                                        </Box>
-                                        <Typography variant="caption" color="text.secondary" sx={{
-                                          display: 'block',
-                                          mt: 1,
-                                          fontSize: '0.75rem'
-                                        }}>
-                                          Required columns: snp_ids, case, controls
-                                        </Typography>
-                                      </Box>
-                                    </Box>
-                                  </Box>
-                                </AccordionDetails>
-
-                                {/* File Upload Section */}
-                                <Tooltip placement="bottom" arrow title={file ? "File already selected" : "Upload file must be in CSV or JSON format."}>
-                                  <span>
-                                    <Button
-                                      variant="outlined"
-                                      component="label"
-                                      fullWidth
-                                      sx={{ mt: 1, borderRadius: 10 }}
-                                    >
-                                      {file ? file.name : "Select Stat Data"}
-                                      <input type="file" hidden onChange={handleFileUpload} />
-                                    </Button>
-                                  </span>
-                                </Tooltip>
-
-                                {/* Submit Button */}
-                                {file && (
-                                  <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleSubmitStat}>
-                                    Submit Stat Data
-                                  </Button>
-                                )}
-                              </>
-                            }
-                            sx={{
-                              '& .MuiListItemText-primary': {
-                                width: '100%',
-                                display: 'block'
-                              },
-                              '& .MuiListItemText-secondary': {
-                                width: '100%'
+                                    />
+                                  </Accordion>
+                                </Box>
                               }
-                            }}
-                          />
+                              secondary={
+                                <>
+                                  <AccordionDetails sx={{
+                                    p: expanded ? 2 : 0,
+                                    bgcolor: '#e8f1fa',
+                                    borderRadius: '11px',
+                                    mt: 1,
+                                    display: expanded ? 'block' : 'none'
+                                  }}>
+                                    <Typography variant="body1" sx={{
+                                      pb: 0.5,
+                                      mb: 1,
+                                      color: 'text.primary',
+                                      borderBottom: '1px solid',
+                                      borderColor: 'divider',
+                                      fontWeight: 500
+                                    }}>
+                                      Instructions
+                                    </Typography>
+                                    <Box sx={{ position: 'relative' }}>
+                                      {/* Download Section */}
+                                      <Box sx={{ mb: 3, display: 'flex', position: 'relative' }}>
+                                        <ArrowRightIcon sx={{
+                                          fontSize: '20px',
+                                          color: 'primary.main',
+                                          flexShrink: 0,
+                                          mt: '2px'
+                                        }} />
+                                        <Box sx={{ flexGrow: 1, ml: 1.5 }}>
+                                          <Typography variant="body2" sx={{
+                                            mb: 1.5,
+                                            color: 'text.primary',
+                                            fontWeight: 500
+                                          }}>
+                                            Download Script to Generate Stat Data
+                                          </Typography>
+                                          <Button
+                                            variant="outlined"
+                                            size="small"
+                                            endIcon={<DownloadRounded />}
+                                            sx={{
+                                              borderRadius: 10,
+                                              boxShadow: 'none',
+                                              textTransform: 'none',
+                                              '&:hover': { boxShadow: 'none' }
+                                            }}
+                                          >
+                                            Python Script
+                                          </Button>
+                                          <Typography variant="caption" color="text.secondary" sx={{
+                                            display: 'block',
+                                            mt: 1,
+                                            fontSize: '0.75rem'
+                                          }}>
+                                            Python script for standardized SNP data formatting
+                                          </Typography>
+                                        </Box>
+                                      </Box>
+
+                                      {/* Format Section */}
+                                      <Box sx={{ mb: 3, display: 'flex' }}>
+                                        <ArrowRightIcon sx={{
+                                          fontSize: '20px',
+                                          color: 'primary.main',
+                                          flexShrink: 0,
+                                          mt: '2px'
+                                        }} />
+                                        <Box sx={{ flexGrow: 1, ml: 1.5 }}>
+                                          <Typography variant="body2" sx={{
+                                            mb: 1.5,
+                                            color: 'text.primary',
+                                            fontWeight: 500
+                                          }}>
+                                            Accepted Formats
+                                          </Typography>
+                                          <Box sx={{ display: 'flex', gap: 1.5 }}>
+                                            <Chip
+                                              label="CSV"
+                                              color="primary"
+                                              size="small"
+                                              variant="outlined"
+                                              icon={<CheckCircleIcon fontSize="small" />}
+                                              sx={{ borderRadius: 3, fontWeight: 500 }}
+                                            />
+                                            <Chip
+                                              label="JSON"
+                                              color="primary"
+                                              size="small"
+                                              variant="outlined"
+                                              icon={<CheckCircleIcon fontSize="small" />}
+                                              sx={{ borderRadius: 3, fontWeight: 500 }}
+                                            />
+                                          </Box>
+                                        </Box>
+                                      </Box>
+
+                                      {/* Example Preview */}
+                                      <Box sx={{ mb: 2, display: 'flex' }}>
+                                        <ArrowRightIcon sx={{
+                                          fontSize: '20px',
+                                          color: 'primary.main',
+                                          flexShrink: 0,
+                                          mt: '2px'
+                                        }} />
+                                        <Box sx={{ flexGrow: 1, ml: 1.5 }}>
+                                          <Typography variant="body2" sx={{
+                                            mb: 1.5,
+                                            color: 'text.primary',
+                                            fontWeight: 500
+                                          }}>
+                                            File Structure Example
+                                          </Typography>
+                                          <Box sx={{
+                                            border: '1px solid',
+                                            borderColor: 'primary.main',
+                                            borderRadius: 2,
+                                            overflow: 'hidden',
+                                            bgcolor: 'common.white',
+                                            maxWidth: 400
+                                          }}>
+                                            <img
+                                              src={statSampleImage}
+                                              alt="File format example"
+                                              style={{
+                                                width: '100%',
+                                                objectFit: 'contain',
+                                                padding: 5,
+                                                borderRadius: 10
+                                              }}
+                                            />
+                                          </Box>
+                                          <Typography variant="caption" color="text.secondary" sx={{
+                                            display: 'block',
+                                            mt: 1,
+                                            fontSize: '0.75rem'
+                                          }}>
+                                            Required columns: snp_ids, case, controls
+                                          </Typography>
+                                        </Box>
+                                      </Box>
+                                    </Box>
+                                  </AccordionDetails>
+
+                                  {/* File Upload Section */}
+                                  <Tooltip placement="bottom" arrow title={file ? "File already selected" : "Upload file must be in CSV or JSON format."}>
+                                    <span>
+                                      <Button
+                                        variant="outlined"
+                                        component="label"
+                                        fullWidth
+                                        sx={{ mt: 1, borderRadius: 10 }}
+                                      >
+                                        {file ? file.name : "Select Stat Data"}
+                                        <input type="file" hidden onChange={handleFileUpload} />
+                                      </Button>
+                                    </span>
+                                  </Tooltip>
+
+                                  {/* Submit Button */}
+                                  {file && (
+                                    <>
+                                      <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleSubmitStat}>
+                                        Submit Stat Data
+                                      </Button>
+                                      <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
+                                        <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                                        <Typography variant="body2">{file.name} will be linked to {creator.phenotype} for this collaboration.</Typography>
+                                      </Box>
+                                    </>
+                                  )}
+                                </>
+                              }
+                              sx={{
+                                '& .MuiListItemText-primary': {
+                                  width: '100%',
+                                  display: 'block'
+                                },
+                                '& .MuiListItemText-secondary': {
+                                  width: '100%'
+                                }
+                              }}
+                            />
+                          </>
                         )}
                       </ListItem>
                     </>
                   </List>
                 </Box>
               )}
-              {(isGwasInitiateEnabled || isGwasResultsEnabled) && (
-                <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
-                  <List>
+              {(isGwasInitiateEnabled || isGwasResultsEnabled) && thresholdDefined && (
+                <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                  <List sx={{ pt: 0 }}>
                     <>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Typography variant="h2" sx={{ flexGrow: 1, fontSize: 20, fontWeight: 'bold' }}>
+                          GWAS Experiment
+                        </Typography>
+                        <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
+                      </Box>
                       {role === 'sender' && (
                         <ListItem disableGutters>
                           <ListItemText
-                            primary={<Typography variant="h6" fontWeight="bold">GWAS Experiment</Typography>}
                             secondary={
                               <Box
                                 sx={{
@@ -1956,22 +1976,41 @@ const CollaborationDetails = () => {
                       )}
                     </>
                     {(gwasResultsAvailable) && (
-                      <Box>
+                      <Box sx={{ mt: 2 }}>
                         {/* <Typography variant="h6" gutterBottom>
                           <strong>GWAS Experiment</strong>
                         </Typography> */}
 
                         <Tabs
                           value={selectedTab}
-                          onChange={(event, newValue) => setSelectedTab(newValue)}
+                          onChange={(event, newValue) => {
+                            if (selectedTab !== 0) {
+                              setSelectedTab(newValue);
+                            }
+                          }}
                           variant="scrollable"
                           scrollButtons="auto"
-                          sx={{ borderBottom: 1, bgcolor: 'white', border: 1, borderRadius: 3, borderColor: '#85b1e6' }}
+                          sx={{
+                            borderBottom: 1,
+                            bgcolor: 'white',
+                            border: 1,
+                            borderRadius: 3,
+                            borderColor: '#85b1e6'
+                          }}
                         >
                           {placeholderTabs.map((tab, index) => (
-                            <Tab key={index} label={tab} />
+                            selectedTab === 0 && index !== 0 ? (
+                              <Tooltip key={index} title="Results not available" arrow>
+                                <span>
+                                  <Tab label={tab} disabled />
+                                </span>
+                              </Tooltip>
+                            ) : (
+                              <Tab key={index} label={tab} />
+                            )
                           ))}
                         </Tabs>
+
 
                         {/* {gwasResultPreview.map((userData) => (
                           <Box key={userData.userId} sx={{ mb: 4 }}>
@@ -2020,46 +2059,49 @@ const CollaborationDetails = () => {
                         <Box sx={{ pt: 2 }}>
                           {selectedTab === 0 && (
                             <Box>
-                              {gwasResultPreview.map((userData) => (
-                                <Box key={userData.userId} sx={{ mb: 4 }}>
-                                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, borderBottom: 1, borderColor: 'divider', p: 1 }}>
-                                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                                      {getUserName(userData.userId)} - SNP Results
-                                    </Typography>
-                                    <Button
-                                      variant="contained"
-                                      size="small"
-                                      color="primary"
-                                      sx={{ borderRadius: 10, fontSize: 10, boxShadow: 0 }}
-                                      endIcon={<DownloadRounded />}
-                                      onClick={() => handleDownload(userData.userId, userData.sortedSnps)}
-                                    >
-                                      Download Results
-                                    </Button>
-                                  </Box>
-                                  <TableContainer sx={{ maxHeight: 400, overflow: 'auto', borderRadius: 2, border: 1, borderColor: '#a3c8ed', mt: 2 }}>
-                                    <Table stickyHeader>
-                                      <TableHead>
-                                        <TableRow>
-                                          <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>SNP</TableCell>
-                                          <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>Chi-Square</TableCell>
-                                          <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>P-Value</TableCell>
-                                        </TableRow>
-                                      </TableHead>
-                                      <TableBody>
-                                        {userData.sortedSnps.map((snp) => (
-                                          <TableRow key={snp.snpKey}>
-                                            <TableCell align="center">{snp.snpKey}</TableCell>
-                                            <TableCell align="center">{snp.chi.toFixed(3)}</TableCell>
-                                            <TableCell align="center">{snp.pValue.toFixed(3)}</TableCell>
+                              {gwasResultPreview
+                                .filter(userData => userData.userId === currentUserId || userData.userId === "aggregated") // Keep only the current user and combined data
+                                .map(userData => (
+                                  <Box key={userData.userId} sx={{ mb: 4 }}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, borderBottom: 1, borderColor: 'divider', p: 1 }}>
+                                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                                        {userData.userId === "aggregated" ? "Joint Results Chi-Square" : `Individual Results - Chi-Square`}
+                                      </Typography>
+                                      <Button
+                                        variant="contained"
+                                        size="small"
+                                        color="primary"
+                                        sx={{ borderRadius: 10, fontSize: 10, boxShadow: 0 }}
+                                        endIcon={<DownloadRounded />}
+                                        onClick={() => handleDownload(userData.userId, userData.sortedSnps)}
+                                      >
+                                        Download Results
+                                      </Button>
+                                    </Box>
+                                    <TableContainer sx={{ maxHeight: 400, overflow: 'auto', borderRadius: 2, border: 1, borderColor: '#a3c8ed', mt: 2 }}>
+                                      <Table stickyHeader>
+                                        <TableHead>
+                                          <TableRow>
+                                            <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>SNP</TableCell>
+                                            <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>Chi-Square</TableCell>
+                                            <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>P-Value</TableCell>
                                           </TableRow>
-                                        ))}
-                                      </TableBody>
-                                    </Table>
-                                  </TableContainer>
-                                </Box>
-                              ))}
+                                        </TableHead>
+                                        <TableBody>
+                                          {userData.sortedSnps.map(snp => (
+                                            <TableRow key={snp.snpKey}>
+                                              <TableCell align="center">{snp.snpKey}</TableCell>
+                                              <TableCell align="center">{snp.chi.toFixed(3)}</TableCell>
+                                              <TableCell align="center">{snp.pValue.toFixed(3)}</TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    </TableContainer>
+                                  </Box>
+                                ))}
                             </Box>
+
                           )}
                           {selectedTab !== 0 && (
                             <Typography variant="body1">Placeholder content for {placeholderTabs[selectedTab]}</Typography>
@@ -2113,12 +2155,12 @@ const CollaborationDetails = () => {
           <Card sx={{ height: '100%', marginBottom: '20px', p: 0, boxShadow: 'none' }}>
             <CardContent sx={{ p: 0 }}>
               {/* Header */}
-              <Box sx={{ bgcolor: '#f9fdff', p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+              <Box sx={{ bgcolor: '#ffffff', p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <Typography variant="h6" sx={{ flexGrow: 1 }}>
                     <strong>Collaborators</strong>
                   </Typography>
-                  <Divider sx={{ flexGrow: 30, borderColor: 'black' }} />
+                  <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                 </Box>
                 <List>
                   <ListItem disableGutters>
@@ -2126,13 +2168,12 @@ const CollaborationDetails = () => {
                       primary={`${senderInfo.name} (Initiator)`}
                     />
                   </ListItem>
-                  <Divider />
+                  <Divider sx={{ borderColor: 'primary.main' }} />
 
                   {invitedUsers.map((user, index) => (
                     <ListItem key={index} disableGutters sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <ListItemText
-                        primary={user.name}
-                        secondary={`Phenotype: ${user.phenotype}`}
+                        primary={`${user.name} (Collaborator)`}
                       />
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
                         {role === 'sender' && user.status === 'pending' ? (
@@ -2182,12 +2223,12 @@ const CollaborationDetails = () => {
                   ))}
                 </List>
               </Box>
-              <Box sx={{ bgcolor: '#f9fdff', p: 2, mt: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+              <Box sx={{ bgcolor: '#ffffff', p: 2, mt: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <Typography variant="h6" sx={{ flexGrow: 1 }}>
                     <strong>Collaboration Status</strong>
                   </Typography>
-                  <Divider sx={{ flexGrow: 30, borderColor: 'black' }} />
+                  <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                 </Box>
                 {/*Will have the progress bar here*/}
                 <Stepper activeStep={progressActiveStep} orientation="vertical">

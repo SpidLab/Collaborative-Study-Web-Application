@@ -52,7 +52,7 @@ const NewUser = () => {
 
       console.log('Response:', response.data); // Debugging
       setError('');
-      setSuccess('User created successfully'); // Set success message
+      setSuccess('Your profile is successfully created!'); // Set success message
       // Clear form fields
       setUsername('');
       setName(''); // Clear name field

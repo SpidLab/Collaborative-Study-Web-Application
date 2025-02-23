@@ -1039,6 +1039,7 @@ def get_collaboration_details(uuid):
         user_id = str(current_user.id)
 
         is_sender = collaboration['creator_id'] == ObjectId(user_id)
+        sender_id = str(collaboration['creator_id'])  
         sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
         sender_name = sender_user["name"] if sender_user else "Unknown"
          
@@ -1047,34 +1048,53 @@ def get_collaboration_details(uuid):
         for invited_user in collaboration.get('invited_users', []):
             receiver_user = db.users.find_one({"_id": ObjectId(invited_user["user_id"])})
             receiver_name = receiver_user["name"] if receiver_user else "Unknown"
-            phenotype = invited_user["phenotype"]
             status = invited_user["status"]
             user_dataset_id= str(invited_user["user_dataset_id"])
+
+            invited_user_dataset = db.datasets.find_one({'_id': ObjectId(user_dataset_id)})
+            invited_user_dataset_uploaded = True if invited_user_dataset and len(invited_user_dataset.get('data', [])) > 0 else False
+
+            phenotype = invited_user_dataset.get('phenotype') if invited_user_dataset else None
+            number_of_samples = invited_user_dataset.get('number_of_samples') if invited_user_dataset else None
 
             invited_users_details.append({
                 'user_id': str(invited_user["user_id"]),
                 'name': receiver_name,
-                'phenotype': phenotype,
                 'status': status,
-                'user_dataset_id': user_dataset_id
+                'user_dataset_id': user_dataset_id,
+                'is_dataset_uploaded': invited_user_dataset_uploaded,
+                'phenotype': phenotype,
+                'number_of_samples': number_of_samples
             })
+    
+
         
-        invited_user_dataset = db.datasets.find_one({'_id': ObjectId(user_dataset_id)})
-        invited_user_dataset_uploaded = True if invited_user_dataset and len(invited_user_dataset.get('data', [])) > 0 else False
 
-
+        # To fetch the data of creator/initator
         dataset = db.datasets.find_one(
             {'_id': ObjectId(collaboration["creator_dataset_id"])},
             {'phenotype': 1, 'number_of_samples': 1}
         )
 
-        phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
-        number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
-
+        # To fetch the data of invited_user/collaborator
+        # invited_dataset = db.datasets.find_one(
+        #     {'_id': ObjectId(collaboration["user_dataset_id"])},
+        #     {'phenotype': 1, 'number_of_samples': 1}
+        # )
+        # Making multiple queries can be optimised but using for time being
+        creator_phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
+        creator_number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
         creator_dataset = {
-            'phenotype': phenotype,
-            'samples': number_of_samples
+            'phenotype': creator_phenotype,
+            'samples': creator_number_of_samples
         }
+
+        # invited_user_phenotype = invited_dataset.get('phenotype', 'N/A') if invited_dataset else 'N/A'
+        # invited_user_number_of_samples = invited_dataset.get('number_of_samples', '0') if invited_dataset else '0'
+        # invited_user_dataset = {
+        #     'phenotype': invited_user_phenotype,
+        #     'samples': invited_user_number_of_samples
+        # }
 
         collaboration_details = {
             'uuid': collaboration['uuid'],
@@ -1082,11 +1102,11 @@ def get_collaboration_details(uuid):
             'experiments': collaboration.get('experiments', []),
             'phenotype': collaboration.get('phenotype', None),
             'samples': collaboration.get('samples', None),
-            'sender_id': is_sender,
+            'is_sender': is_sender,
+            'sender_id': sender_id,
             'sender_name': sender_name,
             'invited_users': invited_users_details,
-            'datasets': creator_dataset,
-            'user_dataset_uploaded' : invited_user_dataset_uploaded
+            'creator_datasets': creator_dataset,
         }
 
         return jsonify(collaboration_details), 200
@@ -1980,9 +2000,24 @@ def calculate_chi_square():
     except Exception as e:
         print(f"Unexpected error: {str(e)}")
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    
+
+@app.route('/api/calculate_chi_square_results/<collab_uuid>', methods=['GET'])
+def get_chi_square_results(collab_uuid):
+    try:
+        # Fetch the chi-square results from the database (after calculation)
+        collaboration = db['collaborations'].find_one({"uuid": collab_uuid})
+        chi_square_results = collaboration.get('chi_square_results', {})
+
+        if not chi_square_results:
+            return jsonify({"error": "Chi-square results not found"}), 404
+
+        return jsonify({"chi_square_results": chi_square_results}), 200
+
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-#----- Below code is older version ------
-#----- Below code is older version ------

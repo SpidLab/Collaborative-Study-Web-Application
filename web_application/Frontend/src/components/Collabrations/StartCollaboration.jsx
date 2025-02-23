@@ -59,7 +59,7 @@ const StartCollaboration = () => {
         // TODO: Replace this with actual API call when backend is ready
         // const response = await axios.get("YOUR_BACKEND_API_URL");
         // setExperimentOptions(response.data);
-        const data = ["Chi-Square", "Odd-Even Ratio"];
+        const data = ["Chi-Square", "Odd Ratio"];
         setExperimentOptions(data);
       } catch (error) {
         console.error("Error fetching experiment options:", error);
@@ -81,6 +81,7 @@ const StartCollaboration = () => {
       setExperimentList([...experimentList, selectedExperiment]);
     }
   };
+  
   const handleDeleteExperiment = (index) => {
     const updatedList = experimentList.filter((_, i) => i !== index);
     setExperimentList(updatedList);
@@ -283,8 +284,9 @@ const StartCollaboration = () => {
               ))}
             </Box>*/}
             <FormControl fullWidth sx={{ mb: 1 }}>
-              <InputLabel id="experiment-select-label" >Experiment Name</InputLabel>
+              <InputLabel id="experiment-select-label" >Experiment Type</InputLabel>
               <Select 
+                value=""
                 onChange={handleAddExperiment} 
                 labelId="experiment-select-label"
                 label="Experiment Name"
