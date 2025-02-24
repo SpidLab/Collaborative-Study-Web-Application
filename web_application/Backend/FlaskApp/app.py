@@ -25,6 +25,8 @@ from calculate_coefficients import compute_coefficients_array
 from fuzzywuzzy import process
 import uuid
 from stats import calc_chi_pvalue
+from bson import ObjectId
+
 # from stats import calc_chi_pvalue
 
 app = Flask(__name__)
@@ -1875,43 +1877,44 @@ def get_filtered_qc_results(collab_uuid):
         if threshold_update_result.matched_count == 0:
             return jsonify({"error": "Failed to update threshold."}), 500
 
-        # Get full QC results
         full_qc_results = collaboration_data.get("full_qc", [])
-        filtered_results = {}
 
-        # Filter results based on the threshold and phi value
+        final_results = {}
+
         for result in full_qc_results:
-            if result["phi_value"] < threshold:
-                user1, sample1 = result["user1"], result["sample1"]
-                user2, sample2 = result["user2"], result["sample2"]
+            user1, sample1 = result["user1"], result["sample1"]
+            user2, sample2 = result["user2"], result["sample2"]
+            phi_value = result["phi_value"]
 
-                # Add samples to filtered results
-                if user1 not in filtered_results:
-                    filtered_results[user1] = set()
-                filtered_results[user1].add(sample1)
+            if user1 not in final_results:
+                final_results[user1] = set()
+            if user2 not in final_results:
+                final_results[user2] = set()
 
-                if user2 not in filtered_results:
-                    filtered_results[user2] = set()
-                filtered_results[user2].add(sample2)
+            if phi_value > threshold:
+                final_results[user1].discard(sample1)
+                final_results[user2].discard(sample2)
+            else:
+                final_results[user1].add(sample1)
+                final_results[user2].add(sample2)
 
-        # Convert sets to lists for JSON serialization
-        for user_id in filtered_results:
-            filtered_results[user_id] = list(filtered_results[user_id])
+        for user_id in final_results:
+            final_results[user_id] = list(final_results[user_id])
 
-        # Store the filtered results in the database
         filtered_qc_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
-            {"$set": {"filtered_qc": filtered_results}}
+            {"$set": {"filtered_qc": final_results}}
         )
 
         if filtered_qc_update_result.matched_count == 0:
             return jsonify({"error": "Failed to update filtered QC results."}), 500
 
-        return jsonify(filtered_results), 200
+        return jsonify(final_results), 200
 
     except Exception as e:
         print(f"Error retrieving and filtering QC results: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
 
 def handle_error(error_message, status_code):
     logging.error(error_message)
