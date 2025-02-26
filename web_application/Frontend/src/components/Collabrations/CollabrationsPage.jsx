@@ -107,7 +107,7 @@ const UserInvitation = ({
           <Grid item xs={12} sm={4} sx={{ textAlign: { xs: 'left', sm: 'right' }, mt: { xs: 2, sm: 0 } }}>
             {type === 'pending' && (
               <Box>
-                <Tooltip title="Accept Invitation">
+                <Tooltip arrow title="Accept Invitation">
                   <Button
                     variant="contained"
                     color="primary"
@@ -119,7 +119,7 @@ const UserInvitation = ({
                     Accept
                   </Button>
                 </Tooltip>
-                <Tooltip title="Reject Invitation">
+                <Tooltip arrow title="Reject Invitation">
                   <Button
                     variant="outlined"
                     color="primary"
@@ -134,7 +134,7 @@ const UserInvitation = ({
               </Box>
             )}
             {type === 'sent' && (
-                <Tooltip title="Withdraw Invitation">
+                <Tooltip arrow title="Withdraw on-going Invitation">
                   <Button
                     variant="contained"
                     color="primary"
@@ -438,6 +438,7 @@ const CollaborationsPage = () => {
                   {/* Actions Section */}
                   <Grid item xs={12} sm={4} sx={{ textAlign: { xs: 'left', sm: 'right' }, mt: { xs: 2, sm: 0 } }}>
                     {invitation.sender_id === currentUserId && (
+                       <Tooltip arrow title="Learn more about this collaboration.">
                       <Button
                         variant="outlined"
                         color="primary"
@@ -447,9 +448,10 @@ const CollaborationsPage = () => {
                       >
                         View Details
                       </Button>
+                      </Tooltip>
                     )}
                     {invitation.receiver_id === currentUserId && (
-                      <Tooltip title="Revoke Invitation">
+                      <Tooltip arrow title="Revoke on-going Invitation">
                         <Button
                           variant="outlined"
                           color="secondary"
