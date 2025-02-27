@@ -221,7 +221,7 @@ const StartCollaboration = () => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" align="left" gutterBottom sx={{ fontWeight: 'light' }}>
+      <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'light' }}>
         Start a New Collaboration
       </Typography>
       <Card sx={{ height: '100%', marginBottom: '20px', border: '1px solid #ccc', borderRadius: 2, boxShadow: 'none' }}>
