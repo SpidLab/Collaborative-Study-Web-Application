@@ -108,7 +108,7 @@ export default function LoggedIn({ onLogout }) {
         </MenuItem>
       </Menu>
 
-      <Button color="inherit" component={RouterLink} to="/session">Session</Button>
+      {/* <Button color="inherit" component={RouterLink} to="/session">Session</Button> */}
 
       <Tooltip title="Account settings">
         <IconButton

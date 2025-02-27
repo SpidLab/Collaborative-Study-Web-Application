@@ -137,7 +137,7 @@ const CollaborationDetails = () => {
         setTimeout(() => {
           window.location.reload();
         }, 1000);
-      } 
+      }
 
       setSnackbar({
         open: true,
@@ -175,13 +175,12 @@ const CollaborationDetails = () => {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
+      
+      setTimeout(() => {
+        window.location.reload(); // reloads the page after 2 seconds
+      }, 1000);
 
-      if (response === 200) {
-        checkQcStatus();
-        setTimeout(() => {
-          window.location.reload(); // reloads the page after 2 seconds
-        }, 1000);  
-      }
+      checkQcStatus();
 
       // console.log('File uploaded successfully:', response.data);
       setSnackbar({
@@ -268,7 +267,7 @@ const CollaborationDetails = () => {
         setTimeout(() => {
           window.location.reload();
         }, 100);
-  
+
       }
     } catch (error) {
       console.error('Error accepting invitation:', error);
@@ -345,7 +344,7 @@ const CollaborationDetails = () => {
         setTimeout(() => {
           window.location.reload(); // reloads the page after 2 seconds
         }, 1000);
-      } 
+      }
       // setThresholdDefined(false);
       // setThreshold(newThreshold);
 
@@ -527,7 +526,7 @@ const CollaborationDetails = () => {
         setTimeout(() => {
           window.location.reload(); // reloads the page after 2 seconds
         }, 1000);
-      } 
+      }
 
 
       setSnackbar({
@@ -742,24 +741,24 @@ const CollaborationDetails = () => {
       filteredData: [],
       userSamplesList: {}
     };
-  
+
     const userSamples = {};
     const allUniqueSamples = new Set();
     const selectedUniqueSamples = new Set();
-  
+
     // Filtered data for display (phi < threshold)
     const filteredData = qcResults.filter(({ phi_value }) => phi_value < newThreshold);
-  
+
     // Process ALL QC results to determine sample inclusion
     qcResults.forEach(({ user1, sample1, user2, sample2, phi_value }) => {
       // Track all unique samples
       allUniqueSamples.add(sample1);
       allUniqueSamples.add(sample2);
-  
+
       // Initialize user sets if needed
       if (!userSamples[user1]) userSamples[user1] = new Set();
       if (!userSamples[user2]) userSamples[user2] = new Set();
-  
+
       // Add/remove samples based on threshold comparison
       if (phi_value > newThreshold) {
         userSamples[user1].delete(sample1);
@@ -769,18 +768,18 @@ const CollaborationDetails = () => {
         userSamples[user2].add(sample2);
       }
     });
-  
+
     // Calculate selected samples from final user sets
     Object.values(userSamples).forEach(samples => {
       samples.forEach(sample => selectedUniqueSamples.add(sample));
     });
-  
+
     // Convert sets to arrays for output
     const userSamplesList = {};
     Object.keys(userSamples).forEach(user => {
       userSamplesList[user] = Array.from(userSamples[user]);
     });
-  
+
     return {
       userCounts: Object.fromEntries(
         Object.entries(userSamples).map(([user, samples]) => [user, samples.size])
@@ -835,12 +834,12 @@ const CollaborationDetails = () => {
         alert("No samples to download.");
         return;
       }
-  
+
       // Wrap the samples in a list property
       const jsonContent = JSON.stringify({ "Sample IDs": samples }, null, 2);
-      
+
       const blob = new Blob([jsonContent], { type: "application/json" });
-  
+
       const link = document.createElement("a");
       const url = window.URL.createObjectURL(blob);
       link.href = url;
@@ -854,7 +853,7 @@ const CollaborationDetails = () => {
       alert(`Download failed: ${error.message}`);
     }
   };
-  
+
 
   const handleSliderChange = (event, newValue) => {
     setNewThreshold(newValue);
@@ -862,26 +861,26 @@ const CollaborationDetails = () => {
   };
 
   // utility functions for Data Export
-  const convertToCSV = (data,file_name) => {
+  const convertToCSV = (data, file_name) => {
     const title = `${file_name} - GWAS Experiment Report`;
     const headers = ['SNP ID,Chi-Square,P-Value'];
     const rows = data.map(snp =>
       `"${snp.snpKey}",${snp.chi},${snp.pValue}`
     );
-    return [title,...headers, ...rows].join('\n');
+    return [title, ...headers, ...rows].join('\n');
   };
 
   const handleDownload = (userId, data) => {
     try {
 
       let file_name;
-      if (userId !== 'aggregated'){
+      if (userId !== 'aggregated') {
         file_name = getUserName(userId);
-      }else{
+      } else {
         file_name = 'Joint'
       }
 
-      const csvContent = convertToCSV(data,file_name);
+      const csvContent = convertToCSV(data, file_name);
 
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
@@ -1152,17 +1151,25 @@ const CollaborationDetails = () => {
                     />
                   </ListItem>
                   <Divider sx={{ borderColor: 'primary.main' }} />
-
                   <ListItem disableGutters>
                     <ListItemText
                       primary={<Tooltip arrow title='Samples to be included in this collaboration' placement='right'><strong>Number of Samples</strong></Tooltip>}
                       secondary={
-
                         <Box display={'inline-flex'} gap={2} sx={{ color: 'text.primary' }}>
                           <Typography variant="body2">{senderInfo?.name} : {creator?.samples}</Typography>
                           <Typography variant="body2">{invitedUsers[0]?.name}: {invitedUsers[0]?.number_of_samples}</Typography>
                         </Box>
-
+                      }
+                    />
+                  </ListItem>
+                  <Divider sx={{ borderColor: 'primary.main' }} />
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={<Tooltip arrow title='Quality Control Scheme' placement='right'><strong>QC Scheme</strong></Tooltip>}
+                      secondary={
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                          <Chip key='Sample Relatedness' label='Sample Relatedness' variant="contained" sx={{backgroundColor:"#D1E3F6", color:'#0D3B69'}}/>
+                        </Box>
                       }
                     />
                   </ListItem>
@@ -1221,49 +1228,15 @@ const CollaborationDetails = () => {
                         </Typography>
                         <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                       </Box>
-                      {(role ==='receiver' && !thresholdDefined) && (
-                        <Box sx={{ bgcolor: '#e8f1fa', mt: 2,p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2, width: '100%' }} display={'flex'}>
-                        <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                        <Typography variant="body2">Results will be available soon.</Typography>
-                      </Box>
+                      {(role === 'receiver' && !thresholdDefined) && (
+                        <Box sx={{ bgcolor: '#e8f1fa', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2, width: '100%' }} display={'flex'}>
+                          <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                          <Typography variant="body2">Results will be available soon.</Typography>
+                        </Box>
                       )}
                       {role === 'sender' && (
                         <ListItemText
                           sx={{ width: '100%', display: 'block' }}
-                          primary={
-                            <Box display="flex" gap={2} sx={{ my: 3 }}>
-                              {["None", "Sample Relatedness", "Population Stratification"].map((label, index) => (
-                                <Box
-                                  key={index}
-                                  display="flex"
-                                  alignItems="center"
-                                  sx={{
-                                    pr: 1.5,
-                                    borderRadius: 10,
-                                    border: '1px solid',
-                                    borderColor: 'primary.main',
-                                    boxShadow: "0px",
-                                    cursor: "pointer",
-                                    transition: "background 0.3s",
-                                    "&:hover": { backgroundColor: "#e8f1fa" },
-                                  }}
-                                >
-                                  <Checkbox
-                                    defaultChecked={index === 1} // First one checked by default
-                                    // onChange={() => handleExperimentChange(index)}
-                                    icon={<RadioButtonUncheckedRounded />}
-                                    checkedIcon={<CheckCircleIcon />}
-                                    sx={{
-                                      color: "#1976d2",
-                                      "&.Mui-checked": { color: "#1565c0" },
-                                      "& .MuiSvgIcon-root": { borderRadius: "50%" }, // Make checkbox circular
-                                    }}
-                                  />
-                                  <Typography variant="body1" sx={{ fontSize: 14 }}>{label}</Typography>
-                                </Box>
-                              ))}
-                            </Box>
-                          }
                           secondary={
                             <Box
                               sx={{
@@ -1472,7 +1445,7 @@ const CollaborationDetails = () => {
                                     {/* Total Samples Typography Block */}
                                     <Box sx={{ mb: 2 }}>
                                       <Typography variant="body1" fontWeight={500} color="text.primary">
-                                        Total Samples to be included in GWAS experiment:{" "}
+                                        Total samples to be included in GWAS experiment:{" "}
                                         <Box component="span" fontWeight={700} color="primary.main">
                                           {filteredResults?.selectedSamples || 0}
                                         </Box>{" "}
@@ -1706,7 +1679,7 @@ const CollaborationDetails = () => {
                       <ListItem disableGutters>
                         {(thresholdDefined && !collaboration?.stat_uploaded) && (
                           <>
-                          {collaboration?.missing_stat_user?.includes(currentUserId) ? (<ListItemText
+                            {collaboration?.missing_stat_user?.includes(currentUserId) ? (<ListItemText
                               primary={
                                 <Box sx={{
                                   position: 'relative',
@@ -1749,7 +1722,7 @@ const CollaborationDetails = () => {
                                                 fontSize: 10,
                                                 bgcolor: '#e8f1fa',
                                                 color: 'primary.main',
-                                                '&:hover':{color:'white'}
+                                                '&:hover': { color: 'white' }
                                               }}
                                             >
                                               Learn More
@@ -1960,11 +1933,11 @@ const CollaborationDetails = () => {
                                   width: '100%'
                                 }
                               }}
-                            />):(
+                            />) : (
                               <Box sx={{ bgcolor: '#e8f1fa', p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2, width: '100%' }} display={'flex'}>
-                              <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                              <Typography variant="body2">Waiting for Collaborators to upload their Stat data.</Typography>
-                            </Box>
+                                <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                                <Typography variant="body2">Waiting for Collaborators to upload their Stat data.</Typography>
+                              </Box>
                             )}
                           </>
                         )}
@@ -1983,11 +1956,11 @@ const CollaborationDetails = () => {
                         </Typography>
                         <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                       </Box>
-                      {(role ==='receiver' && !gwasResultsAvailable) && (
-                        <Box sx={{ bgcolor: '#e8f1fa', mt: 2,p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2, width: '100%' }} display={'flex'}>
-                        <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                        <Typography variant="body2">Results will be available soon.</Typography>
-                      </Box>
+                      {(role === 'receiver' && !gwasResultsAvailable) && (
+                        <Box sx={{ bgcolor: '#e8f1fa', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2, width: '100%' }} display={'flex'}>
+                          <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                          <Typography variant="body2">Results will be available soon.</Typography>
+                        </Box>
                       )}
                       {role === 'sender' && (
                         <ListItem disableGutters>

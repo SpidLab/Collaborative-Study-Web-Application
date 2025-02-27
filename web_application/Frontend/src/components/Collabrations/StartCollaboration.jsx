@@ -386,7 +386,7 @@ const StartCollaboration = () => {
                       }}
                     >
                       <Checkbox
-                        defaultChecked={index === 1} // First one checked by default
+                        defaultChecked={index === 0} // First one checked by default
                         // onChange={() => handleExperimentChange(index)}
                         icon={<RadioButtonUncheckedRounded />}
                         checkedIcon={<CheckCircleIcon />}

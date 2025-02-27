@@ -2012,31 +2012,28 @@ def handle_error(error_message, status_code):
 
 def calculate_and_store_chi_square_results(collaboration_uuid):
     try:
-        # Fetch the collaboration document using the UUID
         collaboration = db['collaborations'].find_one({"uuid": collaboration_uuid})
 
         if not collaboration:
             return {"error": "Collaboration not found"}, 404
 
-        # Extract SNP data from the stats field
         stats = collaboration.get('stats', {})
         if not stats:
             return {"error": "No SNP data found in the stats field"}, 400
 
-        # Debug: Log stats structure
-        print(f"Stats structure: {stats}")
-
-        # Store chi-square results
         chi_square_results = {}
-        aggregated_snp_data = {}  # To store SNP data across all users
+        aggregated_snp_data = {}
 
         for user_id, user_stats in stats.items():
             user_snp_stats = {}
 
             for snp_id, snp_data in user_stats.items():
-                # Extract case and control counts
                 case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
                 control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
+
+                # Replace zero counts with 0.5 to avoid issues with zero expected frequencies
+                case_counts = [0.5 if count == 0 else count for count in case_counts]
+                control_counts = [0.5 if count == 0 else count for count in control_counts]
 
                 user_snp_stats[snp_id] = [case_counts, control_counts]
 
@@ -2045,10 +2042,10 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
                     aggregated_snp_data[snp_id] = {}
                 if user_id not in aggregated_snp_data[snp_id]:
                     aggregated_snp_data[snp_id][user_id] = np.zeros((2, 3))
+
                 aggregated_snp_data[snp_id][user_id][0] += np.array(case_counts)
                 aggregated_snp_data[snp_id][user_id][1] += np.array(control_counts)
 
-            # Compute chi-square results for this user
             chi_square_results[user_id] = calc_chi_pvalue(user_snp_stats)
 
         # Compute chi-square results for the aggregated table
@@ -2057,11 +2054,16 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
             total_table = np.zeros((2, 3))
             for user_table in user_tables.values():
                 total_table += user_table
+
+            # Replace zero counts with 0.5 in the aggregated table to prevent zero expected frequencies
+            total_table = np.where(total_table == 0, 0.5, total_table)
+
+            # Ensure chi-square calculation is performed only on valid tables
             aggregated_results[snp_id] = calc_chi_pvalue({snp_id: total_table})[snp_id]
 
         chi_square_results["aggregated"] = aggregated_results
 
-        # Store the structured chi-square results in the collaboration document
+        # Storing chi-square results in the database
         db['collaborations'].update_one(
             {"uuid": collaboration_uuid},
             {"$set": {"chi_square_results": chi_square_results}},
