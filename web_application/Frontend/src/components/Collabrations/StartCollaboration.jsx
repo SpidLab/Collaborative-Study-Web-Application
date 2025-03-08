@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Container, TextField, Button, List, ListItem, ListItemText, IconButton, Typography, Box, Divider,
+  Container, TextField, Button, Checkbox, IconButton, Typography, Box, Divider,
   Snackbar, Alert, CircularProgress, Grid, Card, CardContent, Chip, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
-import { Add, Delete, Upload, Info } from '@mui/icons-material';
+import { Add, Delete, Upload, Info, RadioButtonUncheckedRounded } from '@mui/icons-material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SearchPage from '../Search/Search';
 import axios from 'axios';
 import URL from '../../config';
 import InfoIcon from '@mui/icons-material/Info';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+
 
 
 //we need to make changes here
@@ -115,6 +117,12 @@ const StartCollaboration = () => {
       return;
     }
 
+    if (!selectedDataset) {
+      setSnackbar({ open: true, message: "Please select a dataset.", severity: 'error' });
+      return;
+    }
+
+
     setIsLoading(true);
     const collaborationData = {
       collabName,
@@ -213,7 +221,7 @@ const StartCollaboration = () => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" align="left" gutterBottom sx={{ fontWeight: 'light' }}>
+      <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'light' }}>
         Start a New Collaboration
       </Typography>
       <Card sx={{ height: '100%', marginBottom: '20px', border: '1px solid #ccc', borderRadius: 2, boxShadow: 'none' }}>
@@ -285,12 +293,12 @@ const StartCollaboration = () => {
             </Box>*/}
             <FormControl fullWidth sx={{ mb: 1 }}>
               <InputLabel id="experiment-select-label" >Experiment Type</InputLabel>
-              <Select 
+              <Select
                 value=""
-                onChange={handleAddExperiment} 
+                onChange={handleAddExperiment}
                 labelId="experiment-select-label"
                 label="Experiment Name"
-                sx={{borderRadius: 2, borderColor: 'divider'}}>
+                sx={{ borderRadius: 2, borderColor: 'divider' }}>
                 {experimentOptions.map((option, index) => (
                   <MenuItem key={index} value={option}>
                     {option}
@@ -334,7 +342,7 @@ const StartCollaboration = () => {
                 2
               </Box>
               <Typography variant="h6" sx={{ flexGrow: 1 }}>
-                Upload
+                Quality Control
               </Typography>
               <Divider sx={{ flexGrow: 30, borderColor: 'black' }} />
             </Box>
@@ -357,6 +365,42 @@ const StartCollaboration = () => {
                 onChange={(e) => setSamples(e.target.value)}
               /> */}
 
+              {/* Place Holder Choose Quality Control Scheme  */}
+              <Box sx={{p:1.5, backgroundColor: '#FAFAFA', border: '1px solid', borderColor: 'divider', borderRadius: 2}}>
+                Choose your QC Scheme
+                <Box display="flex" gap={2} sx={{ mt: 1.5 }}>
+                  {["None", "Sample Relatedness", "Population Stratification"].map((label, index) => (
+                    <Box
+                      key={index}
+                      display="flex"
+                      alignItems="center"
+                      sx={{
+                        pr: 1.5,
+                        borderRadius: 10,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        boxShadow: "0px",
+                        cursor: "pointer",
+                        transition: "background 0.3s",
+                        "&:hover": { backgroundColor: "#e8f1fa" },
+                      }}
+                    >
+                      <Checkbox
+                        defaultChecked={index === 0} // First one checked by default
+                        // onChange={() => handleExperimentChange(index)}
+                        icon={<RadioButtonUncheckedRounded />}
+                        checkedIcon={<CheckCircleIcon />}
+                        sx={{
+                          color: "#1976d2",
+                          "&.Mui-checked": { color: "#1565c0" },
+                          "& .MuiSvgIcon-root": { borderRadius: "50%" }, // Make checkbox circular
+                        }}
+                      />
+                      <Typography variant="body1" sx={{ fontSize: 14 }}>{label}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
               {/* **New Dropdown for Selecting Datasets** */}
               <FormControl fullWidth sx={{ mt: 2 }}>
                 <InputLabel id="dataset-select-label">Select Dataset</InputLabel>
@@ -375,8 +419,11 @@ const StartCollaboration = () => {
                       </MenuItem>
                     ))
                   ) : (
-                    <MenuItem value="" disabled>
-                      No Datasets Available
+                    <MenuItem value="">
+                      No Datasets Available. You can upload your datasets
+                      <a href="/upload" target="_blank" rel="noopener noreferrer" style={{ color: 'primary.main', textDecoration: 'underline', marginLeft: '5px' }}>
+                        here
+                      </a>.
                     </MenuItem>
                   )}
                 </Select>

@@ -1068,9 +1068,28 @@ def get_collaboration_details(uuid):
                 'phenotype': phenotype,
                 'number_of_samples': number_of_samples
             })
-    
 
+
+        # To check if the Stat Exist and which user has uploaded their stat data for conditional UI Rendering
+        stats = collaboration.get('stats', {})
+        stat_uploaded_users = []
+        for su_id, user_obj in stats.items():
+            if user_obj and isinstance(user_obj, dict) and len(user_obj) > 0:
+                stat_uploaded_users.append(su_id)
         
+        stat_uploaded = True
+        waiting_user_to_upload_stat = []
+
+        if sender_id not in stat_uploaded_users:
+            stat_uploaded = False
+            waiting_user_to_upload_stat.append(sender_id)
+
+        for invited_user in invited_users_details:
+            u_id = invited_user.get("user_id")
+    
+            if u_id not in stat_uploaded_users:
+                stat_uploaded = False
+                waiting_user_to_upload_stat.append(u_id)
 
         # To fetch the data of creator/initator
         dataset = db.datasets.find_one(
@@ -1109,6 +1128,8 @@ def get_collaboration_details(uuid):
             'sender_name': sender_name,
             'invited_users': invited_users_details,
             'creator_datasets': creator_dataset,
+            "missing_stat_user": list(set(waiting_user_to_upload_stat)),
+            "stat_uploaded": stat_uploaded
         }
 
         return jsonify(collaboration_details), 200
@@ -1450,6 +1471,8 @@ def upload_csv_stats():
         logging.error(f'Unexpected error: {str(e)}')
         logging.error(traceback.format_exc())
         return jsonify({'message': 'An unexpected error occurred', 'error': str(e)}), 500
+
+
 
 
 # @app.route('/api/upload_csv', methods=['POST'])
@@ -1842,6 +1865,79 @@ def get_initial_qc_matrix(collab_uuid):
         print(f"Error retrieving QC results matrix: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+
+
+# @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
+# def get_filtered_qc_results(collab_uuid):
+#     try:
+#         # Fetch collaboration data
+#         collaboration_data = fetch_collaboration_data(collab_uuid)
+#         if not collaboration_data:
+#             return jsonify({"error": "Collaboration not found."}), 404
+
+#         # Get the threshold value from the request body (or fallback to the default in collaboration data)
+#         threshold = request.json.get("threshold", collaboration_data.get("threshold", 0.08))
+#         print("Threshold received:", threshold)
+
+#         # Reference to MongoDB collection
+#         collaboration_collection = db["collaborations"]
+
+#         # Check if threshold was already set in the database
+#         existing_threshold = collaboration_data.get("threshold")
+
+#         if existing_threshold is not None:
+#             # First, remove 'stats' and 'chi_square_results' if threshold was already set
+#             collaboration_collection.update_one(
+#                 {"uuid": collab_uuid},
+#                 {"$unset": {"stats": "", "chi_square_results": ""}}
+#             )
+
+#         # Update threshold in the database
+#         threshold_update_result = collaboration_collection.update_one(
+#             {"uuid": collab_uuid},
+#             {"$set": {"threshold": threshold}}
+#         )
+
+#         if threshold_update_result.matched_count == 0:
+#             return jsonify({"error": "Failed to update threshold."}), 500
+
+#         # Get full QC results
+#         full_qc_results = collaboration_data.get("full_qc", [])
+#         filtered_results = {}
+
+#         # Filter results based on the threshold and phi value
+#         for result in full_qc_results:
+#             if result["phi_value"] < threshold:
+#                 user1, sample1 = result["user1"], result["sample1"]
+#                 user2, sample2 = result["user2"], result["sample2"]
+
+#                 # Add samples to filtered results
+#                 if user1 not in filtered_results:
+#                     filtered_results[user1] = set()
+#                 filtered_results[user1].add(sample1)
+
+#                 if user2 not in filtered_results:
+#                     filtered_results[user2] = set()
+#                 filtered_results[user2].add(sample2)
+
+#         # Convert sets to lists for JSON serialization
+#         for user_id in filtered_results:
+#             filtered_results[user_id] = list(filtered_results[user_id])
+
+#         # Store the filtered results in the database
+#         filtered_qc_update_result = collaboration_collection.update_one(
+#             {"uuid": collab_uuid},
+#             {"$set": {"filtered_qc": filtered_results}}
+#         )
+
+#         if filtered_qc_update_result.matched_count == 0:
+#             return jsonify({"error": "Failed to update filtered QC results."}), 500
+
+#         return jsonify(filtered_results), 200
+
+#     except Exception as e:
+#         print(f"Error retrieving and filtering QC results: {str(e)}")
+#         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
 def get_filtered_qc_results(collab_uuid):
