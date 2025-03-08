@@ -3,7 +3,7 @@ import json
 
 def main():
     with app.app_context():
-        uuid = "0639c170-e109-4d0a-9117-8d65ad570340"
+        uuid = "a9f10c50-db97-401b-b44c-3da0cad371e7"
         collaboration_data = initiate_qc(uuid)
 
         if collaboration_data:
