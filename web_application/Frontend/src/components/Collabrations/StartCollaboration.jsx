@@ -17,15 +17,11 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 const StartCollaboration = () => {
   const [collabName, setCollabName] = useState('');
   // const [experimentName, setExperimentName] = useState('');
-  // const [experimentName, setExperimentName] = useState('');
   const [experimentList, setExperimentList] = useState([]);
-  const [experimentOptions, setExperimentOptions] = useState([]);
   const [experimentOptions, setExperimentOptions] = useState([]);
   // const [phenoType, setPhenotype] = useState('');
   // const [samples, setSamples] = useState('');
   // const [rawData, setRawData] = useState(null);
-  const [csvFile, setCSVFile] = useState(null);
-  const [fileName, setFileName] = useState('');
   const [csvFile, setCSVFile] = useState(null);
   const [fileName, setFileName] = useState('');
   const [selectedUsers, setSelectedUsers] = useState([]);
@@ -85,35 +81,9 @@ const StartCollaboration = () => {
     const selectedExperiment = event.target.value;
     if (selectedExperiment && !experimentList.includes(selectedExperiment)) {
       setExperimentList([...experimentList, selectedExperiment]);
-  useEffect(() => {
-    const fetchOptions = async () => {
-      try {
-        // TODO: Replace this with actual API call when backend is ready
-        // const response = await axios.get("YOUR_BACKEND_API_URL");
-        // setExperimentOptions(response.data);
-        const data = ["Chi-Square", "Odd Ratio"];
-        setExperimentOptions(data);
-      } catch (error) {
-        console.error("Error fetching experiment options:", error);
-      }
-    };
-    fetchOptions();
-  }, []);
-
-  // const handleAddExperiment = () => {
-  //   if (experimentName.trim()) {
-  //     setExperimentList([...experimentList, experimentName]);
-  //     setExperimentName('');
-  //   }
-  // };
-
-  const handleAddExperiment = (event) => {
-    const selectedExperiment = event.target.value;
-    if (selectedExperiment && !experimentList.includes(selectedExperiment)) {
-      setExperimentList([...experimentList, selectedExperiment]);
     }
   };
-  
+
   const handleDeleteExperiment = (index) => {
     const updatedList = experimentList.filter((_, i) => i !== index);
     setExperimentList(updatedList);
@@ -139,24 +109,7 @@ const StartCollaboration = () => {
   const handleDragOver = (event) => {
     event.preventDefault();
   };
-  const handleFileChange = (event) => {
-    const file = event.target.files[0];
-    setCSVFile(file);
-    setFileName(file.name);
-  };
-
-  const handleDrop = (event) => {
-    event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    setCSVFile(file);
-    setFileName(file.name);
-  };
-
-  const handleDragOver = (event) => {
-    event.preventDefault();
-  };
   const handleCreateCollaboration = async () => {
-    // console.log("Selected Users:", selectedUsers);
     // console.log("Selected Users:", selectedUsers);
 
     if (selectedUsers.length === 0) {
@@ -219,18 +172,6 @@ const StartCollaboration = () => {
           }
         });
       }
-      if (csvFile) {
-        const formData = new FormData();
-        formData.append('file', csvFile);
-        formData.append('dataset_id', selectedDataset.dataset_id);
-
-        await axios.post(`${URL}/api/update_qc_data`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-      }
 
       setSnackbar({
         open: true,
@@ -245,11 +186,7 @@ const StartCollaboration = () => {
       // setRawData(null);
       setCSVFile(null);
       setFileName('');
-      setCSVFile(null);
-      setFileName('');
       setSelectedUsers([]);
-      setSelectedDataset('');
-      setExperimentOptions([]);
       setSelectedDataset('');
       setExperimentOptions([]);
       setResetSearch(prev => !prev);
@@ -278,7 +215,6 @@ const StartCollaboration = () => {
   };
 
   const handleDatasetChange = (event) => {
-    const selectedDataset = event.target.value;
     const selectedDataset = event.target.value;
     setSelectedDataset(selectedDataset);
   };
@@ -327,7 +263,6 @@ const StartCollaboration = () => {
           />
 
           <Box mt={2}>
-            {/* <TextField
             {/* <TextField
               label="Experiment Name"
               variant="outlined"
@@ -476,7 +411,6 @@ const StartCollaboration = () => {
                   label="Select Dataset"
                   onChange={handleDatasetChange}
                   sx={{ borderRadius: 2, borderColor: 'divider' }}
-                  sx={{ borderRadius: 2, borderColor: 'divider' }}
                 >
                   {datasets.length > 0 ? (
                     datasets.map((dataset, index) => (
@@ -545,47 +479,7 @@ const StartCollaboration = () => {
                   </Typography>
                 </label>
               </Box>
-              <Box
-                sx={{
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  borderRadius: 2,
-                  padding: 2,
-                  textAlign: 'center',
-                  marginTop: 2,
-                  backgroundColor: '#fafafa',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.3s',
-                  '&:hover': {
-                    backgroundColor: '#f0f0f0',
-                  },
-                }}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-              >
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleFileChange}
-                  style={{ display: 'none' }}
-                  id="csv-file-input"
-                />
-                <label htmlFor="csv-file-input" style={{ display: 'block', cursor: 'pointer' }}>
-                  <IconButton color="primary" component="span">
-                    <CloudUploadIcon sx={{ fontSize: 40 }} />
-                  </IconButton>
-                  <Typography variant="body1">
-                    {fileName || 'Upload Dataset File'}
-                  </Typography>
-                </label>
-              </Box>
             </Box>
-            {(csvFile && selectedDataset) && (
-              <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
-                <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                <Typography variant="body2">{fileName} will be linked to {selectedDataset.phenotype} for this collaboration.</Typography>
-              </Box>
-            )}
             {(csvFile && selectedDataset) && (
               <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
                 <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
@@ -655,7 +549,6 @@ const StartCollaboration = () => {
           size="large"
           onClick={handleCreateCollaboration}
           disabled={isLoading}
-          sx={{ py: 2, fontSize: '1.1rem', borderRadius: 100 }}
           sx={{ py: 2, fontSize: '1.1rem', borderRadius: 100 }}
         >
           {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Create Collaboration'}

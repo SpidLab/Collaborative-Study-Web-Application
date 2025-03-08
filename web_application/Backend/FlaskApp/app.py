@@ -1476,88 +1476,6 @@ def update_qc_data():
         logging.error(f'Unexpected error: {str(e)}')
         return jsonify({'message': 'An error occurred while processing the metadata', 'error': str(e)}), 500
 
-@app.route('/api/update_qc_data', methods=['POST'])
-def update_qc_data():
-    try:
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            logging.error("Authorization header missing")
-            return jsonify({"error": "Authorization header missing"}), 401
-
-        token = auth_header.split()[1]
-        current_user = User.verify_auth_token(token)
-
-        if not current_user:
-            logging.error("Invalid token or user not found")
-            return jsonify({"error": "Invalid token or user not found"}), 401
-
-        user_id = current_user.id
-
-        # Get the dataset ID and file from the request
-        dataset_id = request.form.get('dataset_id')  # Expecting dataset_id in JSON payload
-        if not dataset_id:
-            return jsonify({"error": "Dataset ID is required"}), 400
-
-        file = request.files['file']
-
-        if not file or file.filename == '':
-            return jsonify({"error": "CSV file is required"}), 400
-
-        if not file.filename.endswith('.csv'):
-            return jsonify({"error": "Only CSV files are supported"}), 400
-
-        # Read the file directly into a DataFrame, setting the first column as sample_id
-        df = pd.read_csv(file, index_col=0)
-        df.index.name = 'sample_id'  # Set the index name
-
-        if not df.empty:
-            data = {}
-        if not df.empty:
-            data = {}
-
-            # Store each row in the data dictionary using sample_id as the key
-            for sample_id, row in df.iterrows():
-                data[str(sample_id)] = row.to_dict()
-            # Store each row in the data dictionary using sample_id as the key
-            for sample_id, row in df.iterrows():
-                data[str(sample_id)] = row.to_dict()
-
-        # Get the dataset from the DB
-        dataset = db['datasets'].find_one({"_id": ObjectId(dataset_id)})
-        if not dataset:
-            return jsonify({"error": "Dataset not found"}), 404
-
-
-        # Update the dataset in the DB with the new data
-        db['datasets'].update_one(
-            {"_id": ObjectId(dataset_id)},
-            {"$set": {"data": data}}
-        )
-
-        return jsonify({"message": "Dataset updated successfully"}), 200
-
-        # Get the dataset from the DB
-        dataset = db['datasets'].find_one({"_id": ObjectId(dataset_id)})
-        if not dataset:
-            return jsonify({"error": "Dataset not found"}), 404
-
-
-        # Update the dataset in the DB with the new data
-        db['datasets'].update_one(
-            {"_id": ObjectId(dataset_id)},
-            {"$set": {"data": data}}
-        )
-
-        return jsonify({"message": "Dataset updated successfully"}), 200
-
-    except Exception as e:
-        logging.error(f'Error updating dataset with CSV data: {str(e)}')
-        return jsonify({"error": "An error occurred while processing the CSV file", "details": str(e)}), 500
-
-
-        logging.error(f'Error updating dataset with CSV data: {str(e)}')
-        return jsonify({"error": "An error occurred while processing the CSV file", "details": str(e)}), 500
-
 
 
 @app.route('/api/upload_csv_stats', methods=['POST'])
@@ -1632,8 +1550,6 @@ def upload_csv_stats():
 
             # Update the collaborations entry to add or merge user-specific stats
             result = db['collaborations'].update_one(
-            # Update the collaborations entry to add or merge user-specific stats
-            result = db['collaborations'].update_one(
                 {"uuid": collaboration_uuid},
                 {"$set": {f"stats.{user_id}": user_stats}},  # Store data under stats.{user_id}
                 upsert=True
@@ -1654,6 +1570,8 @@ def upload_csv_stats():
         logging.error(f'Unexpected error: {str(e)}')
         logging.error(traceback.format_exc())
         return jsonify({'message': 'An unexpected error occurred', 'error': str(e)}), 500
+
+
 
 
 # @app.route('/api/upload_csv', methods=['POST'])
@@ -1930,7 +1848,6 @@ def get_combined_datasets(collab_uuid):
 
         # Get threshold and dataset IDs
         threshold = collaboration_data.get("threshold", 1)
-        threshold = collaboration_data.get("threshold", 1)
         invited_users = collaboration_data.get("invited_users", [])
         creator_dataset_id = collaboration_data.get("creator_dataset_id")
 
@@ -1993,8 +1910,6 @@ def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
 #         print(f"Error storing results: {str(e)}")
 # init qc
 @app.route('/api/datasets/<collab_uuid>', methods=['POST'])
-# init qc
-@app.route('/api/datasets/<collab_uuid>', methods=['POST'])
 def initiate_qc(collab_uuid):
     try:
         # Get the combined datasets and threshold from the collaboration data
@@ -2004,9 +1919,6 @@ def initiate_qc(collab_uuid):
             return df  # This is already a JSON response
 
         print("Got datasets")
-        # print(df)
-        print(df)
-        
         # print(df)
         print(df)
         
@@ -2040,11 +1952,8 @@ def get_initial_qc_matrix(collab_uuid):
         # Get the QC results matrix from the collaboration data
         full_qc_results = collaboration_data.get("full_qc", [])
         threshold_value = collaboration_data.get("threshold", None)
-        threshold_value = collaboration_data.get("threshold", None)
-        threshold_value = collaboration_data.get("threshold", None)
 
         if not full_qc_results:
-            return jsonify({"message": "No QC results available for this collaboration."}), 201
             return jsonify({"message": "No QC results available for this collaboration."}), 201
 
         # Return the full QC results matrix as a JSON response
@@ -2055,7 +1964,8 @@ def get_initial_qc_matrix(collab_uuid):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
+
+# @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
 # def get_filtered_qc_results(collab_uuid):
 #     try:
 #         # Fetch collaboration data
@@ -2127,6 +2037,7 @@ def get_initial_qc_matrix(collab_uuid):
 #         print(f"Error retrieving and filtering QC results: {str(e)}")
 #         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
 def get_filtered_qc_results(collab_uuid):
     try:
         # Fetch collaboration data
@@ -2151,16 +2062,6 @@ def get_filtered_qc_results(collab_uuid):
                 {"$unset": {"stats": "", "chi_square_results": ""}}
             )
 
-        # Check if threshold was already set in the database
-        existing_threshold = collaboration_data.get("threshold")
-
-        if existing_threshold is not None:
-            # First, remove 'stats' and 'chi_square_results' if threshold was already set
-            collaboration_collection.update_one(
-                {"uuid": collab_uuid},
-                {"$unset": {"stats": "", "chi_square_results": ""}}
-            )
-
         # Update threshold in the database
         threshold_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
@@ -2173,7 +2074,6 @@ def get_filtered_qc_results(collab_uuid):
         full_qc_results = collaboration_data.get("full_qc", [])
 
         final_results = {}
-        final_results = {}
 
         for result in full_qc_results:
             user1, sample1 = result["user1"], result["sample1"]
@@ -2184,24 +2084,7 @@ def get_filtered_qc_results(collab_uuid):
                 final_results[user1] = set()
             if user2 not in final_results:
                 final_results[user2] = set()
-            user1, sample1 = result["user1"], result["sample1"]
-            user2, sample2 = result["user2"], result["sample2"]
-            phi_value = result["phi_value"]
 
-            if user1 not in final_results:
-                final_results[user1] = set()
-            if user2 not in final_results:
-                final_results[user2] = set()
-
-            if phi_value > threshold:
-                final_results[user1].discard(sample1)
-                final_results[user2].discard(sample2)
-            else:
-                final_results[user1].add(sample1)
-                final_results[user2].add(sample2)
-
-        for user_id in final_results:
-            final_results[user_id] = list(final_results[user_id])
             if phi_value > threshold:
                 final_results[user1].discard(sample1)
                 final_results[user2].discard(sample2)
@@ -2215,19 +2098,16 @@ def get_filtered_qc_results(collab_uuid):
         filtered_qc_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
             {"$set": {"filtered_qc": final_results}}
-            {"$set": {"filtered_qc": final_results}}
         )
 
         if filtered_qc_update_result.matched_count == 0:
             return jsonify({"error": "Failed to update filtered QC results."}), 500
 
         return jsonify(final_results), 200
-        return jsonify(final_results), 200
 
     except Exception as e:
         print(f"Error retrieving and filtering QC results: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
 
 
 def handle_error(error_message, status_code):

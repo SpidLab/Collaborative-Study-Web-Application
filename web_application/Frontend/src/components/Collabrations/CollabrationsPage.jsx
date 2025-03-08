@@ -79,7 +79,6 @@ const UserInvitation = ({
 
   return (
     <Card variant="outlined" sx={{ mb: 2, borderRadius: 3  }}>
-    <Card variant="outlined" sx={{ mb: 2, borderRadius: 3  }}>
       <CardContent>
         <Grid container alignItems="center">
           {/* Information Section */}
@@ -116,7 +115,6 @@ const UserInvitation = ({
                     startIcon={<CheckCircleIcon />}
                     onClick={handleAccept}
                     sx={{ mr: 1, borderRadius: 10 }}
-                    sx={{ mr: 1, borderRadius: 10 }}
                   >
                     Accept
                   </Button>
@@ -125,11 +123,9 @@ const UserInvitation = ({
                   <Button
                     variant="outlined"
                     color="primary"
-                    color="primary"
                     size="small"
                     startIcon={<CancelIcon />}
                     onClick={handleReject}
-                    sx={{ borderRadius:10}}
                     sx={{ borderRadius:10}}
                   >
                     Reject
@@ -145,7 +141,6 @@ const UserInvitation = ({
                     size="small"
                     startIcon={<UndoIcon />}
                     onClick={handleWithdraw}
-                    sx={{ borderRadius:10}}
                     sx={{ borderRadius:10}}
                   >
                     Withdraw
@@ -181,7 +176,6 @@ const CollaborationsPage = () => {
           },
         });
         // console.log('invitation data: ',response.data);
-        // console.log('invitation data: ',response.data);
 
         const { user_id, invitations } = response.data;
 
@@ -190,10 +184,8 @@ const CollaborationsPage = () => {
         );
         const sent = invitations.filter(
           (invitation) => invitation.sender_id === user_id && invitation.status !== 'withdrawn'
-          (invitation) => invitation.sender_id === user_id && invitation.status !== 'withdrawn'
         );
         const accepted = invitations.filter(
-          (invitation) => invitation.status === 'accepted' && (invitation.sender_id === user_id || invitation.receiver_id === user_id)
           (invitation) => invitation.status === 'accepted' && (invitation.sender_id === user_id || invitation.receiver_id === user_id)
         );
 
@@ -229,14 +221,8 @@ const CollaborationsPage = () => {
       if (response.status === 200) {
         setMessage('Invitation Withdrawn');
         console.log("Before update:", sentInvitations);
-        console.log("Before update:", sentInvitations);
         setOpenSnackbar(true);
         setSentInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
-        // setSentInvitations((prev) => {
-        //   const updated = prev.filter((invitation) => invitation._id !== invitationId);
-        //   console.log("After update:", updated);
-        //   return updated;
-        // });
         // setSentInvitations((prev) => {
         //   const updated = prev.filter((invitation) => invitation._id !== invitationId);
         //   console.log("After update:", updated);
@@ -330,7 +316,6 @@ const CollaborationsPage = () => {
         setSentInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
         setAcceptedInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
         // console.log("acceptedInvitation:", acceptedInvitations);
-        // console.log("acceptedInvitation:", acceptedInvitations);
       }
     } catch (error) {
       console.error('Error revoking invitation:', error);
@@ -362,14 +347,12 @@ const CollaborationsPage = () => {
       </Typography>
 
       <Paper sx={{ mb: 4, border: '1px solid #dddddd', boxShadow: 'none', borderRadius: 10 }}>
-      <Paper sx={{ mb: 4, border: '1px solid #dddddd', boxShadow: 'none', borderRadius: 10 }}>
         <Tabs
           value={tabValue}
           onChange={handleTabChange}
           variant="fullWidth"
           indicatorColor="primary"
           textColor="primary"
-          sx={{borderRadius: 10}}
           sx={{borderRadius: 10}}
         >
           <Tab label={`Pending (${pendingInvitations.length})`} {...a11yProps(0)} />
@@ -424,7 +407,6 @@ const CollaborationsPage = () => {
         ) : (
           acceptedInvitations.map((invitation) => (
             <Card variant="outlined" sx={{ mb: 2, borderRadius: 3 }} key={invitation._id}>
-            <Card variant="outlined" sx={{ mb: 2, borderRadius: 3 }} key={invitation._id}>
               <CardContent>
                 <Grid container alignItems="center">
                   {/* Information Section */}
@@ -435,7 +417,6 @@ const CollaborationsPage = () => {
                       </Avatar>
                       
                       <Box>
-                      <Tooltip arrow title={`${invitation.collab_name} initiated by ${invitation.sender_name}`} placement='right'>
                       <Tooltip arrow title={`${invitation.collab_name} initiated by ${invitation.sender_name}`} placement='right'>
                         <Typography
                           variant="h6"
@@ -460,15 +441,11 @@ const CollaborationsPage = () => {
                        <Tooltip arrow title="Learn more about this collaboration.">
                       <Button
                         variant="outlined"
-                        variant="outlined"
                         color="primary"
                         size="small"
                         sx={{borderRadius:10}}
                         onClick={() => navigate(`/collaboration/${invitation.collab_uuid}`)}
-                        sx={{borderRadius:10}}
-                        onClick={() => navigate(`/collaboration/${invitation.collab_uuid}`)}
                       >
-                        View Details
                         View Details
                       </Button>
                       </Tooltip>
@@ -480,7 +457,6 @@ const CollaborationsPage = () => {
                           color="secondary"
                           size="small"
                           startIcon={<CancelPresentationIcon />}
-                          sx={{borderRadius:10}}
                           sx={{borderRadius:10}}
                           onClick={() =>
                             handleRevoke(invitation._id, invitation.receiver_id, invitation.sender_id, invitation.collab_uuid)
