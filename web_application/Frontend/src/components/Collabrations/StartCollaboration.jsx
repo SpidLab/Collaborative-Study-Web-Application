@@ -30,6 +30,10 @@ const StartCollaboration = () => {
   const [resetSearch, setResetSearch] = useState(false);
   const [datasets, setDatasets] = useState([]);
   const [selectedDataset, setSelectedDataset] = useState('');
+  const [qcScheme, setQcSchemes] = useState([]);
+  const [selectedQcSchemes, setSelectedQcSchemes] = useState([]);
+
+
 
   // **Fetch Datasets on Component Mount**
   useEffect(() => {
@@ -40,8 +44,16 @@ const StartCollaboration = () => {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
         });
-        console.log(response.data);
+        const fetchedQcSchemes = response.data.qc_schemes[0].quality_control_scheme;
+        setQcSchemes(fetchedQcSchemes);
+        setExperimentOptions(response.data.experiments[0].experiment_types);
         setDatasets(response.data.datasets);
+
+        // Ensure the first QC scheme is selected by default
+        if (fetchedQcSchemes.length > 0) {
+          setSelectedQcSchemes([fetchedQcSchemes[0]]);
+        }
+
       } catch (error) {
         console.error("Error fetching datasets:", error);
         setSnackbar({
@@ -55,20 +67,20 @@ const StartCollaboration = () => {
     fetchDatasets();
   }, []);
 
-  useEffect(() => {
-    const fetchOptions = async () => {
-      try {
-        // TODO: Replace this with actual API call when backend is ready
-        // const response = await axios.get("YOUR_BACKEND_API_URL");
-        // setExperimentOptions(response.data);
-        const data = ["Chi-Square", "Odd Ratio"];
-        setExperimentOptions(data);
-      } catch (error) {
-        console.error("Error fetching experiment options:", error);
-      }
-    };
-    fetchOptions();
-  }, []);
+  // useEffect(() => {
+  //   const fetchOptions = async () => {
+  //     try {
+  //       // TODO: Replace this with actual API call when backend is ready
+  //       // const response = await axios.get("YOUR_BACKEND_API_URL");
+  //       // setExperimentOptions(response.data);
+  //       const data = ["Chi-Square", "Odd Ratio"];
+  //       setExperimentOptions(data);
+  //     } catch (error) {
+  //       console.error("Error fetching experiment options:", error);
+  //     }
+  //   };
+  //   fetchOptions();
+  // }, []);
 
   // const handleAddExperiment = () => {
   //   if (experimentName.trim()) {
@@ -87,6 +99,13 @@ const StartCollaboration = () => {
   const handleDeleteExperiment = (index) => {
     const updatedList = experimentList.filter((_, i) => i !== index);
     setExperimentList(updatedList);
+  };
+  const handleQcScheme = (label) => {
+    setSelectedQcSchemes((prevSelected) =>
+      prevSelected.includes(label)
+        ? prevSelected.filter((item) => item !== label) // Remove if already selected
+        : [...prevSelected, label] // Add if not selected
+    );
   };
 
   // const handleFileUpload = (e, setData) => {
@@ -127,6 +146,8 @@ const StartCollaboration = () => {
     const collaborationData = {
       collabName,
       experiments: experimentList,
+      collabQcScheme: selectedQcSchemes,
+      // collabQcScheme: ,
       // phenoType,
       // samples,
       // rawData: rawData ? rawData.name : null,
@@ -189,6 +210,7 @@ const StartCollaboration = () => {
       setSelectedUsers([]);
       setSelectedDataset('');
       setExperimentOptions([]);
+      setSelectedQcSchemes([]);
       setResetSearch(prev => !prev);
 
     } catch (error) {
@@ -366,10 +388,10 @@ const StartCollaboration = () => {
               /> */}
 
               {/* Place Holder Choose Quality Control Scheme  */}
-              <Box sx={{p:1.5, backgroundColor: '#FAFAFA', border: '1px solid', borderColor: 'divider', borderRadius: 2}}>
+              <Box sx={{ p: 1.5, backgroundColor: '#FAFAFA', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
                 Choose your QC Scheme
                 <Box display="flex" gap={2} sx={{ mt: 1.5 }}>
-                  {["None", "Sample Relatedness", "Population Stratification"].map((label, index) => (
+                  {/* {qcScheme.map((label, index) => (
                     <Box
                       key={index}
                       display="flex"
@@ -394,6 +416,37 @@ const StartCollaboration = () => {
                           color: "#1976d2",
                           "&.Mui-checked": { color: "#1565c0" },
                           "& .MuiSvgIcon-root": { borderRadius: "50%" }, // Make checkbox circular
+                        }}
+                      />
+                      <Typography variant="body1" sx={{ fontSize: 14 }}>{label}</Typography>
+                    </Box>
+                  ))} */}
+
+                  {qcScheme.map((label, index) => (
+                    <Box
+                      key={index}
+                      display="flex"
+                      alignItems="center"
+                      sx={{
+                        pr: 1.5,
+                        borderRadius: 10,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        boxShadow: "0px",
+                        cursor: "pointer",
+                        transition: "background 0.3s",
+                        "&:hover": { backgroundColor: "#e8f1fa" },
+                      }}
+                      onClick={() => handleQcScheme(label)} // Toggle selection
+                    >
+                      <Checkbox
+                        checked={selectedQcSchemes.includes(label)} // Check if selected
+                        icon={<RadioButtonUncheckedRounded />}
+                        checkedIcon={<CheckCircleIcon />}
+                        sx={{
+                          color: "#1976d2",
+                          "&.Mui-checked": { color: "#1565c0" },
+                          "& .MuiSvgIcon-root": { borderRadius: "50%" },
                         }}
                       />
                       <Typography variant="body1" sx={{ fontSize: 14 }}>{label}</Typography>

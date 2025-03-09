@@ -19,6 +19,7 @@ const CollaborationDetails = () => {
   const [collabName, setCollabName] = useState('');
   const [experimentName, setExperimentName] = useState('');
   const [experimentList, setExperimentList] = useState([]);
+  const [qcScheme, setQcScheme] = useState([]);
   const [phenoType, setPhenotype] = useState('');
   const [creator, setCreator] = useState('');
   // const [samples, setSamples] = useState('');
@@ -75,9 +76,9 @@ const CollaborationDetails = () => {
         setCollaboration(response.data);
         setCollabName(response.data.name);
         setExperimentList(response.data.experiments || []);
+        setQcScheme(response.data.collabQcScheme || []);
         setPhenotype(response.data.creator_datasets.phenotype || []);
         setCreator(response.data.creator_datasets || []);
-        // setSamples(response.data.creator_datasets.samples || '');
         setCollaborationUuid(response.data.uuid);
         setSenderInfo({ is_sender: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
         setInvitedUsers(response.data.invited_users || []);
@@ -95,7 +96,7 @@ const CollaborationDetails = () => {
   }, [uuid]);
 
 
-  console.log('QC Data:', collaboration);
+  console.log('QC Scheme:', collaboration);
 
   const handleAddExperiment = () => {
     if (experimentName.trim()) {
@@ -1168,7 +1169,9 @@ const CollaborationDetails = () => {
                       primary={<Tooltip arrow title='Quality Control Scheme' placement='right'><strong>QC Scheme</strong></Tooltip>}
                       secondary={
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                          <Chip key='Sample Relatedness' label='Sample Relatedness' variant="contained" sx={{backgroundColor:"#D1E3F6", color:'#0D3B69'}}/>
+                          {qcScheme.map((scheme, index) => (
+                                <Chip key={index} label={scheme} color="primary" variant="contained" sx={{backgroundColor:"#D1E3F6", color:'#0D3B69'}}/>
+                              ))}
                         </Box>
                       }
                     />

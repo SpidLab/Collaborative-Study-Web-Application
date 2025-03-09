@@ -807,6 +807,91 @@ def reject_invitation():
 #         logging.error(f"Error creating collaboration: {str(e)}")
 #         return jsonify({"error": str(e)}), 500
 # This code needs to be optimised
+
+'''
+Creating collection to store the experiments list
+'''
+experiment_list_collection = db['experiments']
+
+@app.route('/api/experiments', methods=['GET'])
+def get_experiment_list():
+    try:
+        experiment = experiment_list_collection.find_one({})
+        if experiment:
+            # Convert ObjectId to string directly here
+            experiment['_id'] = str(experiment['_id'])
+            return jsonify({
+                "experiment_types": experiment.get('experiment_types', []),
+                "quality_control_scheme": experiment.get('quality_control_scheme', [])
+            }), 200
+        return jsonify({"message": "Experiment list not found."}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/experiments', methods=['PUT'])
+def update_experiment_list():
+    data = request.get_json()
+
+    # Get both experiment types and quality control scheme types
+    experiment_types = data.get('experiment_types')
+    quality_control_scheme = data.get('quality_control_scheme')
+
+    if experiment_types is None and quality_control_scheme is None:
+        return jsonify({"message": "Either experiment_types or quality_control_scheme is required."}), 400
+
+    update_data = {}
+    if experiment_types is not None:
+        update_data['experiment_types'] = experiment_types
+    if quality_control_scheme is not None:
+        update_data['quality_control_scheme'] = quality_control_scheme
+
+    try:
+        experiment = experiment_list_collection.find_one_and_replace(
+            {},  
+            update_data,  
+            upsert=True, 
+            return_document=True  
+        )
+        
+        # Convert ObjectId to string directly here
+        if experiment:
+            experiment['_id'] = str(experiment['_id'])
+        return jsonify(experiment), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/experiments/remove', methods=['PUT'])
+def remove_experiment():
+    data = request.get_json()
+
+    experiment_type = data.get('experiment_type')
+    qc_scheme_type = data.get('qc_scheme_type')
+
+    if not experiment_type and not qc_scheme_type:
+        return jsonify({"message": "Either experiment_type or qc_scheme_type is required."}), 400
+
+    update_data = {}
+    if experiment_type:
+        update_data["$pull"] = {"experiment_types": experiment_type}
+    if qc_scheme_type:
+        update_data["$pull"] = {"quality_control_scheme": qc_scheme_type}
+
+    try:
+        # Update document by removing experiment or quality control scheme
+        experiment = experiment_list_collection.find_one_and_update(
+            {},
+            update_data,
+            return_document=True
+        )
+        if experiment:
+            experiment['_id'] = str(experiment['_id'])  
+            return jsonify(experiment), 200
+        return jsonify({"message": "Experiment type or QC scheme type not found."}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    
+
 @app.route('/api/start_collaboration', methods=['GET', 'POST'])
 def start_collaboration():
     if request.method == 'GET':
@@ -825,12 +910,15 @@ def get_start_collaboration():
 
         user_id = str(current_user.id)  
 
+        experiments = db.experiments.find()
+        experiments_list = [{'experiment_types': experiment['experiment_types']} for experiment in experiments]
+        qc_schemes = db.experiments.find()
+        qc_schemes_list = [{'quality_control_scheme': scheme['quality_control_scheme']} for scheme in qc_schemes]
         
         datasets_cursor = db.datasets.find(
             {'user_id': user_id},
             {'phenotype': 1, 'number_of_samples': 1, '_id' : 1}  # Projection: include only these fields
         )
-
         datasets = []
         for dataset in datasets_cursor:
             dataset_id = dataset.get('_id', 'N/A')
@@ -848,8 +936,10 @@ def get_start_collaboration():
                 'dataset_id' : dataset_id
 
             })
-
-        return jsonify({'datasets': datasets}), 200
+        return jsonify({
+            'experiments': experiments_list,
+            'qc_schemes': qc_schemes_list,
+            'datasets': datasets}), 200
 
     except Exception as e:
         logging.error(f"Error fetching datasets: {str(e)}")
@@ -865,6 +955,7 @@ def post_start_collaboration():
         data = request.get_json()
         collab_name = data.get('collabName')
         experiments = data.get('experiments', [])
+        collabQcScheme = data.get('collabQcScheme', [])
         invited_users = data.get('invitedUsers', [])
         creator_dataset_id = data.get('creatorDatasetId')
         logging.info(invited_users)
@@ -878,6 +969,7 @@ def post_start_collaboration():
             'uuid': str(uuid.uuid4()),
             'name': collab_name,
             'experiments': experiments,
+            'qc_scheme' : collabQcScheme,
             'creator_id': ObjectId(creator_id),
             'creator_dataset_id': ObjectId(creator_dataset_id),
             'invited_users': [
@@ -1042,7 +1134,6 @@ def get_collaboration_details(uuid):
 
         is_sender = collaboration['creator_id'] == ObjectId(user_id)
         sender_id = str(collaboration['creator_id'])  
-        sender_id = str(collaboration['creator_id'])  
         sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
         sender_name = sender_user["name"] if sender_user else "Unknown"
          
@@ -1059,12 +1150,6 @@ def get_collaboration_details(uuid):
             phenotype = invited_user_dataset.get('phenotype') if invited_user_dataset else None
             number_of_samples = invited_user_dataset.get('number_of_samples') if invited_user_dataset else None
             user_dataset_id= str(invited_user["user_dataset_id"])
-
-            invited_user_dataset = db.datasets.find_one({'_id': ObjectId(user_dataset_id)})
-            invited_user_dataset_uploaded = True if invited_user_dataset and len(invited_user_dataset.get('data', [])) > 0 else False
-
-            phenotype = invited_user_dataset.get('phenotype') if invited_user_dataset else None
-            number_of_samples = invited_user_dataset.get('number_of_samples') if invited_user_dataset else None
 
             invited_users_details.append({
                 'user_id': str(invited_user["user_id"]),
@@ -1115,14 +1200,6 @@ def get_collaboration_details(uuid):
         # Making multiple queries can be optimised but using for time being
         creator_phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
         creator_number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
-        # To fetch the data of invited_user/collaborator
-        # invited_dataset = db.datasets.find_one(
-        #     {'_id': ObjectId(collaboration["user_dataset_id"])},
-        #     {'phenotype': 1, 'number_of_samples': 1}
-        # )
-        # Making multiple queries can be optimised but using for time being
-        creator_phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
-        creator_number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
         creator_dataset = {
             'phenotype': creator_phenotype,
             'samples': creator_number_of_samples
@@ -1135,23 +1212,14 @@ def get_collaboration_details(uuid):
         #     'samples': invited_user_number_of_samples
         # }
 
-        # invited_user_phenotype = invited_dataset.get('phenotype', 'N/A') if invited_dataset else 'N/A'
-        # invited_user_number_of_samples = invited_dataset.get('number_of_samples', '0') if invited_dataset else '0'
-        # invited_user_dataset = {
-        #     'phenotype': invited_user_phenotype,
-        #     'samples': invited_user_number_of_samples
-        # }
 
         collaboration_details = {
             'uuid': collaboration['uuid'],
             'name': collaboration['name'],
             'experiments': collaboration.get('experiments', []),
-            'phenotype': collaboration.get('phenotype', None),
-            'samples': collaboration.get('samples', None),
-            'is_sender': is_sender,
+            'collabQcScheme': collaboration.get('qc_scheme', []),
             'sender_id': sender_id,
             'is_sender': is_sender,
-            'sender_id': sender_id,
             'sender_name': sender_name,
             'invited_users': invited_users_details,
             'creator_datasets': creator_dataset,
@@ -1449,32 +1517,31 @@ def update_qc_data():
         # Read the file directly into a DataFrame, setting the first column as sample_id
         df = pd.read_csv(file, index_col=0)
         df.index.name = 'sample_id'  # Set the index name
-        # Get metadata fields from the form data
-        phenotype = request.form.get('phenotype')
-        number_of_samples = request.form.get('number_of_samples')
 
-        if not phenotype or not number_of_samples:
-            return jsonify({"error": "Missing required fields"}), 400
+        if not df.empty:
+            data = {}
 
-        # Create a new dataset record in the database (without data at this stage)
-        dataset = {
-            "user_id": str(user_id),
-            "phenotype": phenotype,
-            "number_of_samples": number_of_samples,
-            "data": {}  # No data at the moment, will be updated later with CSV
-        }
+            # Store each row in the data dictionary using sample_id as the key
+            for sample_id, row in df.iterrows():
+                data[str(sample_id)] = row.to_dict()
 
-        # Insert into the database
-        result = db['datasets'].insert_one(dataset)
-        dataset_id = str(result.inserted_id)
+        # Get the dataset from the DB
+        dataset = db['datasets'].find_one({"_id": ObjectId(dataset_id)})
+        if not dataset:
+            return jsonify({"error": "Dataset not found"}), 404
 
-        print('Data from frontend:', request.form)
 
-        return jsonify({"message": "Metadata uploaded successfully", "dataset_id": dataset_id}), 200
+        # Update the dataset in the DB with the new data
+        db['datasets'].update_one(
+            {"_id": ObjectId(dataset_id)},
+            {"$set": {"data": data}}
+        )
+
+        return jsonify({"message": "Dataset updated successfully"}), 200
 
     except Exception as e:
-        logging.error(f'Unexpected error: {str(e)}')
-        return jsonify({'message': 'An error occurred while processing the metadata', 'error': str(e)}), 500
+        logging.error(f'Error updating dataset with CSV data: {str(e)}')
+        return jsonify({"error": "An error occurred while processing the CSV file", "details": str(e)}), 500
 
 
 
