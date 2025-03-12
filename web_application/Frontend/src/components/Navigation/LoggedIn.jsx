@@ -83,7 +83,7 @@ export default function LoggedIn({ onLogout }) {
   return (
     <>
       <Button color="inherit" component={RouterLink} to="/">Home</Button>
-      <Button color="inherit" component={RouterLink} to="/upload">Upload</Button>
+      <Button color="inherit" component={RouterLink} to="/upload">Metadata</Button>
       
       <Badge badgeContent={pendingCount} color="error">
         <Button
@@ -108,7 +108,7 @@ export default function LoggedIn({ onLogout }) {
         </MenuItem>
       </Menu>
 
-      <Button color="inherit" component={RouterLink} to="/session">Session</Button>
+      {/* <Button color="inherit" component={RouterLink} to="/session">Session</Button> */}
 
       <Tooltip title="Account settings">
         <IconButton

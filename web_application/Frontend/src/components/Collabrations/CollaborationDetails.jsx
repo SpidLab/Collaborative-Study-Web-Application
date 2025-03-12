@@ -19,6 +19,7 @@ const CollaborationDetails = () => {
   const [collabName, setCollabName] = useState('');
   const [experimentName, setExperimentName] = useState('');
   const [experimentList, setExperimentList] = useState([]);
+  const [qcScheme, setQcScheme] = useState([]);
   const [phenoType, setPhenotype] = useState('');
   const [creator, setCreator] = useState('');
   // const [samples, setSamples] = useState('');
@@ -75,9 +76,9 @@ const CollaborationDetails = () => {
         setCollaboration(response.data);
         setCollabName(response.data.name);
         setExperimentList(response.data.experiments || []);
+        setQcScheme(response.data.collabQcScheme || []);
         setPhenotype(response.data.creator_datasets.phenotype || []);
         setCreator(response.data.creator_datasets || []);
-        // setSamples(response.data.creator_datasets.samples || '');
         setCollaborationUuid(response.data.uuid);
         setSenderInfo({ is_sender: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
         setInvitedUsers(response.data.invited_users || []);
@@ -95,7 +96,7 @@ const CollaborationDetails = () => {
   }, [uuid]);
 
 
-  console.log('QC Data:', collaboration);
+  console.log('QC Scheme:', collaboration);
 
   const handleAddExperiment = () => {
     if (experimentName.trim()) {
@@ -133,8 +134,12 @@ const CollaborationDetails = () => {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
+      if (response.status === 200) {
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      }
 
-      console.log('File uploaded successfully:', response.data);
       setSnackbar({
         open: true,
         message: 'Stat data uploaded Successfully!',
@@ -171,10 +176,12 @@ const CollaborationDetails = () => {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
+      
+      setTimeout(() => {
+        window.location.reload(); // reloads the page after 2 seconds
+      }, 1000);
 
-      if (response === 200) {
-        checkQcStatus();
-      }
+      checkQcStatus();
 
       // console.log('File uploaded successfully:', response.data);
       setSnackbar({
@@ -258,6 +265,10 @@ const CollaborationDetails = () => {
           )
         );
         setSnackbar({ open: true, message: 'Invitation accepted successfully!', severity: 'success' });
+        setTimeout(() => {
+          window.location.reload();
+        }, 100);
+
       }
     } catch (error) {
       console.error('Error accepting invitation:', error);
@@ -328,8 +339,15 @@ const CollaborationDetails = () => {
           },
         }
       );
-      setThresholdDefined(false);
-      setThreshold(newThreshold);
+      if (response.status === 200) {
+        setThresholdDefined(false);
+        setThreshold(newThreshold);
+        setTimeout(() => {
+          window.location.reload(); // reloads the page after 2 seconds
+        }, 1000);
+      }
+      // setThresholdDefined(false);
+      // setThreshold(newThreshold);
 
       setSnackbar({
         open: true,
@@ -384,7 +402,7 @@ const CollaborationDetails = () => {
     }
   };
   // to optimise
-  // console.log("QC Loading", isQcInitiateLoading);
+  console.log("QC Loading", isQcInitiateLoading);
 
   const checkGwasStatus = async () => {
     try {
@@ -504,7 +522,14 @@ const CollaborationDetails = () => {
           },
         }
       );
-      console.log('response:', response);
+      // console.log('response:', response);
+      if (response.status === 200) {
+        setTimeout(() => {
+          window.location.reload(); // reloads the page after 2 seconds
+        }, 1000);
+      }
+
+
       setSnackbar({
         open: true,
         message: 'QC Calculations successfully Initiated. Come back later for the QC Results',
@@ -663,7 +688,53 @@ const CollaborationDetails = () => {
   console.log(currentUserId);
 
 
-  const getGroupedSampleCounts = (qcResults, threshold) => {
+  // const getGroupedSampleCounts = (qcResults, threshold) => {
+  //   if (!qcResults || !Array.isArray(qcResults)) return {
+  //     userCounts: {},
+  //     totalSamples: 0,
+  //     selectedSamples: 0,
+  //     filteredData: [],
+  //     userSamplesList: {}
+  //   };
+
+  //   const userSamples = {};
+  //   const allUniqueSamples = new Set();
+  //   const selectedUniqueSamples = new Set();
+
+  //   const filteredData = qcResults.filter(({ phi_value }) => phi_value < threshold);
+
+  //   qcResults.forEach(({ sample1, sample2 }) => {
+  //     allUniqueSamples.add(sample1);
+  //     allUniqueSamples.add(sample2);
+  //   });
+
+  //   filteredData.forEach(({ sample1, sample2, user1, user2 }) => {
+  //     if (!userSamples[user1]) userSamples[user1] = new Set();
+  //     if (!userSamples[user2]) userSamples[user2] = new Set();
+
+  //     userSamples[user1].add(sample1);
+  //     userSamples[user2].add(sample2);
+
+  //     selectedUniqueSamples.add(sample1);
+  //     selectedUniqueSamples.add(sample2);
+  //   });
+  //   const userSamplesList = {};
+  //   Object.keys(userSamples).forEach(user => {
+  //     userSamplesList[user] = Array.from(userSamples[user]);
+  //   });
+
+  //   // Calculate sample counts
+  //   return {
+  //     userCounts: Object.fromEntries(Object.entries(userSamples).map(([user, samples]) => [user, samples.size])),
+  //     totalSamples: allUniqueSamples.size,
+  //     selectedSamples: selectedUniqueSamples.size,
+  //     filteredData,
+  //     userSamplesList
+  //   };
+  // };
+
+
+  const getGroupedSampleCounts = (qcResults, newThreshold) => {
     if (!qcResults || !Array.isArray(qcResults)) return {
       userCounts: {},
       totalSamples: 0,
@@ -676,45 +747,62 @@ const CollaborationDetails = () => {
     const allUniqueSamples = new Set();
     const selectedUniqueSamples = new Set();
 
-    const filteredData = qcResults.filter(({ phi_value }) => phi_value < threshold);
+    // Filtered data for display (phi < threshold)
+    const filteredData = qcResults.filter(({ phi_value }) => phi_value < newThreshold);
 
-    qcResults.forEach(({ sample1, sample2 }) => {
+    // Process ALL QC results to determine sample inclusion
+    qcResults.forEach(({ user1, sample1, user2, sample2, phi_value }) => {
+      // Track all unique samples
       allUniqueSamples.add(sample1);
       allUniqueSamples.add(sample2);
-    });
 
-    filteredData.forEach(({ sample1, sample2, user1, user2 }) => {
+      // Initialize user sets if needed
       if (!userSamples[user1]) userSamples[user1] = new Set();
       if (!userSamples[user2]) userSamples[user2] = new Set();
 
-      userSamples[user1].add(sample1);
-      userSamples[user2].add(sample2);
-
-      selectedUniqueSamples.add(sample1);
-      selectedUniqueSamples.add(sample2);
+      // Add/remove samples based on threshold comparison
+      if (phi_value > newThreshold) {
+        userSamples[user1].delete(sample1);
+        userSamples[user2].delete(sample2);
+      } else {
+        userSamples[user1].add(sample1);
+        userSamples[user2].add(sample2);
+      }
     });
+
+    // Calculate selected samples from final user sets
+    Object.values(userSamples).forEach(samples => {
+      samples.forEach(sample => selectedUniqueSamples.add(sample));
+    });
+
+    // Convert sets to arrays for output
     const userSamplesList = {};
     Object.keys(userSamples).forEach(user => {
       userSamplesList[user] = Array.from(userSamples[user]);
     });
 
-    // Calculate sample counts
     return {
-      userCounts: Object.fromEntries(Object.entries(userSamples).map(([user, samples]) => [user, samples.size])),
+      userCounts: Object.fromEntries(
+        Object.entries(userSamples).map(([user, samples]) => [user, samples.size])
+      ),
       totalSamples: allUniqueSamples.size,
       selectedSamples: selectedUniqueSamples.size,
-      filteredData,
+      filteredData, // Maintain original filtered data for display
       userSamplesList
     };
   };
+
+
+
   useEffect(() => {
-    if (qcResults && threshold !== null) {
+    if (qcResults && newThreshold !== null) {
       const { userCounts, totalSamples, selectedSamples, filteredData, userSamplesList } =
-        getGroupedSampleCounts(qcResults, threshold);
+        getGroupedSampleCounts(qcResults, newThreshold);
 
       setFilteredResults({ userCounts, totalSamples, selectedSamples, filteredData, userSamplesList });
     }
-  }, [qcResults, threshold]);
+  }, [qcResults, newThreshold]);
+
 
   // const downloadSamples = (samples, filename) => {
   //   try {
@@ -747,12 +835,12 @@ const CollaborationDetails = () => {
         alert("No samples to download.");
         return;
       }
-  
+
       // Wrap the samples in a list property
       const jsonContent = JSON.stringify({ "Sample IDs": samples }, null, 2);
-      
+
       const blob = new Blob([jsonContent], { type: "application/json" });
-  
+
       const link = document.createElement("a");
       const url = window.URL.createObjectURL(blob);
       link.href = url;
@@ -766,31 +854,40 @@ const CollaborationDetails = () => {
       alert(`Download failed: ${error.message}`);
     }
   };
-  
+
 
   const handleSliderChange = (event, newValue) => {
     setNewThreshold(newValue);
+    // setThreshold(newValue);
   };
 
   // utility functions for Data Export
-  const convertToCSV = (data) => {
+  const convertToCSV = (data, file_name) => {
+    const title = `${file_name} - GWAS Experiment Report`;
     const headers = ['SNP ID,Chi-Square,P-Value'];
     const rows = data.map(snp =>
       `"${snp.snpKey}",${snp.chi},${snp.pValue}`
     );
-    return [...headers, ...rows].join('\n');
+    return [title, ...headers, ...rows].join('\n');
   };
 
   const handleDownload = (userId, data) => {
     try {
-      const csvContent = convertToCSV(data);
+
+      let file_name;
+      if (userId !== 'aggregated') {
+        file_name = getUserName(userId);
+      } else {
+        file_name = 'Joint'
+      }
+
+      const csvContent = convertToCSV(data, file_name);
 
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-
       const link = document.createElement('a');
       const url = window.URL.createObjectURL(blob);
       link.href = url;
-      link.download = `gwas_results_${getUserName(userId)}.csv`;
+      link.download = `${file_name}_GWAS_results.csv`;
       document.body.appendChild(link);
       link.click();
       window.URL.revokeObjectURL(url);
@@ -815,7 +912,7 @@ const CollaborationDetails = () => {
             pValue: values.p_value
           };
         })
-        .sort((a, b) => b.pValue - a.pValue); // Descending by p-value
+        .sort((a, b) => a.pValue - b.pValue);
 
       return { userId, sortedSnps };
     });
@@ -854,19 +951,19 @@ const CollaborationDetails = () => {
 
   const progressSteps = [{
     label: 'Onboarding Collaborators',
-    description: 'Waiting for Collaborators to accept the invitation and upload QC data'
+    description: !userAcceptedInvitation ? 'Waiting for Collaborator to accept the invitation' : 'Waiting for Collaborator to upload Quality Control data.'
   },
   {
     label: 'QC Calculation',
-    description: !qcResultsAvailable ? 'QC Calculation, results are not available' : 'QC results are available, waiting for initator to confirm the Threshold'
+    description: !qcResultsAvailable ? 'Awaiting the initiator to start the QC calculation' : 'QC results are available, waiting for initator to confirm the Threshold.'
   },
   {
     label: 'Stat Data',
-    description: 'Upload Stat Data for GWAS experiment'
+    description: 'Waiting for all parties involved to upload their Stat Data.'
   },
   {
-    label: 'GWAS Calculation',
-    description: 'GWAS experiment Results available'
+    label: 'Final Experiment',
+    description: !gwasResultsAvailable ? 'Awaiting the initiator to perform operations.' : 'Final Results available'
   },
   ];
 
@@ -877,15 +974,21 @@ const CollaborationDetails = () => {
       return;
     }
     // if QC Results not avaialble, it stays here
-    if (isQcInitiateEnabled && !qcResultsAvailable) {
+    if (invitedUsers[0].is_dataset_uploaded && !thresholdDefined) {
       setProgressActiveStep(1);
       return;
     }
-    if ((thresholdDefined && Object.keys(gwasResults).length === 0)) {
+    // if ((thresholdDefined && Object.keys(gwasResults).length === 0)) {
+    //   setProgressActiveStep(2);
+    //   return;
+    // }
+
+    if (thresholdDefined && !collaboration?.stat_uploaded) {
       setProgressActiveStep(2);
       return;
     }
-    if ((isGwasInitiateEnabled)) {
+
+    if ((collaboration?.stat_uploaded && !gwasResultsAvailable)) {
       setProgressActiveStep(3);
       return;
     }
@@ -1049,17 +1152,27 @@ const CollaborationDetails = () => {
                     />
                   </ListItem>
                   <Divider sx={{ borderColor: 'primary.main' }} />
-
                   <ListItem disableGutters>
                     <ListItemText
                       primary={<Tooltip arrow title='Samples to be included in this collaboration' placement='right'><strong>Number of Samples</strong></Tooltip>}
                       secondary={
-
                         <Box display={'inline-flex'} gap={2} sx={{ color: 'text.primary' }}>
                           <Typography variant="body2">{senderInfo?.name} : {creator?.samples}</Typography>
                           <Typography variant="body2">{invitedUsers[0]?.name}: {invitedUsers[0]?.number_of_samples}</Typography>
                         </Box>
-
+                      }
+                    />
+                  </ListItem>
+                  <Divider sx={{ borderColor: 'primary.main' }} />
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={<Tooltip arrow title='Quality Control Scheme' placement='right'><strong>QC Scheme</strong></Tooltip>}
+                      secondary={
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                          {qcScheme.map((scheme, index) => (
+                                <Chip key={index} label={scheme} color="primary" variant="contained" sx={{backgroundColor:"#D1E3F6", color:'#0D3B69'}}/>
+                              ))}
+                        </Box>
                       }
                     />
                   </ListItem>
@@ -1118,43 +1231,15 @@ const CollaborationDetails = () => {
                         </Typography>
                         <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                       </Box>
-                      {role !== 'receiver' && (
+                      {(role === 'receiver' && !thresholdDefined) && (
+                        <Box sx={{ bgcolor: '#e8f1fa', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2, width: '100%' }} display={'flex'}>
+                          <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                          <Typography variant="body2">Results will be available soon.</Typography>
+                        </Box>
+                      )}
+                      {role === 'sender' && (
                         <ListItemText
                           sx={{ width: '100%', display: 'block' }}
-                          primary={
-                            <Box display="flex" gap={2} sx={{ my: 3 }}>
-                              {["None", "Sample Relatedness", "Population Stratification"].map((label, index) => (
-                                <Box
-                                  key={index}
-                                  display="flex"
-                                  alignItems="center"
-                                  sx={{
-                                    pr: 1.5,
-                                    borderRadius: 10,
-                                    border: '1px solid',
-                                    borderColor: 'primary.main',
-                                    boxShadow: "0px",
-                                    cursor: "pointer",
-                                    transition: "background 0.3s",
-                                    "&:hover": { backgroundColor: "#e8f1fa" },
-                                  }}
-                                >
-                                  <Checkbox
-                                    defaultChecked={index === 1} // First one checked by default
-                                    // onChange={() => handleExperimentChange(index)}
-                                    icon={<RadioButtonUncheckedRounded />}
-                                    checkedIcon={<CheckCircleIcon />}
-                                    sx={{
-                                      color: "#1976d2",
-                                      "&.Mui-checked": { color: "#1565c0" },
-                                      "& .MuiSvgIcon-root": { borderRadius: "50%" }, // Make checkbox circular
-                                    }}
-                                  />
-                                  <Typography variant="body1" sx={{ fontSize: 14 }}>{label}</Typography>
-                                </Box>
-                              ))}
-                            </Box>
-                          }
                           secondary={
                             <Box
                               sx={{
@@ -1322,7 +1407,7 @@ const CollaborationDetails = () => {
                                     />
                                     <Box sx={{ mb: 1 }}>
                                       <Typography variant="body2" gutterBottom>
-                                        Current Threshold: {threshold}
+                                        Current Threshold: {!thresholdDefined ? 'Please select a threshold.' : threshold}
                                       </Typography>
                                       {((newThreshold !== threshold) &&
                                         <Typography variant="body2" gutterBottom>
@@ -1363,7 +1448,7 @@ const CollaborationDetails = () => {
                                     {/* Total Samples Typography Block */}
                                     <Box sx={{ mb: 2 }}>
                                       <Typography variant="body1" fontWeight={500} color="text.primary">
-                                        Total Samples to be included in GWAS experiment:{" "}
+                                        Total samples to be included in GWAS experiment:{" "}
                                         <Box component="span" fontWeight={700} color="primary.main">
                                           {filteredResults?.selectedSamples || 0}
                                         </Box>{" "}
@@ -1595,10 +1680,9 @@ const CollaborationDetails = () => {
                     )}
                     <>
                       <ListItem disableGutters>
-                        {(displayQcResults && thresholdDefined && Object.keys(gwasResults).length === 0) && (
+                        {(thresholdDefined && !collaboration?.stat_uploaded) && (
                           <>
-                            <Divider sx={{ borderColor: 'primary.main', mb: 2 }} />
-                            <ListItemText
+                            {collaboration?.missing_stat_user?.includes(currentUserId) ? (<ListItemText
                               primary={
                                 <Box sx={{
                                   position: 'relative',
@@ -1641,7 +1725,7 @@ const CollaborationDetails = () => {
                                                 fontSize: 10,
                                                 bgcolor: '#e8f1fa',
                                                 color: 'primary.main',
-                                                '&:hover':{color:'white'}
+                                                '&:hover': { color: 'white' }
                                               }}
                                             >
                                               Learn More
@@ -1852,7 +1936,12 @@ const CollaborationDetails = () => {
                                   width: '100%'
                                 }
                               }}
-                            />
+                            />) : (
+                              <Box sx={{ bgcolor: '#e8f1fa', p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2, width: '100%' }} display={'flex'}>
+                                <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                                <Typography variant="body2">Waiting for Collaborators to upload their Stat data.</Typography>
+                              </Box>
+                            )}
                           </>
                         )}
                       </ListItem>
@@ -1860,16 +1949,22 @@ const CollaborationDetails = () => {
                   </List>
                 </Box>
               )}
-              {(isGwasInitiateEnabled || isGwasResultsEnabled) && thresholdDefined && (
+              {collaboration?.stat_uploaded && (
                 <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                   <List sx={{ pt: 0 }}>
                     <>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
                         <Typography variant="h2" sx={{ flexGrow: 1, fontSize: 20, fontWeight: 'bold' }}>
-                          GWAS Experiment
+                          Experiment Results
                         </Typography>
                         <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                       </Box>
+                      {(role === 'receiver' && !gwasResultsAvailable) && (
+                        <Box sx={{ bgcolor: '#e8f1fa', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2, width: '100%' }} display={'flex'}>
+                          <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                          <Typography variant="body2">Results will be available soon.</Typography>
+                        </Box>
+                      )}
                       {role === 'sender' && (
                         <ListItem disableGutters>
                           <ListItemText
@@ -1886,12 +1981,12 @@ const CollaborationDetails = () => {
                                   <Tooltip
                                     arrow title={
                                       isGwasResultsEnabled
-                                        ? 'Get GWAS Results'
+                                        ? 'Get Results'
                                         : !isGwasInitiateEnabled
-                                          ? 'GWAS Calculation already Initiated or Users yet to upload Stat Data'
+                                          ? 'Calculation already Initiated'
                                           : role === 'receiver'
-                                            ? 'Receiver cannot initiate GWAS calculations'
-                                            : 'Initiate GWAS Calculations'
+                                            ? 'Receiver cannot initiate calculations'
+                                            : 'Initiate Calculations'
                                     }
                                     placement="bottom"
                                   >
@@ -2065,7 +2160,7 @@ const CollaborationDetails = () => {
                                   <Box key={userData.userId} sx={{ mb: 4 }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, borderBottom: 1, borderColor: 'divider', p: 1 }}>
                                       <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                                        {userData.userId === "aggregated" ? "Joint Results Chi-Square" : `Individual Results - Chi-Square`}
+                                        {userData.userId === "aggregated" ? "Joint Results: Chi-Square" : `Individual Results: Chi-Square`}
                                       </Typography>
                                       <Button
                                         variant="contained"

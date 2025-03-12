@@ -25,6 +25,8 @@ from calculate_coefficients import compute_coefficients_array
 from fuzzywuzzy import process
 import uuid
 from stats import calc_chi_pvalue
+from bson import ObjectId
+
 # from stats import calc_chi_pvalue
 
 app = Flask(__name__)
@@ -805,6 +807,91 @@ def reject_invitation():
 #         logging.error(f"Error creating collaboration: {str(e)}")
 #         return jsonify({"error": str(e)}), 500
 # This code needs to be optimised
+
+'''
+Creating collection to store the experiments list
+'''
+experiment_list_collection = db['experiments']
+
+@app.route('/api/experiments', methods=['GET'])
+def get_experiment_list():
+    try:
+        experiment = experiment_list_collection.find_one({})
+        if experiment:
+            # Convert ObjectId to string directly here
+            experiment['_id'] = str(experiment['_id'])
+            return jsonify({
+                "experiment_types": experiment.get('experiment_types', []),
+                "quality_control_scheme": experiment.get('quality_control_scheme', [])
+            }), 200
+        return jsonify({"message": "Experiment list not found."}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/experiments', methods=['PUT'])
+def update_experiment_list():
+    data = request.get_json()
+
+    # Get both experiment types and quality control scheme types
+    experiment_types = data.get('experiment_types')
+    quality_control_scheme = data.get('quality_control_scheme')
+
+    if experiment_types is None and quality_control_scheme is None:
+        return jsonify({"message": "Either experiment_types or quality_control_scheme is required."}), 400
+
+    update_data = {}
+    if experiment_types is not None:
+        update_data['experiment_types'] = experiment_types
+    if quality_control_scheme is not None:
+        update_data['quality_control_scheme'] = quality_control_scheme
+
+    try:
+        experiment = experiment_list_collection.find_one_and_replace(
+            {},  
+            update_data,  
+            upsert=True, 
+            return_document=True  
+        )
+        
+        # Convert ObjectId to string directly here
+        if experiment:
+            experiment['_id'] = str(experiment['_id'])
+        return jsonify(experiment), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/experiments/remove', methods=['PUT'])
+def remove_experiment():
+    data = request.get_json()
+
+    experiment_type = data.get('experiment_type')
+    qc_scheme_type = data.get('qc_scheme_type')
+
+    if not experiment_type and not qc_scheme_type:
+        return jsonify({"message": "Either experiment_type or qc_scheme_type is required."}), 400
+
+    update_data = {}
+    if experiment_type:
+        update_data["$pull"] = {"experiment_types": experiment_type}
+    if qc_scheme_type:
+        update_data["$pull"] = {"quality_control_scheme": qc_scheme_type}
+
+    try:
+        # Update document by removing experiment or quality control scheme
+        experiment = experiment_list_collection.find_one_and_update(
+            {},
+            update_data,
+            return_document=True
+        )
+        if experiment:
+            experiment['_id'] = str(experiment['_id'])  
+            return jsonify(experiment), 200
+        return jsonify({"message": "Experiment type or QC scheme type not found."}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    
+
 @app.route('/api/start_collaboration', methods=['GET', 'POST'])
 def start_collaboration():
     if request.method == 'GET':
@@ -823,12 +910,15 @@ def get_start_collaboration():
 
         user_id = str(current_user.id)  
 
+        experiments = db.experiments.find()
+        experiments_list = [{'experiment_types': experiment['experiment_types']} for experiment in experiments]
+        qc_schemes = db.experiments.find()
+        qc_schemes_list = [{'quality_control_scheme': scheme['quality_control_scheme']} for scheme in qc_schemes]
         
         datasets_cursor = db.datasets.find(
             {'user_id': user_id},
             {'phenotype': 1, 'number_of_samples': 1, '_id' : 1}  # Projection: include only these fields
         )
-
         datasets = []
         for dataset in datasets_cursor:
             dataset_id = dataset.get('_id', 'N/A')
@@ -846,8 +936,10 @@ def get_start_collaboration():
                 'dataset_id' : dataset_id
 
             })
-
-        return jsonify({'datasets': datasets}), 200
+        return jsonify({
+            'experiments': experiments_list,
+            'qc_schemes': qc_schemes_list,
+            'datasets': datasets}), 200
 
     except Exception as e:
         logging.error(f"Error fetching datasets: {str(e)}")
@@ -863,6 +955,7 @@ def post_start_collaboration():
         data = request.get_json()
         collab_name = data.get('collabName')
         experiments = data.get('experiments', [])
+        collabQcScheme = data.get('collabQcScheme', [])
         invited_users = data.get('invitedUsers', [])
         creator_dataset_id = data.get('creatorDatasetId')
         logging.info(invited_users)
@@ -876,6 +969,7 @@ def post_start_collaboration():
             'uuid': str(uuid.uuid4()),
             'name': collab_name,
             'experiments': experiments,
+            'qc_scheme' : collabQcScheme,
             'creator_id': ObjectId(creator_id),
             'creator_dataset_id': ObjectId(creator_dataset_id),
             'invited_users': [
@@ -1043,7 +1137,6 @@ def get_collaboration_details(uuid):
         sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
         sender_name = sender_user["name"] if sender_user else "Unknown"
          
-
         invited_users_details = []
         for invited_user in collaboration.get('invited_users', []):
             receiver_user = db.users.find_one({"_id": ObjectId(invited_user["user_id"])})
@@ -1056,6 +1149,7 @@ def get_collaboration_details(uuid):
 
             phenotype = invited_user_dataset.get('phenotype') if invited_user_dataset else None
             number_of_samples = invited_user_dataset.get('number_of_samples') if invited_user_dataset else None
+            user_dataset_id= str(invited_user["user_dataset_id"])
 
             invited_users_details.append({
                 'user_id': str(invited_user["user_id"]),
@@ -1063,12 +1157,34 @@ def get_collaboration_details(uuid):
                 'status': status,
                 'user_dataset_id': user_dataset_id,
                 'is_dataset_uploaded': invited_user_dataset_uploaded,
+                'status': status,
+                'user_dataset_id': user_dataset_id,
+                'is_dataset_uploaded': invited_user_dataset_uploaded,
                 'phenotype': phenotype,
                 'number_of_samples': number_of_samples
             })
-    
 
+
+        # To check if the Stat Exist and which user has uploaded their stat data for conditional UI Rendering
+        stats = collaboration.get('stats', {})
+        stat_uploaded_users = []
+        for su_id, user_obj in stats.items():
+            if user_obj and isinstance(user_obj, dict) and len(user_obj) > 0:
+                stat_uploaded_users.append(su_id)
         
+        stat_uploaded = True
+        waiting_user_to_upload_stat = []
+
+        if sender_id not in stat_uploaded_users:
+            stat_uploaded = False
+            waiting_user_to_upload_stat.append(sender_id)
+
+        for invited_user in invited_users_details:
+            u_id = invited_user.get("user_id")
+    
+            if u_id not in stat_uploaded_users:
+                stat_uploaded = False
+                waiting_user_to_upload_stat.append(u_id)
 
         # To fetch the data of creator/initator
         dataset = db.datasets.find_one(
@@ -1096,17 +1212,19 @@ def get_collaboration_details(uuid):
         #     'samples': invited_user_number_of_samples
         # }
 
+
         collaboration_details = {
             'uuid': collaboration['uuid'],
             'name': collaboration['name'],
             'experiments': collaboration.get('experiments', []),
-            'phenotype': collaboration.get('phenotype', None),
-            'samples': collaboration.get('samples', None),
-            'is_sender': is_sender,
+            'collabQcScheme': collaboration.get('qc_scheme', []),
             'sender_id': sender_id,
+            'is_sender': is_sender,
             'sender_name': sender_name,
             'invited_users': invited_users_details,
             'creator_datasets': creator_dataset,
+            "missing_stat_user": list(set(waiting_user_to_upload_stat)),
+            "stat_uploaded": stat_uploaded
         }
 
         return jsonify(collaboration_details), 200
@@ -1179,6 +1297,77 @@ def update_collaboration_details(uuid):
     except Exception as e:
         print(f"Error occurred: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+# @app.route('/api/upload_csv_qc', methods=['POST'])
+# def upload_csv_qc():
+#     try:
+#         auth_header = request.headers.get('Authorization')
+#         if not auth_header:
+#             logging.error("Authorization header missing")
+#             return jsonify({"error": "Authorization header missing"}), 401
+
+#         token = auth_header.split()[1]
+#         current_user = User.verify_auth_token(token)
+
+#         if not current_user:
+#             logging.error("Invalid token or user not found")
+#             return jsonify({"error": "Invalid token or user not found"}), 401
+
+#         user_id = current_user.id
+
+#         # Check if the post request has the file part
+#         if 'file' not in request.files:
+#             logging.error('No file part in the request')
+#             return jsonify({'message': 'No file part in the request'}), 400
+
+#         file = request.files['file']
+
+#         # If the user does not select a file, the browser submits an empty file without a filename
+#         if file.filename == '':
+#             logging.error('No selected file')
+#             return jsonify({'message': 'No selected file'}), 400
+
+#         if file and file.filename.endswith('.csv'):
+#             phenotype = request.form.get('field1')
+#             number_of_samples = request.form.get('field2')
+
+#             try:
+#                 # Read the file directly into a DataFrame, setting the first column as sample_id
+#                 df = pd.read_csv(file, index_col=0)
+#                 df.index.name = 'sample_id'  # Set the index name
+
+#                 # Check if DataFrame is not empty
+#                 if not df.empty:
+#                     data = {}
+
+#                     # Store each row in the data dictionary using sample_id as the key
+#                     for sample_id, row in df.iterrows():
+#                         data[str(sample_id)] = row.to_dict()
+
+#                     # Insert records into the datasets collection
+#                     db['datasets'].insert_one({
+#                         "user_id": str(user_id),
+#                         "phenotype": str(phenotype),
+#                         "number_of_samples": str(number_of_samples),
+#                         "data": data
+#                     })
+#                 else:
+#                     logging.error('CSV file is empty')
+#                     return jsonify({'message': 'CSV file is empty'}), 400
+
+#             except Exception as e:
+#                 logging.error(f'Error reading CSV or inserting into DB: {str(e)}')
+#                 logging.error(traceback.format_exc())
+#                 return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
+
+#             return jsonify({'message': 'CSV file processed successfully'}), 200
+#         else:
+#             logging.error('Unsupported file type')
+#             return jsonify({'message': 'Unsupported file type'}), 400
+#     except Exception as e:
+#         logging.error(f'Unexpected error: {str(e)}')
+#         logging.error(traceback.format_exc())
+#         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
 # @app.route('/api/upload_csv_qc', methods=['POST'])
 # def upload_csv_qc():
@@ -1448,6 +1637,8 @@ def upload_csv_stats():
         logging.error(f'Unexpected error: {str(e)}')
         logging.error(traceback.format_exc())
         return jsonify({'message': 'An unexpected error occurred', 'error': str(e)}), 500
+
+
 
 
 # @app.route('/api/upload_csv', methods=['POST'])
@@ -1828,7 +2019,6 @@ def get_initial_qc_matrix(collab_uuid):
         # Get the QC results matrix from the collaboration data
         full_qc_results = collaboration_data.get("full_qc", [])
         threshold_value = collaboration_data.get("threshold", None)
-        threshold_value = collaboration_data.get("threshold", None)
 
         if not full_qc_results:
             return jsonify({"message": "No QC results available for this collaboration."}), 201
@@ -1840,6 +2030,79 @@ def get_initial_qc_matrix(collab_uuid):
         print(f"Error retrieving QC results matrix: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+
+
+# @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
+# def get_filtered_qc_results(collab_uuid):
+#     try:
+#         # Fetch collaboration data
+#         collaboration_data = fetch_collaboration_data(collab_uuid)
+#         if not collaboration_data:
+#             return jsonify({"error": "Collaboration not found."}), 404
+
+#         # Get the threshold value from the request body (or fallback to the default in collaboration data)
+#         threshold = request.json.get("threshold", collaboration_data.get("threshold", 0.08))
+#         print("Threshold received:", threshold)
+
+#         # Reference to MongoDB collection
+#         collaboration_collection = db["collaborations"]
+
+#         # Check if threshold was already set in the database
+#         existing_threshold = collaboration_data.get("threshold")
+
+#         if existing_threshold is not None:
+#             # First, remove 'stats' and 'chi_square_results' if threshold was already set
+#             collaboration_collection.update_one(
+#                 {"uuid": collab_uuid},
+#                 {"$unset": {"stats": "", "chi_square_results": ""}}
+#             )
+
+#         # Update threshold in the database
+#         threshold_update_result = collaboration_collection.update_one(
+#             {"uuid": collab_uuid},
+#             {"$set": {"threshold": threshold}}
+#         )
+
+#         if threshold_update_result.matched_count == 0:
+#             return jsonify({"error": "Failed to update threshold."}), 500
+
+#         # Get full QC results
+#         full_qc_results = collaboration_data.get("full_qc", [])
+#         filtered_results = {}
+
+#         # Filter results based on the threshold and phi value
+#         for result in full_qc_results:
+#             if result["phi_value"] < threshold:
+#                 user1, sample1 = result["user1"], result["sample1"]
+#                 user2, sample2 = result["user2"], result["sample2"]
+
+#                 # Add samples to filtered results
+#                 if user1 not in filtered_results:
+#                     filtered_results[user1] = set()
+#                 filtered_results[user1].add(sample1)
+
+#                 if user2 not in filtered_results:
+#                     filtered_results[user2] = set()
+#                 filtered_results[user2].add(sample2)
+
+#         # Convert sets to lists for JSON serialization
+#         for user_id in filtered_results:
+#             filtered_results[user_id] = list(filtered_results[user_id])
+
+#         # Store the filtered results in the database
+#         filtered_qc_update_result = collaboration_collection.update_one(
+#             {"uuid": collab_uuid},
+#             {"$set": {"filtered_qc": filtered_results}}
+#         )
+
+#         if filtered_qc_update_result.matched_count == 0:
+#             return jsonify({"error": "Failed to update filtered QC results."}), 500
+
+#         return jsonify(filtered_results), 200
+
+#     except Exception as e:
+#         print(f"Error retrieving and filtering QC results: {str(e)}")
+#         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
 def get_filtered_qc_results(collab_uuid):
@@ -1875,76 +2138,73 @@ def get_filtered_qc_results(collab_uuid):
         if threshold_update_result.matched_count == 0:
             return jsonify({"error": "Failed to update threshold."}), 500
 
-        # Get full QC results
         full_qc_results = collaboration_data.get("full_qc", [])
-        filtered_results = {}
 
-        # Filter results based on the threshold and phi value
+        final_results = {}
+
         for result in full_qc_results:
-            if result["phi_value"] < threshold:
-                user1, sample1 = result["user1"], result["sample1"]
-                user2, sample2 = result["user2"], result["sample2"]
+            user1, sample1 = result["user1"], result["sample1"]
+            user2, sample2 = result["user2"], result["sample2"]
+            phi_value = result["phi_value"]
 
-                # Add samples to filtered results
-                if user1 not in filtered_results:
-                    filtered_results[user1] = set()
-                filtered_results[user1].add(sample1)
+            if user1 not in final_results:
+                final_results[user1] = set()
+            if user2 not in final_results:
+                final_results[user2] = set()
 
-                if user2 not in filtered_results:
-                    filtered_results[user2] = set()
-                filtered_results[user2].add(sample2)
+            if phi_value > threshold:
+                final_results[user1].discard(sample1)
+                final_results[user2].discard(sample2)
+            else:
+                final_results[user1].add(sample1)
+                final_results[user2].add(sample2)
 
-        # Convert sets to lists for JSON serialization
-        for user_id in filtered_results:
-            filtered_results[user_id] = list(filtered_results[user_id])
+        for user_id in final_results:
+            final_results[user_id] = list(final_results[user_id])
 
-        # Store the filtered results in the database
         filtered_qc_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
-            {"$set": {"filtered_qc": filtered_results}}
+            {"$set": {"filtered_qc": final_results}}
         )
 
         if filtered_qc_update_result.matched_count == 0:
             return jsonify({"error": "Failed to update filtered QC results."}), 500
 
-        return jsonify(filtered_results), 200
+        return jsonify(final_results), 200
 
     except Exception as e:
         print(f"Error retrieving and filtering QC results: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+
 def handle_error(error_message, status_code):
     logging.error(error_message)
     return jsonify({"message": error_message}), status_code
 
-
 def calculate_and_store_chi_square_results(collaboration_uuid):
     try:
-        # Fetch the collaboration document using the UUID
         collaboration = db['collaborations'].find_one({"uuid": collaboration_uuid})
 
         if not collaboration:
             return {"error": "Collaboration not found"}, 404
 
-        # Extract SNP data from the stats field
         stats = collaboration.get('stats', {})
         if not stats:
             return {"error": "No SNP data found in the stats field"}, 400
 
-        # Debug: Log stats structure
-        print(f"Stats structure: {stats}")
-
-        # Store chi-square results
         chi_square_results = {}
-        aggregated_snp_data = {}  # To store SNP data across all users
+        aggregated_snp_data = {}
 
         for user_id, user_stats in stats.items():
             user_snp_stats = {}
 
             for snp_id, snp_data in user_stats.items():
-                # Extract case and control counts
                 case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
                 control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
+
+                # Replace zero counts with 0.5 to avoid issues with zero expected frequencies
+                case_counts = [0.5 if count == 0 else count for count in case_counts]
+                control_counts = [0.5 if count == 0 else count for count in control_counts]
 
                 user_snp_stats[snp_id] = [case_counts, control_counts]
 
@@ -1953,10 +2213,10 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
                     aggregated_snp_data[snp_id] = {}
                 if user_id not in aggregated_snp_data[snp_id]:
                     aggregated_snp_data[snp_id][user_id] = np.zeros((2, 3))
+
                 aggregated_snp_data[snp_id][user_id][0] += np.array(case_counts)
                 aggregated_snp_data[snp_id][user_id][1] += np.array(control_counts)
 
-            # Compute chi-square results for this user
             chi_square_results[user_id] = calc_chi_pvalue(user_snp_stats)
 
         # Compute chi-square results for the aggregated table
@@ -1965,11 +2225,16 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
             total_table = np.zeros((2, 3))
             for user_table in user_tables.values():
                 total_table += user_table
+
+            # Replace zero counts with 0.5 in the aggregated table to prevent zero expected frequencies
+            total_table = np.where(total_table == 0, 0.5, total_table)
+
+            # Ensure chi-square calculation is performed only on valid tables
             aggregated_results[snp_id] = calc_chi_pvalue({snp_id: total_table})[snp_id]
 
         chi_square_results["aggregated"] = aggregated_results
 
-        # Store the structured chi-square results in the collaboration document
+        # Storing chi-square results in the database
         db['collaborations'].update_one(
             {"uuid": collaboration_uuid},
             {"$set": {"chi_square_results": chi_square_results}},

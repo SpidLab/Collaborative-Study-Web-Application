@@ -85,7 +85,7 @@ const UploadForm = () => {
     return (
         <Container component="div" maxWidth="sm" sx={{ padding: 4 }}>
             <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'light' }}>
-                Dataset Metadata Upload
+                Enter Metadata Details
             </Typography>
             <form onSubmit={handleSubmit}>
                 <TextField
@@ -161,7 +161,7 @@ const UploadForm = () => {
                         fullWidth
                         sx={{ marginTop: 2, padding: 2, fontSize: '1rem', borderRadius: 100 }}
                     >
-                        Upload Dataset
+                        Submit
                     </Button>
                 )}
                 <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2}} display={'flex'}>
