@@ -1,12 +1,9 @@
-from email import parser
-import numpy as np 
+import numpy as np
 import pandas as pd
 import itertools
 from concurrent.futures import ProcessPoolExecutor
 
 def calculate_phi(row1, row2):
-    """Computes the phi coefficient between two rows."""
-    # Logical operations to compute n11, n02, n20
     n11 = np.logical_and(row1 == 1, row2 == 1).sum()
     n02 = np.logical_and(row1 == 0, row2 == 2).sum()
     n20 = np.logical_and(row1 == 2, row2 == 0).sum()
@@ -17,12 +14,11 @@ def calculate_phi(row1, row2):
     if n1_ != 0:
         phi = (2 * n11 - 4 * (n02 + n20) - n_1 + n1_) / (4 * n1_)
     else:
-        phi = -999  # Return a default value when the coefficient cannot be computed
+        phi = -999
 
     return phi
 
 def compute_coefficients_for_pairs(pair, df):
-    """Computes phi for a given pair of samples."""
     try:
         (sample1, user1), (sample2, user2) = pair
         row1 = df.loc[(sample1, user1)]
@@ -41,12 +37,10 @@ def compute_coefficients_for_pairs(pair, df):
     except Exception as e:
         return None
 
-# Move process_pair to the global scope to make it pickleable
 def process_pair(pair, df):
     return compute_coefficients_for_pairs(pair, df)
 
 def compute_coefficients_array(df):
-    """Computes phi coefficients for all unique row pairs in the DataFrame."""
     try:
         if not isinstance(df.index, pd.MultiIndex):
             raise ValueError("The DataFrame must have a multi-index with 'sample_id' and 'user_id'.")
@@ -58,7 +52,6 @@ def compute_coefficients_array(df):
         with ProcessPoolExecutor() as executor:
             results = executor.map(process_pair, row_pairs, [df] * len(row_pairs))
 
-        # Collect valid results
         for result in results:
             if result:
                 coeff_array.append(result)

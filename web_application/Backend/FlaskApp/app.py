@@ -1924,19 +1924,19 @@ def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
             {"$set": {key: results_array}}
         )
 
+
     except Exception as e:
-        pass  # Handle silently or log if needed
+        return jsonify({"error": str(e)}), 500
 
 
 # init qc
 @app.route('/api/datasets/<collab_uuid>', methods=['POST'])
 def initiate_qc(collab_uuid):
-    """Initiates the QC process for a given collaboration UUID."""
     try:
         df, threshold = get_combined_datasets(collab_uuid)
 
-        if isinstance(df, dict):  # Check for an error response
-            return df  # This is already a JSON response
+        if isinstance(df, dict):
+            return df
 
         results = compute_coefficients_array(df)
 
@@ -1952,14 +1952,11 @@ def initiate_qc(collab_uuid):
 
 @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['GET'])
 def get_initial_qc_matrix(collab_uuid):
-    """Fetches the initial QC results matrix for a given collaboration UUID."""
     try:
-        # Fetch collaboration data
         collaboration_data = fetch_collaboration_data(collab_uuid)
         if not collaboration_data:
             return jsonify({"error": "Collaboration not found."}), 404
 
-        # Get the QC results matrix from the collaboration data
         full_qc_results = collaboration_data.get("full_qc", [])
         threshold_value = collaboration_data.get("threshold", None)
 
@@ -1974,29 +1971,23 @@ def get_initial_qc_matrix(collab_uuid):
 @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
 def get_filtered_qc_results(collab_uuid):
     try:
-        # Fetch collaboration data
         collaboration_data = fetch_collaboration_data(collab_uuid)
         if not collaboration_data:
             return jsonify({"error": "Collaboration not found."}), 404
 
-        # Get the threshold value from the request body (or fallback to the default in collaboration data)
         threshold = request.json.get("threshold", collaboration_data.get("threshold", 0.08))
         print("Threshold received:", threshold)
 
-        # Reference to MongoDB collection
         collaboration_collection = db["collaborations"]
 
-        # Check if threshold was already set in the database
         existing_threshold = collaboration_data.get("threshold")
 
         if existing_threshold is not None:
-            # First, remove 'stats' and 'chi_square_results' if threshold was already set
             collaboration_collection.update_one(
                 {"uuid": collab_uuid},
                 {"$unset": {"stats": "", "chi_square_results": ""}}
             )
 
-        # Update threshold in the database
         threshold_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
             {"$set": {"threshold": threshold}}
@@ -2009,21 +2000,17 @@ def get_filtered_qc_results(collab_uuid):
 
         final_results = {}
 
-        # Create a thread pool to process QC results in parallel
         with ThreadPoolExecutor() as executor:
             futures = []
             for result in full_qc_results:
                 futures.append(executor.submit(process_qc_result, result, threshold, final_results))
 
-            # Wait for all threads to complete
             for future in as_completed(futures):
                 future.result()  # This will re-raise any exceptions from the threads
 
-        # Convert sets to lists
         for user_id in final_results:
             final_results[user_id] = list(final_results[user_id])
 
-        # Parallelized database update for filtered QC results
         filtered_qc_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
             {"$set": {"filtered_qc": final_results}}
@@ -2165,7 +2152,6 @@ def calculate_chi_square():
 @app.route('/api/calculate_chi_square_results/<collab_uuid>', methods=['GET'])
 def get_chi_square_results(collab_uuid):
     try:
-        # Fetch the chi-square results from the database (after calculation)
         collaboration = db['collaborations'].find_one({"uuid": collab_uuid})
         chi_square_results = collaboration.get('chi_square_results', {})
 
