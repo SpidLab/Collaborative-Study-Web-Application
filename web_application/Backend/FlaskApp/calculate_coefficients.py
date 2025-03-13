@@ -2,9 +2,10 @@ from email import parser
 import numpy as np 
 import pandas as pd
 import itertools
-
+from concurrent.futures import ProcessPoolExecutor
 
 def calculate_phi(row1, row2):
+    """Computes the phi coefficient between two rows."""
     # Logical operations to compute n11, n02, n20
     n11 = np.logical_and(row1 == 1, row2 == 1).sum()
     n02 = np.logical_and(row1 == 0, row2 == 2).sum()
@@ -20,46 +21,63 @@ def calculate_phi(row1, row2):
 
     return phi
 
-
-def compute_coefficients_array(df):
-    coeff_array = []
-
-    # Ensure the DataFrame has a multi-index
-    if not isinstance(df.index, pd.MultiIndex):
-        raise ValueError("The DataFrame must have a multi-index with 'sample_id' and 'user_id'.")
-
-    # Generate row pairs using combinations of multi-index
-    row_pairs = itertools.combinations(df.index, 2)
-
-    for (sample1, user1), (sample2, user2) in row_pairs:
-        # Extract rows corresponding to the pair
+def compute_coefficients_for_pairs(pair, df):
+    """Computes phi for a given pair of samples."""
+    try:
+        (sample1, user1), (sample2, user2) = pair
         row1 = df.loc[(sample1, user1)]
         row2 = df.loc[(sample2, user2)]
 
-        # Calculate phi value between the two rows
         phi_val = calculate_phi(row1, row2)
 
-        # Append results with both sample numbers and user IDs
-        coeff_array.append({
-            "sample1": sample1,
-            "user1": user1,
-            "sample2": sample2,
-            "user2": user2,
+        result = {
+            "sample1": sample1, "user1": user1,
+            "sample2": sample2, "user2": user2,
             "phi_value": phi_val
-        })
+        }
 
-    return coeff_array
+        return result
+
+    except Exception as e:
+        return None
+
+# Move process_pair to the global scope to make it pickleable
+def process_pair(pair, df):
+    return compute_coefficients_for_pairs(pair, df)
+
+def compute_coefficients_array(df):
+    """Computes phi coefficients for all unique row pairs in the DataFrame."""
+    try:
+        if not isinstance(df.index, pd.MultiIndex):
+            raise ValueError("The DataFrame must have a multi-index with 'sample_id' and 'user_id'.")
+
+        row_pairs = list(itertools.combinations(df.index, 2))
+
+        coeff_array = []
+
+        with ProcessPoolExecutor() as executor:
+            results = executor.map(process_pair, row_pairs, [df] * len(row_pairs))
+
+        # Collect valid results
+        for result in results:
+            if result:
+                coeff_array.append(result)
+
+        return coeff_array
+
+    except Exception as e:
+        return []
 
 
-if __name__ == "__main__":
-    #TODO Modify the code below to read from a list of csv files and merge them together
-    print("sad")
-    # Read the first CSV file
-    first_half_data = pd.read_csv("first_dataset.csv", index_col=0)
-    # Read the second CSV file
-    second_half_data = pd.read_csv("second_dataset.csv", index_col=0)
-    # Merge the DataFrames
-    merged_data = pd.concat([first_half_data, second_half_data], axis=1)
-
-    coeff_dict = compute_coefficients_array(merged_data)
-    print(coeff_dict)
+# if __name__ == "__main__":
+#     #TODO Modify the code below to read from a list of csv files and merge them together
+#     print("sad")
+#     # Read the first CSV file
+#     first_half_data = pd.read_csv("first_dataset.csv", index_col=0)
+#     # Read the second CSV file
+#     second_half_data = pd.read_csv("second_dataset.csv", index_col=0)
+#     # Merge the DataFrames
+#     merged_data = pd.concat([first_half_data, second_half_data], axis=1)
+#
+#     coeff_dict = compute_coefficients_array(merged_data)
+#     print(coeff_dict)

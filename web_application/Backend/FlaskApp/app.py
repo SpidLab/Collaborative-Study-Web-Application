@@ -26,6 +26,10 @@ from fuzzywuzzy import process
 import uuid
 from stats import calc_chi_pvalue
 from bson import ObjectId
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Pool
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 
 # from stats import calc_chi_pvalue
 
@@ -1501,7 +1505,6 @@ def update_qc_data():
 
         user_id = current_user.id
 
-        # Get the dataset ID and file from the request
         dataset_id = request.form.get('dataset_id')  # Expecting dataset_id in JSON payload
         if not dataset_id:
             return jsonify({"error": "Dataset ID is required"}), 400
@@ -1514,24 +1517,20 @@ def update_qc_data():
         if not file.filename.endswith('.csv'):
             return jsonify({"error": "Only CSV files are supported"}), 400
 
-        # Read the file directly into a DataFrame, setting the first column as sample_id
         df = pd.read_csv(file, index_col=0)
         df.index.name = 'sample_id'  # Set the index name
 
         if not df.empty:
             data = {}
 
-            # Store each row in the data dictionary using sample_id as the key
             for sample_id, row in df.iterrows():
                 data[str(sample_id)] = row.to_dict()
 
-        # Get the dataset from the DB
         dataset = db['datasets'].find_one({"_id": ObjectId(dataset_id)})
         if not dataset:
             return jsonify({"error": "Dataset not found"}), 404
 
 
-        # Update the dataset in the DB with the new data
         db['datasets'].update_one(
             {"_id": ObjectId(dataset_id)},
             {"$set": {"data": data}}
@@ -1548,7 +1547,6 @@ def update_qc_data():
 @app.route('/api/upload_csv_stats', methods=['POST'])
 def upload_csv_stats():
     try:
-        # Validate Authorization header
         auth_header = request.headers.get('Authorization')
         if not auth_header:
             logging.error("Authorization header missing")
@@ -1563,14 +1561,12 @@ def upload_csv_stats():
 
         user_id = str(current_user.id)  # Ensure user_id is a string for JSON serialization
 
-        # Check for file in the request
         if 'file' not in request.files:
             logging.error('No file part in the request')
             return jsonify({'message': 'No file part in the request'}), 400
 
         file = request.files['file']
 
-        # Check if file is selected and has a valid CSV format
         if file.filename == '':
             logging.error('No selected file')
             return jsonify({'message': 'No selected file'}), 400
@@ -1579,17 +1575,14 @@ def upload_csv_stats():
             logging.error('Unsupported file type')
             return jsonify({'message': 'Unsupported file type'}), 400
 
-        # Get the collaboration UUID from the request
         collaboration_uuid = request.form.get('uuid')
         if not collaboration_uuid:
             logging.error("Collaboration UUID missing")
             return jsonify({"error": "Collaboration UUID missing"}), 400
 
         try:
-            # Read CSV into DataFrame
             df = pd.read_csv(file)
 
-            # Ensure the first column is SNP_ID
             if df.columns[0].lower() != 'snp_id':
                 logging.error('First column must be SNP_ID')
                 return jsonify({'message': 'First column must be SNP_ID'}), 400
@@ -1807,27 +1800,29 @@ def fetch_collaboration_data(uuid):
         collaboration_data = collaboration_collection.find_one({"uuid": uuid})
 
         if collaboration_data is None:
-            print("Collaboration not found.")
-            return None  # Collaboration not found
+            return None
+
         return collaboration_data
 
     except Exception as e:
-        print(f"Error fetching collaboration data for UUID {uuid}: {str(e)}")
-        raise  # Re-raise the exception for higher-level handling
+        raise
 
 
 def fetch_datasets_by_ids(dataset_ids):
     dataset_collection = db["datasets"]
-    datasets = []
 
-    for dataset_id in dataset_ids:
+    def fetch_single_dataset(dataset_id):
         dataset = dataset_collection.find_one({"_id": ObjectId(dataset_id)})
         if dataset:
-            datasets.append(dataset)
+            return dataset
         else:
-            print(f"Dataset ID {dataset_id} not found.")
+            return None
 
-    return datasets
+    with ThreadPoolExecutor() as executor:
+        datasets = list(executor.map(fetch_single_dataset, dataset_ids))
+
+    filtered_datasets = [dataset for dataset in datasets if dataset]
+    return filtered_datasets
 
 
 def combine_datasets(dataset_ids, fetch_dataset):
@@ -1836,40 +1831,28 @@ def combine_datasets(dataset_ids, fetch_dataset):
     for dataset_id in dataset_ids:
         dataset = fetch_dataset(dataset_id)  # Fetch dataset by ID
 
-        if 'data' in dataset:
+        if dataset and 'data' in dataset:
             sample_data = dataset['data']
             all_columns = set()
-
-            # Prepare list of sample data dictionaries
             samples = []
 
             for sample_id, sample in sample_data.items():
-                sample['sample_id'] = sample_id  # Add sample_id field
-
-                # Ensure that we have all columns (rs SNPs) in the DataFrame
+                sample['sample_id'] = sample_id
                 all_columns.update(sample.keys())
-
-                # Append the sample data to the list
                 samples.append(sample)
 
-            # Create DataFrame from the sample data
             df = pd.DataFrame(samples)
-
-            # Add 'user_id' to each sample's data
             df['user_id'] = dataset.get('user_id')
-
-            # Set the multi-index with sample_id and user_id
             df.set_index(['sample_id', 'user_id'], inplace=True)
 
             combined_data.append(df)
-        else:
-            print(f"Dataset ID {dataset_id} does not contain 'data' key. Skipping.")
 
     if combined_data:
         combined_df = pd.concat(combined_data)
         return combined_df
     else:
         raise ValueError("No valid datasets to combine.")
+
 
 def combine_datasets_to_dataframe(datasets_data):
     if datasets_data:
@@ -1882,38 +1865,32 @@ def combine_datasets_to_dataframe(datasets_data):
                 sample_data = dataset['data']
                 samples = []
 
-                # For each sample in the dataset, gather the SNPs and add sample_id/user_id
                 for sample_id, sample in sample_data.items():
                     sample['sample_id'] = sample_id
                     sample['user_id'] = user_id
                     samples.append(sample)
-
                     all_columns.update(sample.keys())
 
-                # Create DataFrame from the sample data
                 df = pd.DataFrame(samples)
-
-                # Reorder the DataFrame columns and set the index
-                df = df.reindex(columns=sorted(all_columns))  # Ensure all columns exist
+                df = df.reindex(columns=sorted(all_columns))
                 df.set_index(['sample_id', 'user_id'], inplace=True)
 
                 dfs.append(df)
 
         if dfs:
             combined_df = pd.concat(dfs)
-            combined_df = combined_df[sorted(combined_df.columns)]  # Sort columns
+            combined_df = combined_df[sorted(combined_df.columns)]
             return combined_df
 
     return pd.DataFrame()
 
+
 def get_combined_datasets(collab_uuid):
     try:
-        # Fetch collaboration data
         collaboration_data = fetch_collaboration_data(collab_uuid)
         if not collaboration_data:
             return jsonify({"error": "Collaboration not found for the provided UUID."}), 404
 
-        # Get threshold and dataset IDs
         threshold = collaboration_data.get("threshold", 1)
         invited_users = collaboration_data.get("invited_users", [])
         creator_dataset_id = collaboration_data.get("creator_dataset_id")
@@ -1922,94 +1899,60 @@ def get_combined_datasets(collab_uuid):
         if creator_dataset_id:
             all_dataset_ids.append(creator_dataset_id)
 
-        # Fetch datasets and combine
         datasets_data = fetch_datasets_by_ids(all_dataset_ids)
         if not datasets_data:
             return jsonify({"error": "No datasets found for the provided IDs."}), 404
 
         combined_df = combine_datasets_to_dataframe(datasets_data)
 
-        # Return the combined DataFrame and threshold
         return combined_df, threshold
 
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
 
 def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
     try:
-        # Get the collaboration data
         collaboration_collection = db["collaborations"]
         collaboration_data = collaboration_collection.find_one({"uuid": collab_uuid})
 
         if collaboration_data is None:
-            print("Collaboration not found.")
             return None
 
-        # Add the results to the document
         collaboration_collection.update_one(
             {"uuid": collab_uuid},
             {"$set": {key: results_array}}
         )
-        print("Results stored successfully.")
 
     except Exception as e:
-        print(f"Error storing results: {str(e)}")
+        pass  # Handle silently or log if needed
 
-# def store_qc_results_in_mongo(collab_uuid, results_array):
-#     try:
-#         # Get the collaboration data
-#         collaboration_collection = db["collaborations"]
-#         collaboration_data = collaboration_collection.find_one({"uuid": collab_uuid})
-#
-#         if collaboration_data is None:
-#             print("Collaboration not found.")
-#             return None
-#
-#         # Add the results to the document
-#         collaboration_collection.update_one(
-#             {"uuid": collab_uuid},
-#             {"$set": {"qc_results": results_array}}
-#         )
-#         print("Results stored successfully.")
-#
-#     except Exception as e:
-#         print(f"Error storing results: {str(e)}")
+
 # init qc
 @app.route('/api/datasets/<collab_uuid>', methods=['POST'])
 def initiate_qc(collab_uuid):
+    """Initiates the QC process for a given collaboration UUID."""
     try:
-        # Get the combined datasets and threshold from the collaboration data
         df, threshold = get_combined_datasets(collab_uuid)
 
-        if isinstance(df, dict):  # Check for an error response (dict could be an error message)
+        if isinstance(df, dict):  # Check for an error response
             return df  # This is already a JSON response
 
-        print("Got datasets")
-        # print(df)
-        print(df)
-        
-
-        # Compute the coefficients using the fetched threshold
         results = compute_coefficients_array(df)
 
         if results:
-            print("Results computed successfully.")
-
-            # Store the computed results in MongoDB
             store_qc_results_in_mongo(collab_uuid, results, "full_qc")
 
-            # Return the results as a JSON response
-            return jsonify(results), 200  # Return results as JSON response
+            return jsonify(results), 200
         else:
             return jsonify({"error": "No results returned from compute_coefficients_array."}), 404
 
     except Exception as e:
-        print(f"An error occurred in initiate_qc: {str(e)}")
-        return jsonify({"error": str(e)}), 500  # Return an error response
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['GET'])
 def get_initial_qc_matrix(collab_uuid):
+    """Fetches the initial QC results matrix for a given collaboration UUID."""
     try:
         # Fetch collaboration data
         collaboration_data = fetch_collaboration_data(collab_uuid)
@@ -2023,86 +1966,10 @@ def get_initial_qc_matrix(collab_uuid):
         if not full_qc_results:
             return jsonify({"message": "No QC results available for this collaboration."}), 201
 
-        # Return the full QC results matrix as a JSON response
         return jsonify(full_qc_results=full_qc_results, threshold=threshold_value), 200
 
     except Exception as e:
-        print(f"Error retrieving QC results matrix: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
-
-
-# @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
-# def get_filtered_qc_results(collab_uuid):
-#     try:
-#         # Fetch collaboration data
-#         collaboration_data = fetch_collaboration_data(collab_uuid)
-#         if not collaboration_data:
-#             return jsonify({"error": "Collaboration not found."}), 404
-
-#         # Get the threshold value from the request body (or fallback to the default in collaboration data)
-#         threshold = request.json.get("threshold", collaboration_data.get("threshold", 0.08))
-#         print("Threshold received:", threshold)
-
-#         # Reference to MongoDB collection
-#         collaboration_collection = db["collaborations"]
-
-#         # Check if threshold was already set in the database
-#         existing_threshold = collaboration_data.get("threshold")
-
-#         if existing_threshold is not None:
-#             # First, remove 'stats' and 'chi_square_results' if threshold was already set
-#             collaboration_collection.update_one(
-#                 {"uuid": collab_uuid},
-#                 {"$unset": {"stats": "", "chi_square_results": ""}}
-#             )
-
-#         # Update threshold in the database
-#         threshold_update_result = collaboration_collection.update_one(
-#             {"uuid": collab_uuid},
-#             {"$set": {"threshold": threshold}}
-#         )
-
-#         if threshold_update_result.matched_count == 0:
-#             return jsonify({"error": "Failed to update threshold."}), 500
-
-#         # Get full QC results
-#         full_qc_results = collaboration_data.get("full_qc", [])
-#         filtered_results = {}
-
-#         # Filter results based on the threshold and phi value
-#         for result in full_qc_results:
-#             if result["phi_value"] < threshold:
-#                 user1, sample1 = result["user1"], result["sample1"]
-#                 user2, sample2 = result["user2"], result["sample2"]
-
-#                 # Add samples to filtered results
-#                 if user1 not in filtered_results:
-#                     filtered_results[user1] = set()
-#                 filtered_results[user1].add(sample1)
-
-#                 if user2 not in filtered_results:
-#                     filtered_results[user2] = set()
-#                 filtered_results[user2].add(sample2)
-
-#         # Convert sets to lists for JSON serialization
-#         for user_id in filtered_results:
-#             filtered_results[user_id] = list(filtered_results[user_id])
-
-#         # Store the filtered results in the database
-#         filtered_qc_update_result = collaboration_collection.update_one(
-#             {"uuid": collab_uuid},
-#             {"$set": {"filtered_qc": filtered_results}}
-#         )
-
-#         if filtered_qc_update_result.matched_count == 0:
-#             return jsonify({"error": "Failed to update filtered QC results."}), 500
-
-#         return jsonify(filtered_results), 200
-
-#     except Exception as e:
-#         print(f"Error retrieving and filtering QC results: {str(e)}")
-#         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/datasets/<collab_uuid>/qc-results', methods=['POST'])
 def get_filtered_qc_results(collab_uuid):
@@ -2142,26 +2009,21 @@ def get_filtered_qc_results(collab_uuid):
 
         final_results = {}
 
-        for result in full_qc_results:
-            user1, sample1 = result["user1"], result["sample1"]
-            user2, sample2 = result["user2"], result["sample2"]
-            phi_value = result["phi_value"]
+        # Create a thread pool to process QC results in parallel
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            for result in full_qc_results:
+                futures.append(executor.submit(process_qc_result, result, threshold, final_results))
 
-            if user1 not in final_results:
-                final_results[user1] = set()
-            if user2 not in final_results:
-                final_results[user2] = set()
+            # Wait for all threads to complete
+            for future in as_completed(futures):
+                future.result()  # This will re-raise any exceptions from the threads
 
-            if phi_value > threshold:
-                final_results[user1].discard(sample1)
-                final_results[user2].discard(sample2)
-            else:
-                final_results[user1].add(sample1)
-                final_results[user2].add(sample2)
-
+        # Convert sets to lists
         for user_id in final_results:
             final_results[user_id] = list(final_results[user_id])
 
+        # Parallelized database update for filtered QC results
         filtered_qc_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
             {"$set": {"filtered_qc": final_results}}
@@ -2177,9 +2039,51 @@ def get_filtered_qc_results(collab_uuid):
         return jsonify({"error": str(e)}), 500
 
 
+def process_qc_result(result, threshold, final_results):
+    user1, sample1 = result["user1"], result["sample1"]
+    user2, sample2 = result["user2"], result["sample2"]
+    phi_value = result["phi_value"]
+
+    if user1 not in final_results:
+        final_results[user1] = set()
+    if user2 not in final_results:
+        final_results[user2] = set()
+
+    if phi_value > threshold:
+        final_results[user1].discard(sample1)
+        final_results[user2].discard(sample2)
+    else:
+        final_results[user1].add(sample1)
+        final_results[user2].add(sample2)
+
 def handle_error(error_message, status_code):
     logging.error(error_message)
     return jsonify({"message": error_message}), status_code
+
+def process_user_snp_stats(user_id, user_stats):
+    user_snp_stats = {}
+    for snp_id, snp_data in user_stats.items():
+        case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
+        control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
+
+        # Replace zero counts with 0.5 to avoid issues with zero expected frequencies
+        case_counts = [0.5 if count == 0 else count for count in case_counts]
+        control_counts = [0.5 if count == 0 else count for count in control_counts]
+
+        user_snp_stats[snp_id] = [case_counts, control_counts]
+
+    return user_id, user_snp_stats
+
+def process_aggregated_snp_data(snp_id, user_tables):
+    total_table = np.zeros((2, 3))
+    for user_table in user_tables.values():
+        total_table += user_table
+
+    # Replace zero counts with 0.5 in the aggregated table to prevent zero expected frequencies
+    total_table = np.where(total_table == 0, 0.5, total_table)
+
+    # Ensure chi-square calculation is performed only on valid tables
+    return snp_id, calc_chi_pvalue({snp_id: total_table})[snp_id]
 
 def calculate_and_store_chi_square_results(collaboration_uuid):
     try:
@@ -2195,46 +2099,37 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
         chi_square_results = {}
         aggregated_snp_data = {}
 
-        for user_id, user_stats in stats.items():
-            user_snp_stats = {}
+        with ProcessPoolExecutor() as executor:
+            future_to_user = {
+                executor.submit(process_user_snp_stats, user_id, user_stats): user_id
+                for user_id, user_stats in stats.items()
+            }
 
-            for snp_id, snp_data in user_stats.items():
-                case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
-                control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
+            for future in as_completed(future_to_user):
+                user_id, user_snp_stats = future.result()
+                chi_square_results[user_id] = calc_chi_pvalue(user_snp_stats)
 
-                # Replace zero counts with 0.5 to avoid issues with zero expected frequencies
-                case_counts = [0.5 if count == 0 else count for count in case_counts]
-                control_counts = [0.5 if count == 0 else count for count in control_counts]
+                for snp_id, (case_counts, control_counts) in user_snp_stats.items():
+                    if snp_id not in aggregated_snp_data:
+                        aggregated_snp_data[snp_id] = {}
+                    if user_id not in aggregated_snp_data[snp_id]:
+                        aggregated_snp_data[snp_id][user_id] = np.zeros((2, 3))
 
-                user_snp_stats[snp_id] = [case_counts, control_counts]
+                    aggregated_snp_data[snp_id][user_id][0] += np.array(case_counts)
+                    aggregated_snp_data[snp_id][user_id][1] += np.array(control_counts)
 
-                # Aggregate SNP data across users
-                if snp_id not in aggregated_snp_data:
-                    aggregated_snp_data[snp_id] = {}
-                if user_id not in aggregated_snp_data[snp_id]:
-                    aggregated_snp_data[snp_id][user_id] = np.zeros((2, 3))
+            future_to_snp = {
+                executor.submit(process_aggregated_snp_data, snp_id, user_tables): snp_id
+                for snp_id, user_tables in aggregated_snp_data.items()
+            }
 
-                aggregated_snp_data[snp_id][user_id][0] += np.array(case_counts)
-                aggregated_snp_data[snp_id][user_id][1] += np.array(control_counts)
+            aggregated_results = {}
+            for future in as_completed(future_to_snp):
+                snp_id, chi_value = future.result()
+                aggregated_results[snp_id] = chi_value
 
-            chi_square_results[user_id] = calc_chi_pvalue(user_snp_stats)
+            chi_square_results["aggregated"] = aggregated_results
 
-        # Compute chi-square results for the aggregated table
-        aggregated_results = {}
-        for snp_id, user_tables in aggregated_snp_data.items():
-            total_table = np.zeros((2, 3))
-            for user_table in user_tables.values():
-                total_table += user_table
-
-            # Replace zero counts with 0.5 in the aggregated table to prevent zero expected frequencies
-            total_table = np.where(total_table == 0, 0.5, total_table)
-
-            # Ensure chi-square calculation is performed only on valid tables
-            aggregated_results[snp_id] = calc_chi_pvalue({snp_id: total_table})[snp_id]
-
-        chi_square_results["aggregated"] = aggregated_results
-
-        # Storing chi-square results in the database
         db['collaborations'].update_one(
             {"uuid": collaboration_uuid},
             {"$set": {"chi_square_results": chi_square_results}},

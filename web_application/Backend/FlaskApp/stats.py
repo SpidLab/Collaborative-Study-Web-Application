@@ -1,11 +1,37 @@
 from scipy.stats import chi2_contingency
-
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
+
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import numpy as np
+from scipy.stats import chi2_contingency
+
+
+def calc_chi_pvalue_for_snp(snp_id, counts):
+    """
+    Calculate the chi-square test statistic and p-value for a single SNP.
+
+    Args:
+        snp_id: SNP ID.
+        counts: Contingency table [[case counts (0, 1, 2)], [control counts (0, 1, 2)]].
+
+    Returns:
+        Tuple containing SNP ID and its chi-square result (chi-square, p-value).
+    """
+    try:
+        aggregated_table = np.array(counts)  # Convert list to numpy array
+
+        chi2, p_value, _, _ = chi2_contingency(aggregated_table)
+
+    except Exception as e:
+        return snp_id, {"chi_square": None, "p_value": None}
+
+    return snp_id, {"chi_square": chi2, "p_value": p_value}
 
 
 def calc_chi_pvalue(snp_stats):
     """
-    Calculate the chi-square test statistic and p-value for GWAS SNPs.
+    Calculate the chi-square test statistic and p-value for GWAS SNPs using multiprocessing.
 
     Args:
         snp_stats: A dictionary where keys are SNP IDs and values are
@@ -16,17 +42,21 @@ def calc_chi_pvalue(snp_stats):
     """
     gwas_result = {}
 
-    for snp_id, counts in snp_stats.items():
-        print(f"Processing SNP: {snp_id}")
+    with ProcessPoolExecutor() as executor:
+        future_to_snp = {
+            executor.submit(calc_chi_pvalue_for_snp, snp_id, counts): snp_id
+            for snp_id, counts in snp_stats.items()
+        }
 
-        aggregated_table = np.array(counts)  # Convert list to numpy array
-
-        # Perform chi-square test
-        chi2, p_value, _, _ = chi2_contingency(aggregated_table)
-
-        gwas_result[snp_id] = {"chi_square": chi2, "p_value": p_value}
+        for future in as_completed(future_to_snp):
+            try:
+                snp_id, result = future.result()
+                gwas_result[snp_id] = result
+            except Exception as e:
+                pass
 
     return gwas_result
+
 
 # # Example usage with mock data
 # example_snp_stats = [
