@@ -10,8 +10,10 @@ dnspython==2.6.0
 exceptiongroup==1.1.0
 Flask==2.1.2
 Flask-Cors==4.0.0
+Flask-HTTPAuth==4.7.0
 Flask-Login==0.6.3
 Flask-PyMongo==2.3.0
+fuzzywuzzy==0.18.0
 h11==0.14.0
 idna==3.3
 importlib-metadata==4.11.4
@@ -29,7 +31,8 @@ pyrsistent==0.18.1
 PySocks==1.7.1
 python-dateutil==2.6.0
 python-dotenv==0.21.1
-PyYAML==6.0
+python-Levenshtein==0.20.9
+PyYAML==6.0.1
 requests==2.27.1
 selenium==4.8.0
 six==1.16.0
