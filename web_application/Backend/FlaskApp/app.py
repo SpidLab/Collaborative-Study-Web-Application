@@ -445,6 +445,116 @@ def get_users_for_invitation():
 
 
 
+# @app.route('/api/invitations', methods=['GET'])
+# def get_user_invitations():
+#     try:
+#         current_user, error_response = get_current_user()
+#         if error_response:
+#             return error_response
+        
+#         user_id = current_user.get_id()
+        
+#         # Find collaborations where the user is either the creator (sender) or an invited user (receiver)
+#         collaborations = db.collaborations.find({
+#             '$or': [
+#                 {'creator_id': ObjectId(user_id)},  # If the user is the sender (creator)
+#                 {'invited_users.user_id': ObjectId(user_id)}  # If the user is an invited user (receiver)
+#             ]
+#         })
+        
+
+#         #invitations_list = []
+        
+#         response_list = []
+#         processed_collab_uuids = set()
+        
+#         # Iterate over the collaborations
+#         for collaboration in collaborations:
+#             collaboration_uuid = collaboration.get("uuid", None)
+#             collaboration_name = collaboration.get("name", "No name")
+#             creator_id = collaboration.get("creator_id")
+
+#             # Sender (initiator) info
+#             sender_user = db.users.find_one({"_id": ObjectId(creator_id)})
+#             sender_email = sender_user["email"] if sender_user else "Unknown"
+#             sender_name = sender_user["name"] if sender_user else "Unknown"
+#             is_current_user_the_initiator = (str(creator_id) == user_id)
+            
+#             participants_list_summary = []
+#             current_user_specific_status_as_invitee = None
+#             all_invitees_accepted = True if collaboration.get('invited_users') else False
+#             any_invitee_pending = False
+            
+            
+#             # Iterate over invited users
+#             for invited_user in collaboration.get('invited_users', []):
+#                 receiver_id = invited_user.get("user_id")
+#                 receiver_user = db.users.find_one({"_id": ObjectId(receiver_id)})
+#                 receiver_email = receiver_user["email"] if receiver_user else "Unknown"
+#                 receiver_name = receiver_user["name"] if receiver_user else "Unknown"
+#                 status_str = invited_user.get("status", "pending")
+                
+#                 participants_list_summary.append(
+#                     {
+#                         "user_id": str(receiver_id),
+#                         "name": receiver_name,
+#                         "email": receiver_email,
+#                         "status": status_str
+#                     }
+#                 )
+#                 if receiver_id == user_id:
+#                     current_user_specific_status_as_invitee = status_str
+#                 if status_str == 'pending': any_invitee_pending = True
+#                 if status_str != 'accepted': all_invitees_accepted = False
+                
+#                 # # Only include invitations where the user is the sender or receiver
+#                 # if str(invited_user["user_id"]) == user_id or str(collaboration["creator_id"]) == user_id:
+#                 #     participants_list_summary.append({
+#                 #         "_id": str(collaboration["_id"]),
+#                 #         "uuid": str(collaboration_uuid),
+#                 #         "collab_name": collaboration_name,
+#                 #         "collab_uuid": str(collaboration_uuid),
+#                 #         "receiver_id": str(invited_user["user_id"]),
+#                 #         "sender_id": str(collaboration["creator_id"]),
+#                 #         "receiver_email": receiver_email,
+#                 #         "receiver_name": receiver_name,
+#                 #         "sender_email": sender_email,
+#                 #         "sender_name": sender_name,
+#                 #         "status": invited_user["status"],
+#                 #         "phenotype": invited_user.get("phenotype", "Not provided")
+#                 #     })
+#             base_representation = {
+#                 "uuid": collaboration_uuid, "collab_name": collaboration_name,
+#                 "creator_name": sender_name, "creator_email": sender_email, "creator_id": str(creator_id)
+#             }
+#             if is_current_user_the_initiator:
+#                 base_representation["view_type"] = "initiator_summary"
+#                 base_representation["all_invited_participants"] = participants_list_summary
+#                 if not collaboration.get('invited_users'): base_representation["overall_status_for_initiator_tab"] = "setup"
+#                 elif any_invitee_pending: base_representation["overall_status_for_initiator_tab"] = "pending_responses"
+#                 elif all_invitees_accepted: base_representation["overall_status_for_initiator_tab"] = "active_all_accepted"
+#                 else: base_representation["overall_status_for_initiator_tab"] = "active_mixed_responses"
+#                 response_list.append(base_representation)
+#                 processed_collab_uuids.add(collaboration_uuid)
+#             elif current_user_specific_status_as_invitee:
+#                 base_representation["view_type"] = "invitee_specific"
+#                 base_representation["my_status_as_invitee"] = current_user_specific_status_as_invitee
+#                 my_entry = next((iu for iu in collaboration.get('invited_users', []) if str(iu.get("user_id")) == user_id), None)
+#                 if my_entry: base_representation["phenotype_context"] = my_entry.get("phenotype", "N/A")
+#                 # For invitee view, sender/receiver is more direct for existing frontend
+#                 base_representation["sender_id"] = str(creator_id)
+#                 base_representation["sender_name"] = sender_name
+#                 base_representation["receiver_id"] = user_id
+#                 base_representation["receiver_name"] = current_user.user_json.get("name", "You")
+#                 response_list.append(base_representation)
+#                 processed_collab_uuids.add(collaboration_uuid)
+
+#         return jsonify({"invitations": response_list, "current_user_id": user_id}), 200
+#     except Exception as e:
+#         logging.error(f"Error getting user invitations: {str(e)}")
+#         return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/invitations', methods=['GET'])
 def get_user_invitations():
     try:
@@ -463,42 +573,63 @@ def get_user_invitations():
         })
         
 
-        invitations_list = []
+        #invitations_list = []
+        
+        response_list = []
+        processed_collab_uuids = set()
         
         # Iterate over the collaborations
         for collaboration in collaborations:
             collaboration_uuid = collaboration.get("uuid", None)
             collaboration_name = collaboration.get("name", "No name")
+            creator_id = collaboration.get("creator_id")
 
             # Sender (initiator) info
-            sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
+            sender_user = db.users.find_one({"_id": ObjectId(creator_id)})
             sender_email = sender_user["email"] if sender_user else "Unknown"
             sender_name = sender_user["name"] if sender_user else "Unknown"
+            is_initiator = (str(creator_id) == user_id)
             
-            # Iterate over invited users
-            for invited_user in collaboration.get('invited_users', []):
-                receiver_user = db.users.find_one({"_id": ObjectId(invited_user["user_id"])})
-                receiver_email = receiver_user["email"] if receiver_user else "Unknown"
-                receiver_name = receiver_user["name"] if receiver_user else "Unknown"
+            if is_initiator:
+                participants_summary = []
+                any_pending = False
+                all_accepted = True if collaboration.get('invited_users') else False
+                for iu in collaboration.get('invited_users', []):
+                    iu_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
+                    status = iu.get("status", "pending")
+                    participants_summary.append({ "user_id": str(iu["user_id"]), "name": iu_doc.get("name") if iu_doc else "Unknown", "status": status })
+                    if status == 'pending': any_pending = True
+                    if status != 'accepted': all_accepted = False
                 
-                # Only include invitations where the user is the sender or receiver
-                if str(invited_user["user_id"]) == user_id or str(collaboration["creator_id"]) == user_id:
-                    invitations_list.append({
-                        "_id": str(collaboration["_id"]),
-                        "uuid": str(collaboration_uuid),
-                        "collab_name": collaboration_name,
-                        "collab_uuid": str(collaboration_uuid),
-                        "receiver_id": str(invited_user["user_id"]),
-                        "sender_id": str(collaboration["creator_id"]),
-                        "receiver_email": receiver_email,
-                        "receiver_name": receiver_name,
-                        "sender_email": sender_email,
-                        "sender_name": sender_name,
-                        "status": invited_user["status"],
-                        "phenotype": invited_user.get("phenotype", "Not provided")
-                    })
+                overall_status = "setup"
+                if collaboration.get('invited_users'):
+                    if any_pending: overall_status = "pending_responses"
+                    elif all_accepted: overall_status = "active_all_accepted"
+                    else: overall_status = "active_mixed_responses"
 
-        return jsonify({"invitations": invitations_list, "user_id": user_id}), 200
+                response_list.append({
+                    "uuid": collaboration_uuid, "collab_name": collaboration.get("name", "Untitled"),
+                    "view_type": "initiator_summary", "creator_name": sender_name,
+                    "all_invited_participants": participants_summary,
+                    "overall_status_for_initiator_tab": overall_status
+                })
+                processed_collab_uuids.add(collaboration_uuid)
+            # --- For Invitee's View ---
+            else:
+                for iu in collaboration.get('invited_users', []):
+                    if str(iu.get("user_id")) == user_id:
+                        invitee_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
+                        response_list.append({
+                            "uuid": collaboration_uuid, "collab_name": collaboration.get("name", "Untitled"),
+                            "view_type": "invitee_specific",
+                            "my_status_as_invitee": iu.get("status"),
+                            "sender_id": str(collaboration["creator_id"]), "sender_name": sender_name,
+                            "receiver_id": user_id, "receiver_name": invitee_doc.get("name") if invitee_doc else "You"
+                        })
+                        processed_collab_uuids.add(collaboration_uuid)
+                        break
+            
+        return jsonify({"invitations": response_list, "current_user_id": user_id}), 200
     except Exception as e:
         logging.error(f"Error getting user invitations: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -652,9 +783,13 @@ def accept_invitation():
 
     # Find the collaboration document using the uuid
     collaboration = db.collaborations.find_one({'uuid': uuid})
+    
 
     if collaboration:
         # Update the status of the specific invited user in the collaboration
+        #comment if any issues arise
+        if not any(str(iu['user_id']) == user_id for iu in collaboration.get('invited_users', [])):
+            return jsonify({'message': f'User {user_id} not an invitee.'}), 404
         result = db.collaborations.update_one(
             {'uuid': uuid, 'invited_users.user_id': ObjectId(user_id)},
             {'$set': {'invited_users.$.status': 'accepted'}}   
@@ -1054,6 +1189,7 @@ def get_collaboration_details(uuid):
             user_dataset_id= str(invited_user["user_dataset_id"])
 
             invited_user_dataset = db.datasets.find_one({'_id': ObjectId(user_dataset_id)})
+            #need to remove this if user has to upload their dataset for every collaboration
             invited_user_dataset_uploaded = True if invited_user_dataset and len(invited_user_dataset.get('data', [])) > 0 else False
 
             phenotype = invited_user_dataset.get('phenotype') if invited_user_dataset else None
@@ -1070,38 +1206,25 @@ def get_collaboration_details(uuid):
             })
 
 
-        # To check if the Stat Exist and which user has uploaded their stat data for conditional UI Rendering
         stats = collaboration.get('stats', {})
-        stat_uploaded_users = []
-        for su_id, user_obj in stats.items():
-            if user_obj and isinstance(user_obj, dict) and len(user_obj) > 0:
-                stat_uploaded_users.append(su_id)
+        stat_uploaded_user_ids = set(stats.keys())
         
-        stat_uploaded = True
-        waiting_user_to_upload_stat = []
-
-        if sender_id not in stat_uploaded_users:
-            stat_uploaded = False
-            waiting_user_to_upload_stat.append(sender_id)
-
+        obligated_user_ids = {sender_id} # Initiator is always obligated
         for invited_user in invited_users_details:
-            u_id = invited_user.get("user_id")
-    
-            if u_id not in stat_uploaded_users:
-                stat_uploaded = False
-                waiting_user_to_upload_stat.append(u_id)
-
+            if invited_user.get("status") == "accepted":
+                obligated_user_ids.add(invited_user.get("user_id"))
+                
+        
+        missing_stat_user_ids = list(obligated_user_ids - stat_uploaded_user_ids)
+        all_stats_uploaded = not missing_stat_user_ids # True if the missing list is empty
         # To fetch the data of creator/initator
         dataset = db.datasets.find_one(
             {'_id': ObjectId(collaboration["creator_dataset_id"])},
             {'phenotype': 1, 'number_of_samples': 1}
         )
+        
 
-        # To fetch the data of invited_user/collaborator
-        # invited_dataset = db.datasets.find_one(
-        #     {'_id': ObjectId(collaboration["user_dataset_id"])},
-        #     {'phenotype': 1, 'number_of_samples': 1}
-        # )
+        
         # Making multiple queries can be optimised but using for time being
         creator_phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
         creator_number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
@@ -1110,12 +1233,7 @@ def get_collaboration_details(uuid):
             'samples': creator_number_of_samples
         }
 
-        # invited_user_phenotype = invited_dataset.get('phenotype', 'N/A') if invited_dataset else 'N/A'
-        # invited_user_number_of_samples = invited_dataset.get('number_of_samples', '0') if invited_dataset else '0'
-        # invited_user_dataset = {
-        #     'phenotype': invited_user_phenotype,
-        #     'samples': invited_user_number_of_samples
-        # }
+    
 
         collaboration_details = {
             'uuid': collaboration['uuid'],
@@ -1128,8 +1246,10 @@ def get_collaboration_details(uuid):
             'sender_name': sender_name,
             'invited_users': invited_users_details,
             'creator_datasets': creator_dataset,
-            "missing_stat_user": list(set(waiting_user_to_upload_stat)),
-            "stat_uploaded": stat_uploaded
+            "missing_stat_user": missing_stat_user_ids,
+            "stat_uploaded": all_stats_uploaded,
+            'current_logged_in_user_id': user_id
+            
         }
 
         return jsonify(collaboration_details), 200
