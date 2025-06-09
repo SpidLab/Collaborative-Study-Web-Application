@@ -477,7 +477,7 @@ const CollaborationsPage = () => {
       <TabPanel value={tabValue} index={2}>
         {sentInvitations.length === 0 ? (
           <Typography variant="body1">
-          No invitations sent.{' '}
+          No invitations sent.{' '} 
           <Box component="span">
             <RouterLink
               to="/start-collaboration"
