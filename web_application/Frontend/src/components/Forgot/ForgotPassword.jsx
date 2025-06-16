@@ -29,6 +29,7 @@ const ForgotPassword = () => {
           </Typography>
           <TextField
             label="Email"
+            required
             fullWidth
             margin="normal"
             variant="outlined"
