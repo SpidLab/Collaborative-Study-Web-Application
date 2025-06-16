@@ -72,7 +72,7 @@ const CollaborationDetails = () => {
             Authorization: `Bearer ${localStorage.getItem('token')}`,
           },
         });
-        // console.log(response.data);
+        console.log("Data from Backend: ", response.data);
         setCollaboration(response.data);
         setCollabName(response.data.name);
         setExperimentList(response.data.experiments || []);
@@ -96,7 +96,9 @@ const CollaborationDetails = () => {
   }, [uuid]);
 
 
-  console.log('QC Scheme:', collaboration);
+  // setting the current user id
+  const current_user_id = collaboration?.current_logged_in_user_id;
+
 
   const handleAddExperiment = () => {
     if (experimentName.trim()) {
@@ -176,7 +178,7 @@ const CollaborationDetails = () => {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
-      
+
       setTimeout(() => {
         window.location.reload(); // reloads the page after 2 seconds
       }, 1000);
@@ -1127,10 +1129,44 @@ const CollaborationDetails = () => {
                     />
                   </ListItem>
                   <Divider sx={{ borderColor: 'primary.main' }} />
+                  { /* Phenotype & Number of Samples*/}
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={
+                        <Tooltip arrow title="Phenotypes and Number of Samples from all users" placement="right">
+                          <strong>Phenotypes & Number of Samples</strong>
+                        </Tooltip>
+                      }
+                      secondary={
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                          {/* Add the creator's phenotype and samples */}
+                          <Tooltip title={`Initiator: ${senderInfo.name}`} arrow>
+                            <Chip
+                              label={`${creator.phenotype} - ${creator.samples}`}
+                              color="primary"
+                              variant="contained"
+                            />
+                          </Tooltip>
+
+                          {/* Add the invited users' phenotypes and samples */}
+                          {invitedUsers.map((user, index) => (
+                            <Tooltip key={index} title={`Collaborator: ${user.name}`} arrow>
+                              <Chip
+                                label={`${user.phenotype} - ${user.number_of_samples}`}
+                                color="secondary"
+                                variant="contained"
+                                
+                              />
+                            </Tooltip>
+                          ))}
+                        </Box>
+                      }
+                    />
+                  </ListItem>
 
 
                   {/* Phenotype */}
-                  <ListItem disableGutters>
+                  {/* <ListItem disableGutters>
                     <ListItemText
                       primary={<Tooltip arrow title='Phenotype from Initiator data' placement='right'><strong>Phenotype</strong></Tooltip>}
                       secondary={
@@ -1162,7 +1198,7 @@ const CollaborationDetails = () => {
                         </Box>
                       }
                     />
-                  </ListItem>
+                  </ListItem> */}
                   <Divider sx={{ borderColor: 'primary.main' }} />
                   <ListItem disableGutters>
                     <ListItemText
@@ -1170,8 +1206,8 @@ const CollaborationDetails = () => {
                       secondary={
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                           {qcScheme.map((scheme, index) => (
-                                <Chip key={index} label={scheme} color="primary" variant="contained" sx={{backgroundColor:"#D1E3F6", color:'#0D3B69'}}/>
-                              ))}
+                            <Chip key={index} label={scheme} color="primary" variant="contained" sx={{ backgroundColor: "#D1E3F6", color: '#0D3B69' }} />
+                          ))}
                         </Box>
                       }
                     />
@@ -2283,7 +2319,8 @@ const CollaborationDetails = () => {
                               Withdraw
                             </Button>
                           </Tooltip>
-                        ) : role === 'receiver' && user.status === 'pending' ? (
+                          // Modify
+                        ) : role === 'receiver' && current_user_id == user.user_id && user.status === 'pending' ? (
                           <>
                             <Tooltip arrow title="Accept this invitation" placement="top">
                               <Button

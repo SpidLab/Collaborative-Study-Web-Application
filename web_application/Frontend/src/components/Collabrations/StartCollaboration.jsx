@@ -279,9 +279,9 @@ const StartCollaboration = () => {
             value={collabName}
             onChange={(e) => setCollabName(e.target.value)}
             InputProps={{
-              sx: { borderRadius: 2, borderColor: 'divider' }
+              sx: {borderRadius: 2, borderColor: 'divider'}
             }}
-
+            
           />
 
           <Box mt={2}>

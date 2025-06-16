@@ -30,7 +30,6 @@ from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Pool
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-
 # from stats import calc_chi_pvalue
 
 app = Flask(__name__)
@@ -449,6 +448,116 @@ def get_users_for_invitation():
 
 
 
+# @app.route('/api/invitations', methods=['GET'])
+# def get_user_invitations():
+#     try:
+#         current_user, error_response = get_current_user()
+#         if error_response:
+#             return error_response
+        
+#         user_id = current_user.get_id()
+        
+#         # Find collaborations where the user is either the creator (sender) or an invited user (receiver)
+#         collaborations = db.collaborations.find({
+#             '$or': [
+#                 {'creator_id': ObjectId(user_id)},  # If the user is the sender (creator)
+#                 {'invited_users.user_id': ObjectId(user_id)}  # If the user is an invited user (receiver)
+#             ]
+#         })
+        
+
+#         #invitations_list = []
+        
+#         response_list = []
+#         processed_collab_uuids = set()
+        
+#         # Iterate over the collaborations
+#         for collaboration in collaborations:
+#             collaboration_uuid = collaboration.get("uuid", None)
+#             collaboration_name = collaboration.get("name", "No name")
+#             creator_id = collaboration.get("creator_id")
+
+#             # Sender (initiator) info
+#             sender_user = db.users.find_one({"_id": ObjectId(creator_id)})
+#             sender_email = sender_user["email"] if sender_user else "Unknown"
+#             sender_name = sender_user["name"] if sender_user else "Unknown"
+#             is_current_user_the_initiator = (str(creator_id) == user_id)
+            
+#             participants_list_summary = []
+#             current_user_specific_status_as_invitee = None
+#             all_invitees_accepted = True if collaboration.get('invited_users') else False
+#             any_invitee_pending = False
+            
+            
+#             # Iterate over invited users
+#             for invited_user in collaboration.get('invited_users', []):
+#                 receiver_id = invited_user.get("user_id")
+#                 receiver_user = db.users.find_one({"_id": ObjectId(receiver_id)})
+#                 receiver_email = receiver_user["email"] if receiver_user else "Unknown"
+#                 receiver_name = receiver_user["name"] if receiver_user else "Unknown"
+#                 status_str = invited_user.get("status", "pending")
+                
+#                 participants_list_summary.append(
+#                     {
+#                         "user_id": str(receiver_id),
+#                         "name": receiver_name,
+#                         "email": receiver_email,
+#                         "status": status_str
+#                     }
+#                 )
+#                 if receiver_id == user_id:
+#                     current_user_specific_status_as_invitee = status_str
+#                 if status_str == 'pending': any_invitee_pending = True
+#                 if status_str != 'accepted': all_invitees_accepted = False
+                
+#                 # # Only include invitations where the user is the sender or receiver
+#                 # if str(invited_user["user_id"]) == user_id or str(collaboration["creator_id"]) == user_id:
+#                 #     participants_list_summary.append({
+#                 #         "_id": str(collaboration["_id"]),
+#                 #         "uuid": str(collaboration_uuid),
+#                 #         "collab_name": collaboration_name,
+#                 #         "collab_uuid": str(collaboration_uuid),
+#                 #         "receiver_id": str(invited_user["user_id"]),
+#                 #         "sender_id": str(collaboration["creator_id"]),
+#                 #         "receiver_email": receiver_email,
+#                 #         "receiver_name": receiver_name,
+#                 #         "sender_email": sender_email,
+#                 #         "sender_name": sender_name,
+#                 #         "status": invited_user["status"],
+#                 #         "phenotype": invited_user.get("phenotype", "Not provided")
+#                 #     })
+#             base_representation = {
+#                 "uuid": collaboration_uuid, "collab_name": collaboration_name,
+#                 "creator_name": sender_name, "creator_email": sender_email, "creator_id": str(creator_id)
+#             }
+#             if is_current_user_the_initiator:
+#                 base_representation["view_type"] = "initiator_summary"
+#                 base_representation["all_invited_participants"] = participants_list_summary
+#                 if not collaboration.get('invited_users'): base_representation["overall_status_for_initiator_tab"] = "setup"
+#                 elif any_invitee_pending: base_representation["overall_status_for_initiator_tab"] = "pending_responses"
+#                 elif all_invitees_accepted: base_representation["overall_status_for_initiator_tab"] = "active_all_accepted"
+#                 else: base_representation["overall_status_for_initiator_tab"] = "active_mixed_responses"
+#                 response_list.append(base_representation)
+#                 processed_collab_uuids.add(collaboration_uuid)
+#             elif current_user_specific_status_as_invitee:
+#                 base_representation["view_type"] = "invitee_specific"
+#                 base_representation["my_status_as_invitee"] = current_user_specific_status_as_invitee
+#                 my_entry = next((iu for iu in collaboration.get('invited_users', []) if str(iu.get("user_id")) == user_id), None)
+#                 if my_entry: base_representation["phenotype_context"] = my_entry.get("phenotype", "N/A")
+#                 # For invitee view, sender/receiver is more direct for existing frontend
+#                 base_representation["sender_id"] = str(creator_id)
+#                 base_representation["sender_name"] = sender_name
+#                 base_representation["receiver_id"] = user_id
+#                 base_representation["receiver_name"] = current_user.user_json.get("name", "You")
+#                 response_list.append(base_representation)
+#                 processed_collab_uuids.add(collaboration_uuid)
+
+#         return jsonify({"invitations": response_list, "current_user_id": user_id}), 200
+#     except Exception as e:
+#         logging.error(f"Error getting user invitations: {str(e)}")
+#         return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/invitations', methods=['GET'])
 def get_user_invitations():
     try:
@@ -467,42 +576,63 @@ def get_user_invitations():
         })
         
 
-        invitations_list = []
+        #invitations_list = []
+        
+        response_list = []
+        processed_collab_uuids = set()
         
         # Iterate over the collaborations
         for collaboration in collaborations:
             collaboration_uuid = collaboration.get("uuid", None)
             collaboration_name = collaboration.get("name", "No name")
+            creator_id = collaboration.get("creator_id")
 
             # Sender (initiator) info
-            sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
+            sender_user = db.users.find_one({"_id": ObjectId(creator_id)})
             sender_email = sender_user["email"] if sender_user else "Unknown"
             sender_name = sender_user["name"] if sender_user else "Unknown"
+            is_initiator = (str(creator_id) == user_id)
             
-            # Iterate over invited users
-            for invited_user in collaboration.get('invited_users', []):
-                receiver_user = db.users.find_one({"_id": ObjectId(invited_user["user_id"])})
-                receiver_email = receiver_user["email"] if receiver_user else "Unknown"
-                receiver_name = receiver_user["name"] if receiver_user else "Unknown"
+            if is_initiator:
+                participants_summary = []
+                any_pending = False
+                all_accepted = True if collaboration.get('invited_users') else False
+                for iu in collaboration.get('invited_users', []):
+                    iu_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
+                    status = iu.get("status", "pending")
+                    participants_summary.append({ "user_id": str(iu["user_id"]), "name": iu_doc.get("name") if iu_doc else "Unknown", "status": status })
+                    if status == 'pending': any_pending = True
+                    if status != 'accepted': all_accepted = False
                 
-                # Only include invitations where the user is the sender or receiver
-                if str(invited_user["user_id"]) == user_id or str(collaboration["creator_id"]) == user_id:
-                    invitations_list.append({
-                        "_id": str(collaboration["_id"]),
-                        "uuid": str(collaboration_uuid),
-                        "collab_name": collaboration_name,
-                        "collab_uuid": str(collaboration_uuid),
-                        "receiver_id": str(invited_user["user_id"]),
-                        "sender_id": str(collaboration["creator_id"]),
-                        "receiver_email": receiver_email,
-                        "receiver_name": receiver_name,
-                        "sender_email": sender_email,
-                        "sender_name": sender_name,
-                        "status": invited_user["status"],
-                        "phenotype": invited_user.get("phenotype", "Not provided")
-                    })
+                overall_status = "setup"
+                if collaboration.get('invited_users'):
+                    if any_pending: overall_status = "pending_responses"
+                    elif all_accepted: overall_status = "active_all_accepted"
+                    else: overall_status = "active_mixed_responses"
 
-        return jsonify({"invitations": invitations_list, "user_id": user_id}), 200
+                response_list.append({
+                    "uuid": collaboration_uuid, "collab_name": collaboration.get("name", "Untitled"),
+                    "view_type": "initiator_summary", "creator_name": sender_name,
+                    "all_invited_participants": participants_summary,
+                    "overall_status_for_initiator_tab": overall_status
+                })
+                processed_collab_uuids.add(collaboration_uuid)
+            # --- For Invitee's View ---
+            else:
+                for iu in collaboration.get('invited_users', []):
+                    if str(iu.get("user_id")) == user_id:
+                        invitee_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
+                        response_list.append({
+                            "uuid": collaboration_uuid, "collab_name": collaboration.get("name", "Untitled"),
+                            "view_type": "invitee_specific",
+                            "my_status_as_invitee": iu.get("status"),
+                            "sender_id": str(collaboration["creator_id"]), "sender_name": sender_name,
+                            "receiver_id": user_id, "receiver_name": invitee_doc.get("name") if invitee_doc else "You"
+                        })
+                        processed_collab_uuids.add(collaboration_uuid)
+                        break
+            
+        return jsonify({"invitations": response_list, "current_user_id": user_id}), 200
     except Exception as e:
         logging.error(f"Error getting user invitations: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -656,9 +786,13 @@ def accept_invitation():
 
     # Find the collaboration document using the uuid
     collaboration = db.collaborations.find_one({'uuid': uuid})
+    
 
     if collaboration:
         # Update the status of the specific invited user in the collaboration
+        #comment if any issues arise
+        if not any(str(iu['user_id']) == user_id for iu in collaboration.get('invited_users', [])):
+            return jsonify({'message': f'User {user_id} not an invitee.'}), 404
         result = db.collaborations.update_one(
             {'uuid': uuid, 'invited_users.user_id': ObjectId(user_id)},
             {'$set': {'invited_users.$.status': 'accepted'}}   
@@ -1141,6 +1275,7 @@ def get_collaboration_details(uuid):
         sender_user = db.users.find_one({"_id": ObjectId(collaboration["creator_id"])})
         sender_name = sender_user["name"] if sender_user else "Unknown"
          
+
         invited_users_details = []
         for invited_user in collaboration.get('invited_users', []):
             receiver_user = db.users.find_one({"_id": ObjectId(invited_user["user_id"])})
@@ -1149,18 +1284,15 @@ def get_collaboration_details(uuid):
             user_dataset_id= str(invited_user["user_dataset_id"])
 
             invited_user_dataset = db.datasets.find_one({'_id': ObjectId(user_dataset_id)})
+            #need to remove this if user has to upload their dataset for every collaboration
             invited_user_dataset_uploaded = True if invited_user_dataset and len(invited_user_dataset.get('data', [])) > 0 else False
 
             phenotype = invited_user_dataset.get('phenotype') if invited_user_dataset else None
             number_of_samples = invited_user_dataset.get('number_of_samples') if invited_user_dataset else None
-            user_dataset_id= str(invited_user["user_dataset_id"])
 
             invited_users_details.append({
                 'user_id': str(invited_user["user_id"]),
                 'name': receiver_name,
-                'status': status,
-                'user_dataset_id': user_dataset_id,
-                'is_dataset_uploaded': invited_user_dataset_uploaded,
                 'status': status,
                 'user_dataset_id': user_dataset_id,
                 'is_dataset_uploaded': invited_user_dataset_uploaded,
@@ -1169,38 +1301,25 @@ def get_collaboration_details(uuid):
             })
 
 
-        # To check if the Stat Exist and which user has uploaded their stat data for conditional UI Rendering
         stats = collaboration.get('stats', {})
-        stat_uploaded_users = []
-        for su_id, user_obj in stats.items():
-            if user_obj and isinstance(user_obj, dict) and len(user_obj) > 0:
-                stat_uploaded_users.append(su_id)
+        stat_uploaded_user_ids = set(stats.keys())
         
-        stat_uploaded = True
-        waiting_user_to_upload_stat = []
-
-        if sender_id not in stat_uploaded_users:
-            stat_uploaded = False
-            waiting_user_to_upload_stat.append(sender_id)
-
+        obligated_user_ids = {sender_id} # Initiator is always obligated
         for invited_user in invited_users_details:
-            u_id = invited_user.get("user_id")
-    
-            if u_id not in stat_uploaded_users:
-                stat_uploaded = False
-                waiting_user_to_upload_stat.append(u_id)
-
+            if invited_user.get("status") == "accepted":
+                obligated_user_ids.add(invited_user.get("user_id"))
+                
+        
+        missing_stat_user_ids = list(obligated_user_ids - stat_uploaded_user_ids)
+        all_stats_uploaded = not missing_stat_user_ids # True if the missing list is empty
         # To fetch the data of creator/initator
         dataset = db.datasets.find_one(
             {'_id': ObjectId(collaboration["creator_dataset_id"])},
             {'phenotype': 1, 'number_of_samples': 1}
         )
+        
 
-        # To fetch the data of invited_user/collaborator
-        # invited_dataset = db.datasets.find_one(
-        #     {'_id': ObjectId(collaboration["user_dataset_id"])},
-        #     {'phenotype': 1, 'number_of_samples': 1}
-        # )
+        
         # Making multiple queries can be optimised but using for time being
         creator_phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
         creator_number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
@@ -1209,13 +1328,7 @@ def get_collaboration_details(uuid):
             'samples': creator_number_of_samples
         }
 
-        # invited_user_phenotype = invited_dataset.get('phenotype', 'N/A') if invited_dataset else 'N/A'
-        # invited_user_number_of_samples = invited_dataset.get('number_of_samples', '0') if invited_dataset else '0'
-        # invited_user_dataset = {
-        #     'phenotype': invited_user_phenotype,
-        #     'samples': invited_user_number_of_samples
-        # }
-
+    
 
         collaboration_details = {
             'uuid': collaboration['uuid'],
@@ -1223,12 +1336,13 @@ def get_collaboration_details(uuid):
             'experiments': collaboration.get('experiments', []),
             'collabQcScheme': collaboration.get('qc_scheme', []),
             'sender_id': sender_id,
-            'is_sender': is_sender,
             'sender_name': sender_name,
             'invited_users': invited_users_details,
             'creator_datasets': creator_dataset,
-            "missing_stat_user": list(set(waiting_user_to_upload_stat)),
-            "stat_uploaded": stat_uploaded
+            "missing_stat_user": missing_stat_user_ids,
+            "stat_uploaded": all_stats_uploaded,
+            'current_logged_in_user_id': user_id
+            
         }
 
         return jsonify(collaboration_details), 200
@@ -1301,77 +1415,6 @@ def update_collaboration_details(uuid):
     except Exception as e:
         print(f"Error occurred: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-# @app.route('/api/upload_csv_qc', methods=['POST'])
-# def upload_csv_qc():
-#     try:
-#         auth_header = request.headers.get('Authorization')
-#         if not auth_header:
-#             logging.error("Authorization header missing")
-#             return jsonify({"error": "Authorization header missing"}), 401
-
-#         token = auth_header.split()[1]
-#         current_user = User.verify_auth_token(token)
-
-#         if not current_user:
-#             logging.error("Invalid token or user not found")
-#             return jsonify({"error": "Invalid token or user not found"}), 401
-
-#         user_id = current_user.id
-
-#         # Check if the post request has the file part
-#         if 'file' not in request.files:
-#             logging.error('No file part in the request')
-#             return jsonify({'message': 'No file part in the request'}), 400
-
-#         file = request.files['file']
-
-#         # If the user does not select a file, the browser submits an empty file without a filename
-#         if file.filename == '':
-#             logging.error('No selected file')
-#             return jsonify({'message': 'No selected file'}), 400
-
-#         if file and file.filename.endswith('.csv'):
-#             phenotype = request.form.get('field1')
-#             number_of_samples = request.form.get('field2')
-
-#             try:
-#                 # Read the file directly into a DataFrame, setting the first column as sample_id
-#                 df = pd.read_csv(file, index_col=0)
-#                 df.index.name = 'sample_id'  # Set the index name
-
-#                 # Check if DataFrame is not empty
-#                 if not df.empty:
-#                     data = {}
-
-#                     # Store each row in the data dictionary using sample_id as the key
-#                     for sample_id, row in df.iterrows():
-#                         data[str(sample_id)] = row.to_dict()
-
-#                     # Insert records into the datasets collection
-#                     db['datasets'].insert_one({
-#                         "user_id": str(user_id),
-#                         "phenotype": str(phenotype),
-#                         "number_of_samples": str(number_of_samples),
-#                         "data": data
-#                     })
-#                 else:
-#                     logging.error('CSV file is empty')
-#                     return jsonify({'message': 'CSV file is empty'}), 400
-
-#             except Exception as e:
-#                 logging.error(f'Error reading CSV or inserting into DB: {str(e)}')
-#                 logging.error(traceback.format_exc())
-#                 return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
-
-#             return jsonify({'message': 'CSV file processed successfully'}), 200
-#         else:
-#             logging.error('Unsupported file type')
-#             return jsonify({'message': 'Unsupported file type'}), 400
-#     except Exception as e:
-#         logging.error(f'Unexpected error: {str(e)}')
-#         logging.error(traceback.format_exc())
-#         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
 # @app.route('/api/upload_csv_qc', methods=['POST'])
 # def upload_csv_qc():
@@ -1700,79 +1743,79 @@ def upload_csv_stats():
 #         return jsonify({'message': 'An error occurred while processing the file', 'error': str(e)}), 500
 
 # Route to retrieve list of collaborators for a session
-@app.route('/api/user/<user_id>/collaborations', methods=['GET'])
-def get_user_collaborations(user_id):
-    # Find all sessions where the user is either the owner or a collaborator
-    sessions = Session.objects.filter(__raw__={'$or': [{'userID': user_id}, {'collaborators': user_id}]})
+# @app.route('/api/user/<user_id>/collaborations', methods=['GET'])
+# def get_user_collaborations(user_id):
+#     # Find all sessions where the user is either the owner or a collaborator
+#     sessions = Session.objects.filter(__raw__={'$or': [{'userID': user_id}, {'collaborators': user_id}]})
     
-    # Prepare the list of sessions with session ID and collaborators
-    collaborations = [
-        {'sessionID': str(session.id), 'collaborators': session.collaborators} 
-        for session in sessions
-    ]
+#     # Prepare the list of sessions with session ID and collaborators
+#     collaborations = [
+#         {'sessionID': str(session.id), 'collaborators': session.collaborators} 
+#         for session in sessions
+#     ]
     
-    return jsonify(collaborations), 200
+#     return jsonify(collaborations), 200
 
 
 # Start session - need to fix the calculate_coefficient.py file
-@app.route('/api/start_session', methods=['POST'])
-def start_session():
-    data = request.json
-    user_ids = data.get('user_ids')  # Expecting a list of user IDs
+# @app.route('/api/start_session', methods=['POST'])
+# def start_session():
+#     data = request.json
+#     user_ids = data.get('user_ids')  # Expecting a list of user IDs
 
-    try:
-        dataframes = []
-        for user_id in user_ids:
-            dataset = db.datasets.find_one({'userID': user_id})
-            if dataset:
-                df = pd.read_csv(io.StringIO(dataset['csv_content']))
-                dataframes.append(df)
-            else:
-                return jsonify({'message': f"Dataset for user {user_id} not found"}), 404
+#     try:
+#         dataframes = []
+#         for user_id in user_ids:
+#             dataset = db.datasets.find_one({'userID': user_id})
+#             if dataset:
+#                 df = pd.read_csv(io.StringIO(dataset['csv_content']))
+#                 dataframes.append(df)
+#             else:
+#                 return jsonify({'message': f"Dataset for user {user_id} not found"}), 404
 
-        merged_data = pd.concat(dataframes, axis=1, join='inner')
-        coeff_arr = compute_coefficients_array(merged_data)
+#         merged_data = pd.concat(dataframes, axis=1, join='inner')
+#         coeff_arr = compute_coefficients_array(merged_data)
 
-        results_table = pd.DataFrame(list(coeff_arr.items()), columns=['Pair', 'Coefficient'])
+#         results_table = pd.DataFrame(list(coeff_arr.items()), columns=['Pair', 'Coefficient'])
 
-        return results_table.to_json(orient='records'), 200
+#         return results_table.to_json(orient='records'), 200
 
-    except Exception as e:
-        return jsonify({'message': 'An error occurred while starting session', 'error': str(e)}), 500
+#     except Exception as e:
+#         return jsonify({'message': 'An error occurred while starting session', 'error': str(e)}), 500
      
-@app.route('/api/calculations', methods=['GET'])
-def calculate_cofficients():
-    data = request.json
-    user1 = data['user1']
-    user2 = data['user2']
+# @app.route('/api/calculations', methods=['GET'])
+# def calculate_cofficients():
+#     data = request.json
+#     user1 = data['user1']
+#     user2 = data['user2']
 
     
 
-    # Connect to MongoDB
-    client = MongoClient(os.getenv("MONGO_URI"))
+#     # Connect to MongoDB
+#     client = MongoClient(os.getenv("MONGO_URI"))
 
-    try:
-        # Get datasets for both users
-        df_user1 = get_user_dataset(client, user1)
-        df_user2 = get_user_dataset(client, user2)
+#     try:
+#         # Get datasets for both users
+#         df_user1 = get_user_dataset(client, user1)
+#         df_user2 = get_user_dataset(client, user2)
 
-        # Merge the datasets
+#         # Merge the datasets
 
-        merged_data = pd.concat([df_user1, df_user2], axis=1)
+#         merged_data = pd.concat([df_user1, df_user2], axis=1)
   
-        # Compute coefficients
-        coeff_arr = compute_coefficients_array(merged_data)
+#         # Compute coefficients
+#         coeff_arr = compute_coefficients_array(merged_data)
 
-        # Convert the results to a table format (DataFrame)
-        results_table = pd.DataFrame(list(coeff_arr.items()), columns=['Pair', 'Coefficient'])
+#         # Convert the results to a table format (DataFrame)
+#         results_table = pd.DataFrame(list(coeff_arr.items()), columns=['Pair', 'Coefficient'])
         
-        # Return the table as a JSON response
-        return results_table.to_json(orient='records'), 200
+#         # Return the table as a JSON response
+#         return results_table.to_json(orient='records'), 200
 
-    except ValueError as ve:
-        return jsonify({'message': str(ve)}), 404
-    except Exception as e:
-        return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
+#     except ValueError as ve:
+#         return jsonify({'message': str(ve)}), 404
+#     except Exception as e:
+#         return jsonify({'message': 'An error occurred', 'error': str(e)}), 500
 
 # fix issues with models first
 #@app.route('/api/collaborations/<session_id>', methods=['GET'])
@@ -2000,13 +2043,22 @@ def get_filtered_qc_results(collab_uuid):
 
         final_results = {}
 
-        with ThreadPoolExecutor() as executor:
-            futures = []
-            for result in full_qc_results:
-                futures.append(executor.submit(process_qc_result, result, threshold, final_results))
+        for result in full_qc_results:
+            user1, sample1 = result["user1"], result["sample1"]
+            user2, sample2 = result["user2"], result["sample2"]
+            phi_value = result["phi_value"]
 
-            for future in as_completed(futures):
-                future.result()  # This will re-raise any exceptions from the threads
+            if user1 not in final_results:
+                final_results[user1] = set()
+            if user2 not in final_results:
+                final_results[user2] = set()
+
+            if phi_value > threshold:
+                final_results[user1].discard(sample1)
+                final_results[user2].discard(sample2)
+            else:
+                final_results[user1].add(sample1)
+                final_results[user2].add(sample2)
 
         for user_id in final_results:
             final_results[user_id] = list(final_results[user_id])
@@ -2047,31 +2099,6 @@ def handle_error(error_message, status_code):
     logging.error(error_message)
     return jsonify({"message": error_message}), status_code
 
-def process_user_snp_stats(user_id, user_stats):
-    user_snp_stats = {}
-    for snp_id, snp_data in user_stats.items():
-        case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
-        control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
-
-        # Replace zero counts with 0.5 to avoid issues with zero expected frequencies
-        case_counts = [0.5 if count == 0 else count for count in case_counts]
-        control_counts = [0.5 if count == 0 else count for count in control_counts]
-
-        user_snp_stats[snp_id] = [case_counts, control_counts]
-
-    return user_id, user_snp_stats
-
-def process_aggregated_snp_data(snp_id, user_tables):
-    total_table = np.zeros((2, 3))
-    for user_table in user_tables.values():
-        total_table += user_table
-
-    # Replace zero counts with 0.5 in the aggregated table to prevent zero expected frequencies
-    total_table = np.where(total_table == 0, 0.5, total_table)
-
-    # Ensure chi-square calculation is performed only on valid tables
-    return snp_id, calc_chi_pvalue({snp_id: total_table})[snp_id]
-
 def calculate_and_store_chi_square_results(collaboration_uuid):
     try:
         collaboration = db['collaborations'].find_one({"uuid": collaboration_uuid})
@@ -2086,37 +2113,46 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
         chi_square_results = {}
         aggregated_snp_data = {}
 
-        with ProcessPoolExecutor() as executor:
-            future_to_user = {
-                executor.submit(process_user_snp_stats, user_id, user_stats): user_id
-                for user_id, user_stats in stats.items()
-            }
+        for user_id, user_stats in stats.items():
+            user_snp_stats = {}
 
-            for future in as_completed(future_to_user):
-                user_id, user_snp_stats = future.result()
-                chi_square_results[user_id] = calc_chi_pvalue(user_snp_stats)
+            for snp_id, snp_data in user_stats.items():
+                case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
+                control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
 
-                for snp_id, (case_counts, control_counts) in user_snp_stats.items():
-                    if snp_id not in aggregated_snp_data:
-                        aggregated_snp_data[snp_id] = {}
-                    if user_id not in aggregated_snp_data[snp_id]:
-                        aggregated_snp_data[snp_id][user_id] = np.zeros((2, 3))
+                # Replace zero counts with 0.5 to avoid issues with zero expected frequencies
+                case_counts = [0.5 if count == 0 else count for count in case_counts]
+                control_counts = [0.5 if count == 0 else count for count in control_counts]
+
+                user_snp_stats[snp_id] = [case_counts, control_counts]
+
+                # Aggregate SNP data across users
+                if snp_id not in aggregated_snp_data:
+                    aggregated_snp_data[snp_id] = {}
+                if user_id not in aggregated_snp_data[snp_id]:
+                    aggregated_snp_data[snp_id][user_id] = np.zeros((2, 3))
 
                     aggregated_snp_data[snp_id][user_id][0] += np.array(case_counts)
                     aggregated_snp_data[snp_id][user_id][1] += np.array(control_counts)
 
-            future_to_snp = {
-                executor.submit(process_aggregated_snp_data, snp_id, user_tables): snp_id
-                for snp_id, user_tables in aggregated_snp_data.items()
-            }
+            chi_square_results[user_id] = calc_chi_pvalue(user_snp_stats)
 
-            aggregated_results = {}
-            for future in as_completed(future_to_snp):
-                snp_id, chi_value = future.result()
-                aggregated_results[snp_id] = chi_value
+        # Compute chi-square results for the aggregated table
+        aggregated_results = {}
+        for snp_id, user_tables in aggregated_snp_data.items():
+            total_table = np.zeros((2, 3))
+            for user_table in user_tables.values():
+                total_table += user_table
+
+            # Replace zero counts with 0.5 in the aggregated table to prevent zero expected frequencies
+            total_table = np.where(total_table == 0, 0.5, total_table)
+
+            # Ensure chi-square calculation is performed only on valid tables
+            aggregated_results[snp_id] = calc_chi_pvalue({snp_id: total_table})[snp_id]
 
             chi_square_results["aggregated"] = aggregated_results
 
+        # Storing chi-square results in the database
         db['collaborations'].update_one(
             {"uuid": collaboration_uuid},
             {"$set": {"chi_square_results": chi_square_results}},
