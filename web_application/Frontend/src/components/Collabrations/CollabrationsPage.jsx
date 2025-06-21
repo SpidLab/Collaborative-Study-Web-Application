@@ -1,516 +1,247 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
-  Container, Typography, Button, Box, Snackbar, Paper, Alert, Card, CardContent, Avatar, Tabs, Tab, Tooltip, Grid,
+  Container, Typography, Button, Box, Snackbar, Paper, Alert, Card, Avatar, Tabs, Tab, Tooltip, Grid, Chip
 } from '@mui/material';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import CancelIcon from '@mui/icons-material/Cancel';
 import UndoIcon from '@mui/icons-material/Undo';
 import CancelPresentationIcon from '@mui/icons-material/CancelPresentation';
+import GroupIcon from '@mui/icons-material/Group';
 import axios from 'axios';
 import URL from '../../config';
+import PropTypes from 'prop-types';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import { Cancel as CancelIcon } from '@mui/icons-material';
 
-const getToken = () => {
-  return localStorage.getItem('token');
-};
+
+const getToken = () => localStorage.getItem('token');
 
 const TabPanel = (props) => {
-  const { children, value, index, ...other } = props;
-
+  const { children, value, index } = props;
   return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`invitation-tabpanel-${index}`}
-      aria-labelledby={`invitation-tab-${index}`}
-      {...other}
+    <div 
+      role="tabpanel" 
+      hidden={value !== index} 
+      id={`simple-tabpanel-${index}`}
+      aria-labelledby={`simple-tab-${index}`}
     >
-      {value === index && <Box>{children}</Box>}
+      {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
     </div>
   );
 };
 
-const a11yProps = (index) => {
-  return {
-    id: `invitation-tab-${index}`,
-    'aria-controls': `invitation-tabpanel-${index}`,
-  };
+TabPanel.propTypes = {
+  children: PropTypes.node,
+  value: PropTypes.number.isRequired,
+  index: PropTypes.number.isRequired
 };
 
-const UserInvitation = ({
-  invitation,
-  onAccept,
-  onReject,
-  onWithdraw,
-  onRevoke,
-  currentUserId,
-  type, // 'pending' or 'sent'
-}) => {
-  const collaborationUuid = invitation.collab_uuid;
+// --- NEW COMPONENT to render the initiator's consolidated view ---
+const InitiatorCollaborationCard = ({ collaboration, onWithdraw, onRevoke }) => {
+    const navigate = useNavigate();
+    return (
+        <Card sx={{ mb: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6', boxShadow: 'none' }}>
+            <Grid container alignItems="center" spacing={1}>
+                <Grid item xs={12}>
+                    <Box display="flex" alignItems="center">
+                        <Avatar sx={{ mr: 2, bgcolor: 'primary.main' }}><GroupIcon /></Avatar>
+                        <Box sx={{flexGrow: 1}}>
+                            <Typography variant="h6" component={RouterLink} to={`/collaboration/${collaboration.uuid}`} sx={{textDecoration:'none', color:'primary.main', '&:hover':{textDecoration:'underline'}}}>{collaboration.collab_name}</Typography>
+                            <Typography variant="body2" color="textSecondary">Initiated by You</Typography>
+                        </Box>
+                        <Button variant="outlined" color="primary" size="small" onClick={() => navigate(`/collaboration/${collaboration.uuid}`)}>View Details</Button>
+                    </Box>
+                </Grid>
+                <Grid item xs={12} sx={{pt: "16px !important"}}>
+                    <Typography variant="subtitle2" sx={{mb:1}}>Participants:</Typography>
+                    <Box>
+                        {collaboration.all_invited_participants?.map(p => (
+                            <Box key={p.user_id} sx={{ display:'flex', justifyContent:'space-between', alignItems:'center', mb: 1, p: 1, bgcolor: 'action.hover', borderRadius: 2}}>
+                                <Chip avatar={<Avatar sx={{width: 20, height: 20, fontSize: '0.75rem'}}>{p.name?.charAt(0)}</Avatar>} label={p.name} size="small" variant="outlined" />
+                                {p.status === 'pending' && (
+                                    <Tooltip title="Withdraw Invitation">
+                                        <Button size="small" color="warning" variant="text" onClick={() => onWithdraw(collaboration.uuid, p.user_id)} startIcon={<UndoIcon/>}>Withdraw</Button>
+                                    </Tooltip>
+                                )}
+                                {p.status === 'accepted' && (
+                                     <Tooltip title="Revoke Invitation">
+                                        <Button size="small" color="error" variant="text" onClick={() => onRevoke(collaboration.uuid, p.user_id)} startIcon={<CancelPresentationIcon/>}>Revoke</Button>
+                                    </Tooltip>
+                                )}
+                                {p.status !== 'pending' && p.status !== 'accepted' && (
+                                    <Chip label={p.status} size="small" />
+                                )}
+                            </Box>
+                        ))}
+                    </Box>
+                </Grid>
+            </Grid>
+        </Card>
+    );
+};
 
-  const handleAccept = () => {
-    onAccept(invitation._id, invitation.receiver_id, invitation.sender_id, collaborationUuid);
-  };
-
-  const handleReject = () => {
-    onReject(invitation._id, invitation.receiver_id, invitation.sender_id, collaborationUuid);
-  };
-
-  const handleWithdraw = () => {
-    onWithdraw(invitation._id, invitation.receiver_id, invitation.sender_id, collaborationUuid);
-  };
-
-  const handleRevoke = () => {
-    onRevoke(invitation._id, invitation.receiver_id, invitation.sender_id, collaborationUuid);
-  };
-
-  const displayUser = () => {
-    if (type === 'pending') {
-      return invitation.sender_name;
-    } else if (type === 'sent') {
-      return invitation.receiver_name;
-    }
-    return '';
-  };
-
-  const displayCollabName = () => {
-    return invitation.collab_name;
-  };
-
-  return (
-    <Card variant="outlined" sx={{ mb: 2, borderRadius: 3  }}>
-      <CardContent>
-        <Grid container alignItems="center">
-          {/* Information Section */}
-          <Grid item xs={12} sm={8}>
-            <Box display="flex" alignItems="center">
-              <Avatar sx={{ mr: 2 }}>
-                {displayUser().charAt(0).toUpperCase()}
-              </Avatar>
-              <Box>
-                <Typography
-                  variant="h6"
-                  component={RouterLink}
-                  to={`/collaboration/${collaborationUuid}`}
-                  sx={{ textDecoration: 'none', color: 'primary.main' }}
-                >
-                  {displayUser()} • {displayCollabName()}
-                </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  {type === 'pending' ? 'Incoming Invitation' : 'Sent Invitation'}
-                </Typography>
-              </Box>
-            </Box>
-          </Grid>
-
-          {/* Actions Section */}
-          <Grid item xs={12} sm={4} sx={{ textAlign: { xs: 'left', sm: 'right' }, mt: { xs: 2, sm: 0 } }}>
-            {type === 'pending' && (
-              <Box>
-                <Tooltip arrow title="Accept Invitation">
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    size="small"
-                    startIcon={<CheckCircleIcon />}
-                    onClick={handleAccept}
-                    sx={{ mr: 1, borderRadius: 10 }}
-                  >
-                    Accept
-                  </Button>
-                </Tooltip>
-                <Tooltip arrow title="Reject Invitation">
-                  <Button
-                    variant="outlined"
-                    color="primary"
-                    size="small"
-                    startIcon={<CancelIcon />}
-                    onClick={handleReject}
-                    sx={{ borderRadius:10}}
-                  >
-                    Reject
-                  </Button>
-                </Tooltip>
-              </Box>
-            )}
-            {type === 'sent' && (
-                <Tooltip arrow title="Withdraw on-going Invitation">
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    size="small"
-                    startIcon={<UndoIcon />}
-                    onClick={handleWithdraw}
-                    sx={{ borderRadius:10}}
-                  >
-                    Withdraw
-                  </Button>
-                </Tooltip>
-            )}
-          </Grid>
-        </Grid>
-      </CardContent>
-    </Card>
-  );
+InitiatorCollaborationCard.propTypes = {
+    collaboration: PropTypes.shape({
+        uuid: PropTypes.string.isRequired,
+        collab_name: PropTypes.string.isRequired,
+        all_invited_participants: PropTypes.arrayOf(PropTypes.shape({
+            user_id: PropTypes.string.isRequired,
+            name: PropTypes.string.isRequired,
+            status: PropTypes.string.isRequired
+        }))
+    }).isRequired,
+    onWithdraw: PropTypes.func.isRequired,
+    onRevoke: PropTypes.func.isRequired
 };
 
 const CollaborationsPage = () => {
-  const [pendingInvitations, setPendingInvitations] = useState([]);
-  const [sentInvitations, setSentInvitations] = useState([]);
-  const [acceptedInvitations, setAcceptedInvitations] = useState([]);
-  const [error, setError] = useState(null);
-  const [message, setMessage] = useState('');
-  const [openSnackbar, setOpenSnackbar] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState('');
-  const navigate = useNavigate();
-  const [tabValue, setTabValue] = useState(0);
+    const [pendingInvitations, setPendingInvitations] = useState([]);
+    const [sentInvitations, setSentInvitations] = useState([]);
+    const [acceptedCollaborations, setAcceptedCollaborations] = useState([]);
+    const [error, setError] = useState(null);
+    const [message, setMessage] = useState('');
+    const [openSnackbar, setOpenSnackbar] = useState(false);
+    const [currentUserId, setCurrentUserId] = useState('');
+    const navigate = useNavigate();
+    const [tabValue, setTabValue] = useState(0);
 
-  useEffect(() => {
     const fetchInvitations = async () => {
-      const token = getToken();
+        try {
+            const response = await axios.get(`${URL}/api/invitations`, { headers: { Authorization: `Bearer ${getToken()}` } });
+            const { current_user_id, invitations } = response.data;
+            setCurrentUserId(current_user_id);
+            
+            const pending = [], sent = [], accepted = [];
 
-      try {
-        const response = await axios.get(`${URL}/api/invitations`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        // console.log('invitation data: ',response.data);
-
-        const { user_id, invitations } = response.data;
-
-        const pending = invitations.filter(
-          (invitation) => invitation.status === 'pending' && invitation.receiver_id === user_id
-        );
-        const sent = invitations.filter(
-          (invitation) => invitation.sender_id === user_id && invitation.status !== 'withdrawn'
-        );
-        const accepted = invitations.filter(
-          (invitation) => invitation.status === 'accepted' && (invitation.sender_id === user_id || invitation.receiver_id === user_id)
-        );
-
-        setCurrentUserId(user_id);
-        setPendingInvitations(pending);
-        setSentInvitations(sent);
-        setAcceptedInvitations(accepted);
-      } catch (error) {
-        console.error('Error fetching invitations:', error);
-        setError('Failed to fetch invitations');
-      }
+            invitations.forEach(item => {
+                if (item.view_type === 'initiator_summary') {
+                    if (item.overall_status_for_initiator_tab === 'pending_responses') {
+                        sent.push(item);
+                    } else {
+                        accepted.push(item);
+                    }
+                } else if (item.view_type === 'invitee_specific') {
+                    if (item.my_status_as_invitee === 'pending' && item.receiver_id === current_user_id) {
+                        pending.push(item);
+                    } else if (item.my_status_as_invitee === 'accepted' && item.receiver_id === current_user_id) {
+                        accepted.push(item);
+                    }
+                }
+            });
+            setPendingInvitations(pending);
+            setSentInvitations(sent);
+            setAcceptedCollaborations(accepted);
+        } catch (error) {
+            setError('Failed to fetch invitations');
+        }
     };
 
-    fetchInvitations();
-  }, []);
+    useEffect(() => { fetchInvitations(); }, []);
+    console.log("Pending Invitations:", pendingInvitations);
 
-  // Handlers for various invitation actions
-  const handleWithdraw = async (invitationId, receiverId, senderId, collaborationUuid) => {
-    const token = getToken();
-    try {
-      const response = await axios.post(
-        `${URL}/api/withdrawinvitation`,
-        {
-          uuid: collaborationUuid,
-          receiver_id: receiverId,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+    const handleAction = async (action, collabUuid, receiverId) => {
+        const endpointMap = { 
+            accept: '/api/acceptinvitation', 
+            reject: '/api/rejectinvitation', 
+            withdraw: '/api/withdrawinvitation', 
+            revoke: '/api/revoke_invitation' 
+        };
+        try {
+            await axios.post(
+                `${URL}${endpointMap[action]}`, 
+                { uuid: collabUuid, receiver_id: receiverId }, 
+                { headers: { Authorization: `Bearer ${getToken()}` } }
+            );
+            setMessage(`Invitation ${action}ed!`);
+            setOpenSnackbar(true);
+            fetchInvitations();
+        } catch (error) {
+            setMessage(error.response?.data?.message || `Failed to ${action}.`);
+            setOpenSnackbar(true);
         }
-      );
-      if (response.status === 200) {
-        setMessage('Invitation Withdrawn');
-        console.log("Before update:", sentInvitations);
-        setOpenSnackbar(true);
-        setSentInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
-        // setSentInvitations((prev) => {
-        //   const updated = prev.filter((invitation) => invitation._id !== invitationId);
-        //   console.log("After update:", updated);
-        //   return updated;
-        // });
-      }
-    } catch (error) {
-      console.error('Error withdrawing invitation:', error.response?.data?.message || error.message);
-      setMessage('Failed to withdraw invitation');
-      setOpenSnackbar(true);
-    }
-  };
+    };
 
-  const handleAccept = async (invitationId, receiverId, senderId, collaborationUuid) => {
-    const token = getToken();
-    try {
-      const response = await axios.post(
-        `${URL}/api/acceptinvitation`,
-        {
-          uuid: collaborationUuid,
-          receiver_id: receiverId,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-      if (response.status === 200) {
-        setMessage('Invitation Accepted');
-        setOpenSnackbar(true);
-        setPendingInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
-        // Optionally, add to acceptedInvitations if needed
-        const acceptedInvitation = pendingInvitations.find((inv) => inv._id === invitationId);
-        setAcceptedInvitations((prev) => [...prev, { ...acceptedInvitation, status: 'accepted' }]);
-      }
-    } catch (error) {
-      console.error('Error accepting invitation:', error);
-      setMessage('Failed to accept invitation');
-      setOpenSnackbar(true);
-    }
-  };
+    const handleCloseSnackbar = () => setOpenSnackbar(false);
+    const handleTabChange = (event, newValue) => setTabValue(newValue);
 
-  const handleReject = async (invitationId, receiverId, senderId, collaborationUuid) => {
-    const token = getToken();
-    try {
-      const response = await axios.post(
-        `${URL}/api/rejectinvitation`,
-        {
-          uuid: collaborationUuid,
-          receiver_id: receiverId,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+    if (error) return <Container sx={{mt:4}}><Alert severity="error">{error}</Alert></Container>;
 
-      if (response.status === 200) {
-        setMessage('Invitation Rejected');
-        setOpenSnackbar(true);
-        setPendingInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
-      }
-    } catch (error) {
-      console.error('Error rejecting invitation:', error);
-      setMessage('Failed to reject invitation');
-      setOpenSnackbar(true);
-    }
-  };
-
-  const handleRevoke = async (invitationId, receiverId, senderId, collaborationUuid) => {
-    const token = getToken();
-    try {
-      const response = await axios.post(
-        `${URL}/api/revoke_invitation`,
-        {
-          uuid: collaborationUuid,
-          receiver_id: receiverId,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (response.status === 200) {
-        setMessage('Invitation Revoked');
-        setOpenSnackbar(true);
-        setSentInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
-        setAcceptedInvitations((prev) => prev.filter((invitation) => invitation._id !== invitationId));
-        // console.log("acceptedInvitation:", acceptedInvitations);
-      }
-    } catch (error) {
-      console.error('Error revoking invitation:', error);
-      setMessage('Failed to revoke invitation');
-      setOpenSnackbar(true);
-    }
-  };
-
-  const handleCloseSnackbar = () => {
-    setOpenSnackbar(false);
-  };
-
-  const handleTabChange = (event, newValue) => {
-    setTabValue(newValue);
-  };
-
-  if (error) {
     return (
-      <Container component="div" maxWidth="md" sx={{ marginTop: 4 }}>
-        <Alert severity="error">{error}</Alert>
-      </Container>
+        <Container component="div" maxWidth="lg" sx={{ my: 4 }}>
+            <Typography variant="h4" align="center" gutterBottom>Collaborations</Typography>
+            <Paper sx={{ mb: 2, border: 1, borderRadius: 10, borderColor: 'divider', boxShadow: 'none' }}>
+                <Tabs value={tabValue} onChange={handleTabChange} variant="fullWidth">
+                    <Tab label={`Pending (${pendingInvitations.length})`} />
+                    <Tab label={`Accepted (${acceptedCollaborations.length})`} />
+                    <Tab label={`Sent (${sentInvitations.length})`} />
+                </Tabs>
+            </Paper>
+            <TabPanel value={tabValue} index={0}>
+                {pendingInvitations.length === 0 ? <Typography>No pending invitations.</Typography> : 
+                    pendingInvitations.map((inv) => (
+                        <Card key={inv.uuid} sx={{ mb: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6', boxShadow: 'none' }}>
+                            <Grid container alignItems="center">
+                                <Grid item xs={12} sm={8}>
+                                    <Box display="flex" alignItems="center">
+                                        <Avatar sx={{mr:2}}>{inv.sender_name?.charAt(0)}</Avatar>
+                                        <Box>
+                                            <Typography variant="h6" component={RouterLink} to={`/collaboration/${inv.uuid}`} sx={{color:"text.primary"}}>{inv.collab_name}</Typography>
+                                            <Typography variant="body2" color="text.secondary">Invited by: {inv.sender_name}</Typography>
+                                        </Box>
+                                    </Box>
+                                </Grid>
+                                <Grid item xs={12} sm={4} sx={{textAlign:'right'}}>
+                                    <Button sx={{ mr:1, borderRadius: 10, boxShadow: "none"}} variant="contained" startIcon={<CheckCircleIcon />} size="small" onClick={() => handleAction('accept', inv.uuid, inv.receiver_id)}>Accept</Button>
+                                    <Button sx={{mr:1, borderRadius: 10, color: "secondary"}} variant="outlined"  startIcon={<CancelIcon />} size="small" onClick={() => handleAction('reject', inv.uuid, inv.receiver_id)}>Reject</Button>
+                                </Grid>
+                            </Grid>
+                        </Card>
+                    ))
+                }
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={1}>
+                {acceptedCollaborations.length === 0 ? <Typography>No accepted invitations.</Typography> : 
+                    acceptedCollaborations.map((item) => 
+                        item.view_type === 'initiator_summary' ?
+                        <InitiatorCollaborationCard key={item.uuid} collaboration={item} onWithdraw={handleAction.bind(null, 'withdraw')} onRevoke={handleAction.bind(null, 'revoke')} /> :
+                        <Card key={item.uuid} sx={{ mb: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6', boxShadow: 'none' }}>
+                            <Grid container alignItems="center">
+                                <Grid item xs={8}>
+                                    <Box display="flex" alignItems="center">
+                                        <Avatar sx={{mr:2}}>{item.sender_name?.charAt(0)}</Avatar>
+                                        <Box>
+                                            <Typography variant="h6">{item.collab_name}</Typography>
+                                            <Typography variant="body2" color="text.secondary">With: {item.sender_name}</Typography>
+                                        </Box>
+                                    </Box>
+                                </Grid>
+                                <Grid item xs={4} sx={{textAlign:'right'}}>
+                                    <Button variant="outlined" onClick={() => navigate(`/collaboration/${item.uuid}`)}>View Details</Button>
+                                </Grid>
+                            </Grid>
+                        </Card>
+                    )
+                }
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={2}>
+                {sentInvitations.length === 0 ? <Typography>No invitations sent.</Typography> : 
+                    sentInvitations.map((item) => 
+                        <InitiatorCollaborationCard 
+                            key={item.uuid} 
+                            collaboration={item} 
+                            onWithdraw={handleAction.bind(null, 'withdraw')} 
+                            onRevoke={handleAction.bind(null, 'revoke')} 
+                        />
+                    )
+                }
+            </TabPanel>
+
+            <Snackbar open={openSnackbar} autoHideDuration={4000} onClose={handleCloseSnackbar}>
+                <Alert onClose={handleCloseSnackbar} severity={message.toLowerCase().includes('failed') ? 'error' : 'success'} sx={{ width: '100%' }}>{message}</Alert>
+            </Snackbar>
+        </Container>
     );
-  }
-
-  return (
-    <Container component="div" maxWidth="md" sx={{ marginTop: 4, marginBottom: 4 }}>
-      <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 300 }}>
-        Collaborations
-      </Typography>
-
-      <Paper sx={{ mb: 4, border: '1px solid #dddddd', boxShadow: 'none', borderRadius: 10 }}>
-        <Tabs
-          value={tabValue}
-          onChange={handleTabChange}
-          variant="fullWidth"
-          indicatorColor="primary"
-          textColor="primary"
-          sx={{borderRadius: 10}}
-        >
-          <Tab label={`Pending (${pendingInvitations.length})`} {...a11yProps(0)} />
-          <Tab label={`Accepted (${acceptedInvitations.length})`} {...a11yProps(1)} />
-          <Tab label={`Sent (${sentInvitations.length})`} {...a11yProps(2)} />
-        </Tabs>
-      </Paper>
-
-      <TabPanel value={tabValue} index={0}>
-        {pendingInvitations.length === 0 ? (
-          <Typography variant="body1">
-            No pending invitations.{' '}
-            <Box component="span">
-              <RouterLink
-                to="/start-collaboration"
-                style={{ textDecoration: 'none', color: '#1976d2', fontWeight: 'bold' }}
-              >
-                Start new collaboration
-              </RouterLink>
-            </Box>{' '}
-            or{' '}
-            <Box component="span">
-              <RouterLink
-                to="#accepted-tab"
-                onClick={() => setTabValue(1)}
-                style={{ textDecoration: 'none', color: '#1976d2', fontWeight: 'bold' }}
-              >
-                check existing
-              </RouterLink>
-            </Box>.
-          </Typography>
-        ) : (
-          pendingInvitations.map((invitation) => (
-            <UserInvitation
-              key={invitation._id}
-              invitation={invitation}
-              onAccept={handleAccept}
-              onReject={handleReject}
-              onWithdraw={handleWithdraw}
-              onRevoke={handleRevoke}
-              currentUserId={currentUserId}
-              type="pending"
-            />
-          ))
-        )}
-      </TabPanel>
-
-
-      <TabPanel value={tabValue} index={1}>
-        {acceptedInvitations.length === 0 ? (
-          <Typography variant="body1">No accepted invitations.</Typography>
-        ) : (
-          acceptedInvitations.map((invitation) => (
-            <Card variant="outlined" sx={{ mb: 2, borderRadius: 3 }} key={invitation._id}>
-              <CardContent>
-                <Grid container alignItems="center">
-                  {/* Information Section */}
-                  <Grid item xs={12} sm={8}>
-                    <Box display="flex" alignItems="center">
-                      <Avatar sx={{ mr: 2 }}>
-                        {invitation.sender_name.charAt(0).toUpperCase()}
-                      </Avatar>
-                      
-                      <Box>
-                      <Tooltip arrow title={`${invitation.collab_name} initiated by ${invitation.sender_name}`} placement='right'>
-                        <Typography
-                          variant="h6"
-                          component={RouterLink}
-                          to={`/collaboration/${invitation.collab_uuid}`}
-                          sx={{ textDecoration: 'none', color: 'primary.main' }}
-                        >
-                          {invitation.collab_name}
-                        </Typography>
-                        </Tooltip>
-                        <Typography variant="body2" color="textSecondary">
-                          Collaboration between {invitation.sender_name} & {invitation.receiver_name}
-                        </Typography>
-                      </Box>
-                      
-                    </Box>
-                  </Grid>
-
-                  {/* Actions Section */}
-                  <Grid item xs={12} sm={4} sx={{ textAlign: { xs: 'left', sm: 'right' }, mt: { xs: 2, sm: 0 } }}>
-                    {invitation.sender_id === currentUserId && (
-                       <Tooltip arrow title="Learn more about this collaboration.">
-                      <Button
-                        variant="outlined"
-                        color="primary"
-                        size="small"
-                        sx={{borderRadius:10}}
-                        onClick={() => navigate(`/collaboration/${invitation.collab_uuid}`)}
-                      >
-                        View Details
-                      </Button>
-                      </Tooltip>
-                    )}
-                    {invitation.receiver_id === currentUserId && (
-                      <Tooltip arrow title="Revoke on-going Invitation">
-                        <Button
-                          variant="outlined"
-                          color="secondary"
-                          size="small"
-                          startIcon={<CancelPresentationIcon />}
-                          sx={{borderRadius:10}}
-                          onClick={() =>
-                            handleRevoke(invitation._id, invitation.receiver_id, invitation.sender_id, invitation.collab_uuid)
-                          }
-                        >
-                          Revoke
-                        </Button>
-                      </Tooltip>
-                    )}
-                  </Grid>
-                </Grid>
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </TabPanel>
-
-      <TabPanel value={tabValue} index={2}>
-        {sentInvitations.length === 0 ? (
-          <Typography variant="body1">
-          No invitations sent.{' '} 
-          <Box component="span">
-            <RouterLink
-              to="/start-collaboration"
-              style={{ textDecoration: 'none', color: '#1976d2', fontWeight: 'bold' }}
-            >
-              Start new collaboration
-            </RouterLink>
-          </Box>{' '}
-          ?
-        </Typography>
-        ) : (
-          sentInvitations.map((invitation) => (
-            <UserInvitation
-              key={invitation._id}
-              invitation={invitation}
-              onAccept={handleAccept}
-              onReject={handleReject}
-              onWithdraw={handleWithdraw}
-              onRevoke={handleRevoke}
-              currentUserId={currentUserId}
-              type="sent"
-            />
-          ))
-        )}
-      </TabPanel>
-
-      <Snackbar open={openSnackbar} autoHideDuration={3000} onClose={handleCloseSnackbar}>
-        <Alert onClose={handleCloseSnackbar} severity="success" sx={{ width: '100%' }}>
-          {message}
-        </Alert>
-      </Snackbar>
-    </Container>
-  );
 };
 
 export default CollaborationsPage;
