@@ -592,15 +592,18 @@ def get_user_invitations():
             sender_email = sender_user["email"] if sender_user else "Unknown"
             sender_name = sender_user["name"] if sender_user else "Unknown"
             is_initiator = (str(creator_id) == user_id)
+            experiments = collaboration.get('experiments', []),
+            qcSchemes = collaboration.get('qc_scheme', [])
+
             
             if is_initiator:
-                participants_summary = []
+                all_participants = []
                 any_pending = False
                 all_accepted = True if collaboration.get('invited_users') else False
                 for iu in collaboration.get('invited_users', []):
                     iu_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
                     status = iu.get("status", "pending")
-                    participants_summary.append({ "user_id": str(iu["user_id"]), "name": iu_doc.get("name") if iu_doc else "Unknown", "status": status })
+                    all_participants.append({ "user_id": str(iu["user_id"]), "name": iu_doc.get("name") if iu_doc else "Unknown", "status": status })
                     if status == 'pending': any_pending = True
                     if status != 'accepted': all_accepted = False
                 
@@ -613,10 +616,23 @@ def get_user_invitations():
                 response_list.append({
                     "uuid": collaboration_uuid, "collab_name": collaboration.get("name", "Untitled"),
                     "view_type": "initiator_summary", "creator_name": sender_name,
-                    "all_invited_participants": participants_summary,
-                    "overall_status_for_initiator_tab": overall_status
+                    "all_participants": all_participants,
+                    "overall_status_for_initiator_tab": overall_status,
+                    'experiments': experiments,
+                    'collabQcScheme': qcSchemes,
+
                 })
                 processed_collab_uuids.add(collaboration_uuid)
+
+            # Sending all participants to the collaboration -- Quick View Feature
+            all_particiapants = []
+            for iu in collaboration.get('invited_users', []):
+                iu_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
+                status = iu.get("status", "pending")
+                all_particiapants.append({ "user_id": str(iu["user_id"]), "name": iu_doc.get("name") if iu_doc else "Unknown", "status": status })
+                if status == 'pending': any_pending = True
+                if status != 'accepted': all_accepted = False
+
             # --- For Invitee's View ---
             else:
                 for iu in collaboration.get('invited_users', []):
@@ -624,10 +640,13 @@ def get_user_invitations():
                         invitee_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
                         response_list.append({
                             "uuid": collaboration_uuid, "collab_name": collaboration.get("name", "Untitled"),
+                            "all_participants": all_particiapants,
                             "view_type": "invitee_specific",
                             "my_status_as_invitee": iu.get("status"),
                             "sender_id": str(collaboration["creator_id"]), "sender_name": sender_name,
-                            "receiver_id": user_id, "receiver_name": invitee_doc.get("name") if invitee_doc else "You"
+                            "receiver_id": user_id, "receiver_name": invitee_doc.get("name") if invitee_doc else "You",
+                            'experiments': experiments,
+                            'collabQcScheme': qcSchemes,
                         })
                         processed_collab_uuids.add(collaboration_uuid)
                         break
