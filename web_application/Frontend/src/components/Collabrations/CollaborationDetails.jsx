@@ -414,7 +414,7 @@ const CollaborationDetails = () => {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
       });
-      console.log('GWAS Results:', response.data);
+      console.log('GWAS Results:', response.data.chi_square_results);
       if (response.status === 200) {
         setGwasResults(response.data.chi_square_results);
         setGwasResultsAvailable(true);
@@ -429,7 +429,6 @@ const CollaborationDetails = () => {
       return false;
     }
   };
-  // console.log("Gwas Available", gwasResultsAvailable);
 
 
   const handleGwasInitiate = async () => {
@@ -681,13 +680,15 @@ const CollaborationDetails = () => {
     return invitedUser ? invitedUser.name : "Unknown User"; // Return name if found
   };
   // Function below will only work for single collaborator and initiator (might need change for multi user)
-  const getCurrentUserId = (role) => {
-    return role === 'sender'
-      ? senderInfo.id
-      : invitedUsers?.[0]?.user_id || null;
-  };
-  const currentUserId = getCurrentUserId(role);
-  console.log(currentUserId);
+  // const getCurrentUserId = (role) => {
+  //   return role === 'sender'
+  //     ? senderInfo.id
+  //     : invitedUsers?.[0]?.user_id || null;
+  // };
+  // const currentUserId = getCurrentUserId(role);
+  // console.log(currentUserId);
+  const currentUserId = collaboration?.current_logged_in_user_id;
+
 
 
   // const getGroupedSampleCounts = (qcResults, threshold) => {
@@ -804,6 +805,9 @@ const CollaborationDetails = () => {
       setFilteredResults({ userCounts, totalSamples, selectedSamples, filteredData, userSamplesList });
     }
   }, [qcResults, newThreshold]);
+
+  console.log("Total Number of Selected Samples: ",filteredResults?.userSamplesList);
+  console.log("Total Number of Samples: ",filteredResults?.allUniqueSamples);
 
 
   // const downloadSamples = (samples, filename) => {
@@ -1499,12 +1503,12 @@ const CollaborationDetails = () => {
                                     {Object.entries(filteredResults?.userCounts || {}).map(([userId, count]) => (
                                       <Tooltip
                                         key={userId}
-                                        arrow title={userId !== currentUserId ? "You are not allowed to view this collection due to privacy reasons." : ""}
+                                        arrow title={userId !== current_user_id ? "You are not allowed to view this collection due to privacy reasons." : ""}
                                       >
                                         <Box>
                                           <Accordion
-                                            disabled={userId !== currentUserId}
-                                            expanded={userId === currentUserId ? undefined : false}
+                                            disabled={userId !== current_user_id}
+                                            expanded={userId === current_user_id ? undefined : false}
                                             elevation={0}
                                             sx={{
                                               mb: '10px !important',
@@ -1525,13 +1529,13 @@ const CollaborationDetails = () => {
                                             }}
                                           >
                                             <AccordionSummary
-                                              expandIcon={userId === currentUserId ? null : <ExpandMoreIcon />}
+                                              expandIcon={userId === current_user_id ? null : <ExpandMoreIcon />}
                                               sx={{
                                                 px: 3,
                                                 borderRadius: 3,
                                                 '&:hover': { bgcolor: 'action.hover' },
                                                 // Disable rotation only for current user
-                                                ...(userId === currentUserId && {
+                                                ...(userId === current_user_id && {
                                                   '& .MuiAccordionSummary-expandIconWrapper': {
                                                     transform: 'none !important',
                                                   },
@@ -1548,13 +1552,13 @@ const CollaborationDetails = () => {
                                                     width: 32,
                                                     height: 32,
                                                     borderRadius: '50%',
-                                                    bgcolor: userId === currentUserId ? 'primary.main' : 'grey.300',
+                                                    bgcolor: userId === current_user_id ? 'primary.main' : 'grey.300',
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     justifyContent: 'center',
                                                     border: '1px solid',
-                                                    borderColor: userId === currentUserId ? 'primary.dark' : 'divider',
-                                                    '&::after': userId !== currentUserId ? undefined : {
+                                                    borderColor: userId === current_user_id ? 'primary.dark' : 'divider',
+                                                    '&::after': userId !== current_user_id ? undefined : {
                                                       content: '""',
                                                       width: 14,
                                                       height: 14,
@@ -1567,25 +1571,25 @@ const CollaborationDetails = () => {
                                                   <Typography
                                                     variant="subtitle1"
                                                     fontWeight={600}
-                                                    color={userId === currentUserId ? 'primary.main' : 'text.primary'}
+                                                    color={userId === current_user_id ? 'primary.main' : 'text.primary'}
                                                     sx={{ letterSpacing: '-0.02em' }}
                                                   >
                                                     {getUserName(userId)}
                                                   </Typography>
                                                   <Typography
                                                     variant="body2"
-                                                    color={userId === currentUserId ? 'primary.dark' : 'text.secondary'}
+                                                    color={userId === current_user_id ? 'primary.dark' : 'text.secondary'}
                                                     sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
                                                   >
                                                     <Box component="span" fontWeight={500}>{count} Samples</Box>
                                                     <Box component="span" sx={{ color: 'text.disabled' }}>•</Box>
-                                                    <Box component="span">{userId === currentUserId ? 'Your collection' : 'Collaborator'}</Box>
+                                                    <Box component="span">{userId === current_user_id ? 'Your collection' : 'Collaborator'}</Box>
                                                   </Typography>
                                                 </Box>
 
-                                                {userId === currentUserId && (
+                                                {userId === current_user_id && (
                                                   <>
-                                                    {userId === currentUserId && filteredResults.userSamplesList[userId]?.length > 0 && (
+                                                    {userId === current_user_id && filteredResults.userSamplesList[userId]?.length > 0 && (
                                                       <Box>
                                                         <Button
                                                           fullWidth
@@ -1718,7 +1722,7 @@ const CollaborationDetails = () => {
                       <ListItem disableGutters>
                         {(thresholdDefined && !collaboration?.stat_uploaded) && (
                           <>
-                            {collaboration?.missing_stat_user?.includes(currentUserId) ? (<ListItemText
+                            {collaboration?.missing_stat_user?.includes(current_user_id) ? (<ListItemText
                               primary={
                                 <Box sx={{
                                   position: 'relative',
@@ -2191,7 +2195,7 @@ const CollaborationDetails = () => {
                           {selectedTab === 0 && (
                             <Box>
                               {gwasResultPreview
-                                .filter(userData => userData.userId === currentUserId || userData.userId === "aggregated") // Keep only the current user and combined data
+                                .filter(userData => userData.userId === current_user_id || userData.userId === "aggregated") // Keep only the current user and combined data
                                 .map(userData => (
                                   <Box key={userData.userId} sx={{ mb: 4 }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, borderBottom: 1, borderColor: 'divider', p: 1 }}>
