@@ -334,6 +334,7 @@ const CollaborationDetails = () => {
     try {
       const response = await axios.post(`${URL}/api/datasets/${uuid}/qc-results`, {
         threshold: newThreshold,
+        qc_scheme: qcScheme
       },
         {
           headers: {
@@ -369,8 +370,9 @@ const CollaborationDetails = () => {
 
 
   const checkQcStatus = async () => {
+    for(const scheme of qcScheme){ // Checks the status for all qcShecmes for the collaborations
     try {
-      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results`, {
+      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results?scheme=${scheme}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
@@ -380,7 +382,7 @@ const CollaborationDetails = () => {
         setQcResultsAvailable(true);
         setdisplayQcResults(true);
         setIsQcInitiateLoading(false);
-        setQcResults(response.data.full_qc_results); // Store QC results
+        setQcResults(response.data.full_qc_results ?? response.data.popuulation_stratification); // Store QC results
         // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
         if (response.data.threshold !== null) {
           setThreshold(response.data.threshold);
@@ -402,6 +404,7 @@ const CollaborationDetails = () => {
       setQcResultsAvailable(false); // Default to unavailable in case of error
       return false;
     }
+  }
   };
   // to optimise
   console.log("QC Loading", isQcInitiateLoading);
@@ -503,7 +506,6 @@ const CollaborationDetails = () => {
     setIsQcInitiateLoading(true);
     try {
       const resultsAvailable = await checkQcStatus();
-
       if (resultsAvailable) {
         setSnackbar({
           open: true,
@@ -516,7 +518,7 @@ const CollaborationDetails = () => {
       // Proceed with QC initiation if no results are available
       const response = await axios.post(
         `${URL}/api/datasets/${uuid}`,
-        {},
+        {qc_scheme: qcScheme}, // Passing the list in the request body
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem('token')}`,
@@ -569,7 +571,7 @@ const CollaborationDetails = () => {
       if (response.status === 200) {
         setSnackbar({ open: true, message: 'Results are available.', severity: 'success' });
         setQcResultsAvailable(true);
-        setQcResults(response.data.full_qc_results); // Store QC results
+        setQcResults(response.data.full_qc_results ?? response.data.popuulation_stratification); // Store QC results
         // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
         if (response.data.threshold !== null) {
           setThreshold(response.data.threshold);
@@ -687,7 +689,6 @@ const CollaborationDetails = () => {
   // };
   // const currentUserId = getCurrentUserId(role);
   // console.log(currentUserId);
-  const currentUserId = collaboration?.current_logged_in_user_id;
 
 
 
