@@ -382,7 +382,7 @@ const CollaborationDetails = () => {
         setQcResultsAvailable(true);
         setdisplayQcResults(true);
         setIsQcInitiateLoading(false);
-        setQcResults(response.data.full_qc_results ?? response.data.popuulation_stratification); // Store QC results
+        setQcResults(response.data.full_qc_results ?? response.data.population_stratification); // Store QC results
         // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
         if (response.data.threshold !== null) {
           setThreshold(response.data.threshold);
@@ -928,9 +928,38 @@ const CollaborationDetails = () => {
   // console.log('Gwas Results:', gwasResults);
 
 
-  const userAcceptedInvitation = invitedUsers.length > 0 && invitedUsers.every(user => user.status === 'accepted');
-  // check if sender and all user accepted the invitation and invited user has uploaded the dataset and qc results are not available
-  const isQcInitiateEnabled = role === 'sender' && userAcceptedInvitation && invitedUsers[0].is_dataset_uploaded && !qcResultsAvailable;
+  // Helper functions for collaboration status
+  const getAcceptedUsers = () => invitedUsers.filter(user => user.status === 'accepted');
+  const getRejectedUsers = () => invitedUsers.filter(user => user.status === 'rejected');
+  const getWithdrawnUsers = () => invitedUsers.filter(user => user.status === 'withdrawn');
+  const getPendingUsers = () => invitedUsers.filter(user => user.status === 'pending');
+  
+  // Logic: Collaboration can proceed if either all users accept OR at least one accepts and others have rejected/withdrawn (not pending)
+  const userAcceptedInvitation = invitedUsers.length > 0 && (
+    invitedUsers.every(user => user.status === 'accepted') || 
+    (invitedUsers.some(user => user.status === 'accepted') && 
+     invitedUsers.every(user => user.status === 'accepted' || user.status === 'rejected' || user.status === 'withdrawn'))
+  );
+  
+  // check if all accepted users have uploaded their datasets
+  const allAcceptedUsersUploaded = invitedUsers.length > 0 && 
+    getAcceptedUsers().every(user => user.is_dataset_uploaded);
+  
+  // check if sender and collaboration can proceed and all accepted users have uploaded the dataset and qc results are not available
+  const isQcInitiateEnabled = role === 'sender' && userAcceptedInvitation && allAcceptedUsersUploaded && !qcResultsAvailable;
+  
+  // Debug logging
+  console.log('Collaboration Status:', {
+    totalInvited: invitedUsers.length,
+    accepted: getAcceptedUsers().length,
+    rejected: getRejectedUsers().length,
+    withdrawn: getWithdrawnUsers().length,
+    pending: getPendingUsers().length,
+    userAcceptedInvitation,
+    allAcceptedUsersUploaded,
+    isQcInitiateEnabled,
+    role
+  });
 
   const isQcResultsEnabled = !isQcInitiateEnabled && qcResultsAvailable;
 
@@ -958,7 +987,7 @@ const CollaborationDetails = () => {
 
   const progressSteps = [{
     label: 'Onboarding Collaborators',
-    description: !userAcceptedInvitation ? 'Waiting for Collaborator to accept the invitation' : 'Waiting for Collaborator to upload Quality Control data.'
+    description: !userAcceptedInvitation ? 'Waiting for at least one Collaborator to accept the invitation' : 'Waiting for accepted Collaborators to upload Quality Control data.'
   },
   {
     label: 'QC Calculation',
@@ -975,13 +1004,13 @@ const CollaborationDetails = () => {
   ];
 
   const getActiveStep = () => {
-    // if all user accept the invitation it moves forward else not
-    if (!(userAcceptedInvitation && invitedUsers[0].is_dataset_uploaded)) {
+    // if collaboration can proceed and accepted users have uploaded datasets
+    if (!(userAcceptedInvitation && allAcceptedUsersUploaded)) {
       setProgressActiveStep(0);
       return;
     }
-    // if QC Results not avaialble, it stays here
-    if (invitedUsers[0].is_dataset_uploaded && !thresholdDefined) {
+    // if QC Results not available, it stays here
+    if (allAcceptedUsersUploaded && !thresholdDefined) {
       setProgressActiveStep(1);
       return;
     }
@@ -1007,7 +1036,7 @@ const CollaborationDetails = () => {
   };
   useEffect(() => {
     getActiveStep();
-  }, [invitedUsers, qcResultsAvailable, thresholdDefined, gwasResultsAvailable, displayQcResults]);
+  }, [invitedUsers, qcResultsAvailable, thresholdDefined, gwasResultsAvailable, displayQcResults, userAcceptedInvitation, allAcceptedUsersUploaded]);
 
   // Experiments Tabs:
   const placeholderTabs = ['Chi-Square', 'Odd Ratio', 'GWAS Experiment 3', 'GWAS Experiment 4', 'GWAS Experiment 5'];
@@ -1221,7 +1250,7 @@ const CollaborationDetails = () => {
               </Box>
 
               {/*Quality Control Data Upload - After user accepts the request, upload the data for their phenotype color: #f9_fdff*/}
-              {(userAcceptedInvitation && !invitedUsers[0].is_dataset_uploaded) && role === 'receiver' && (
+              {(userAcceptedInvitation && !allAcceptedUsersUploaded) && role === 'receiver' && (
                 <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                   <List>
                     <ListItem sx={{ width: '100%', display: 'block' }}>

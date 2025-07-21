@@ -1354,6 +1354,7 @@ def get_collaboration_details(uuid):
             'name': collaboration['name'],
             'experiments': collaboration.get('experiments', []),
             'collabQcScheme': collaboration.get('qc_scheme', []),
+            'is_sender': is_sender,
             'sender_id': sender_id,
             'sender_name': sender_name,
             'invited_users': invited_users_details,
@@ -1957,7 +1958,8 @@ def get_combined_datasets(collab_uuid):
         invited_users = collaboration_data.get("invited_users", [])
         creator_dataset_id = collaboration_data.get("creator_dataset_id")
 
-        all_dataset_ids = [user["user_dataset_id"] for user in invited_users if "user_dataset_id" in user]
+        all_dataset_ids = [user["user_dataset_id"] for user in invited_users if "user_dataset_id" in user and user["status"] == "accepted"]
+        print("All dataset ids", all_dataset_ids)
         if creator_dataset_id:
             all_dataset_ids.append(creator_dataset_id)
 
