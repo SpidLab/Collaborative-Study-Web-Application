@@ -370,9 +370,9 @@ const CollaborationDetails = () => {
 
 
   const checkQcStatus = async () => {
-    for(const scheme of qcScheme){ // Checks the status for all qcShecmes for the collaborations
+    // for(const scheme of qcScheme){ // Checks the status for all qcShecmes for the collaborations
     try {
-      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results?scheme=${scheme}`, {
+      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
@@ -404,9 +404,8 @@ const CollaborationDetails = () => {
       setQcResultsAvailable(false); // Default to unavailable in case of error
       return false;
     }
-  }
   };
-  // to optimise
+  // }
   console.log("QC Loading", isQcInitiateLoading);
 
   const checkGwasStatus = async () => {
@@ -835,6 +834,12 @@ const CollaborationDetails = () => {
   //   }
   // };
 
+
+  useEffect(() => {
+    checkQcStatus();
+    checkGwasStatus();
+  }, [qcResultsAvailable]);
+
   console.log('Number of samples Creator:', creator?.samples, invitedUsers[0]?.number_of_samples, invitedUsers[0]?.name, senderInfo?.name);
   const downloadSamples = (samples, filename) => {
     try {
@@ -940,13 +945,16 @@ const CollaborationDetails = () => {
     (invitedUsers.some(user => user.status === 'accepted') && 
      invitedUsers.every(user => user.status === 'accepted' || user.status === 'rejected' || user.status === 'withdrawn'))
   );
+
+  const allUsersResponded = invitedUsers.length > 0 && (
+  invitedUsers.every(user => user.status !== 'pending'));
   
   // check if all accepted users have uploaded their datasets
   const allAcceptedUsersUploaded = invitedUsers.length > 0 && 
     getAcceptedUsers().every(user => user.is_dataset_uploaded);
   
   // check if sender and collaboration can proceed and all accepted users have uploaded the dataset and qc results are not available
-  const isQcInitiateEnabled = role === 'sender' && userAcceptedInvitation && allAcceptedUsersUploaded && !qcResultsAvailable;
+  const isQcInitiateEnabled = role === 'sender' && allUsersResponded && allAcceptedUsersUploaded && !qcResultsAvailable;
   
   // Debug logging
   console.log('Collaboration Status:', {
@@ -955,7 +963,7 @@ const CollaborationDetails = () => {
     rejected: getRejectedUsers().length,
     withdrawn: getWithdrawnUsers().length,
     pending: getPendingUsers().length,
-    userAcceptedInvitation,
+    allUsersResponded,
     allAcceptedUsersUploaded,
     isQcInitiateEnabled,
     role
@@ -977,17 +985,12 @@ const CollaborationDetails = () => {
     }
   }, [isQcResultsEnabled, isGwasInitiateEnabled]);
 
-  useEffect(() => {
-    checkQcStatus();
-    checkGwasStatus();
-  }, [qcResultsAvailable]);
-
   console.log("QC Results", isQcResultsEnabled);
 
 
   const progressSteps = [{
     label: 'Onboarding Collaborators',
-    description: !userAcceptedInvitation ? 'Waiting for at least one Collaborator to accept the invitation' : 'Waiting for accepted Collaborators to upload Quality Control data.'
+    description: !allUsersResponded ? 'Waiting for at least one Collaborator to accept the invitation' : 'Waiting for accepted Collaborators to upload Quality Control data.'
   },
   {
     label: 'QC Calculation',
@@ -1005,7 +1008,7 @@ const CollaborationDetails = () => {
 
   const getActiveStep = () => {
     // if collaboration can proceed and accepted users have uploaded datasets
-    if (!(userAcceptedInvitation && allAcceptedUsersUploaded)) {
+    if (!(allUsersResponded && allAcceptedUsersUploaded)) {
       setProgressActiveStep(0);
       return;
     }
@@ -1036,7 +1039,7 @@ const CollaborationDetails = () => {
   };
   useEffect(() => {
     getActiveStep();
-  }, [invitedUsers, qcResultsAvailable, thresholdDefined, gwasResultsAvailable, displayQcResults, userAcceptedInvitation, allAcceptedUsersUploaded]);
+  }, [invitedUsers, qcResultsAvailable, thresholdDefined, gwasResultsAvailable, displayQcResults, allUsersResponded, allAcceptedUsersUploaded]);
 
   // Experiments Tabs:
   const placeholderTabs = ['Chi-Square', 'Odd Ratio', 'GWAS Experiment 3', 'GWAS Experiment 4', 'GWAS Experiment 5'];
@@ -1250,7 +1253,7 @@ const CollaborationDetails = () => {
               </Box>
 
               {/*Quality Control Data Upload - After user accepts the request, upload the data for their phenotype color: #f9_fdff*/}
-              {(userAcceptedInvitation && !allAcceptedUsersUploaded) && role === 'receiver' && (
+              {(allUsersResponded && !allAcceptedUsersUploaded) && role === 'receiver' && (
                 <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                   <List>
                     <ListItem sx={{ width: '100%', display: 'block' }}>
