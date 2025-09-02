@@ -8,11 +8,11 @@ from flask_cors import CORS
 from importlib_metadata import metadata
 from itsdangerous import Serializer, SignatureExpired, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
+from pymongo import MongoClient
 from bson.objectid import ObjectId
 from bson.json_util import dumps
 from dotenv import load_dotenv, find_dotenv
 from werkzeug.utils import secure_filename
-from pymongo.mongo_client import MongoClient
 import os
 import jwt
 import datetime
@@ -25,10 +25,13 @@ from calculate_coefficients import compute_coefficients_array
 from fuzzywuzzy import process
 import uuid
 from stats import calc_chi_pvalue
-from bson import ObjectId
+# Removed duplicate - already imported above
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Pool
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from TrainPCA import train_pca_model, load_pca_model, transform_data_with_pca
+from sklearn.metrics import pairwise_distances
+
 
 # from stats import calc_chi_pvalue
 
@@ -1958,8 +1961,12 @@ def get_combined_datasets(collab_uuid):
         invited_users = collaboration_data.get("invited_users", [])
         creator_dataset_id = collaboration_data.get("creator_dataset_id")
 
-        all_dataset_ids = [user["user_dataset_id"] for user in invited_users if "user_dataset_id" in user and user["status"] == "accepted"]
-        print("All dataset ids", all_dataset_ids)
+        all_dataset_ids = []
+
+        for user in invited_users:
+            if user["status"] == "accepted":
+                all_dataset_ids.append(user["user_dataset_id"])
+        
         if creator_dataset_id:
             all_dataset_ids.append(creator_dataset_id)
 
@@ -1970,6 +1977,36 @@ def get_combined_datasets(collab_uuid):
         combined_df = combine_datasets_to_dataframe(datasets_data)
 
         return combined_df, threshold
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def get_combined_datasets_for_pca(collab_uuid):
+    try:
+        collaboration_data = fetch_collaboration_data(collab_uuid)
+        if not collaboration_data:
+            return jsonify({"error": "Collaboration not found for the provided UUID."}), 404
+
+        threshold = collaboration_data.get("threshold", 1)
+        invited_users = collaboration_data.get("invited_users", [])
+        creator_dataset_id = collaboration_data.get("creator_dataset_id")
+
+        user_dataset_ids = []
+
+        for user in invited_users:
+            if user["status"] == "accepted":
+                user_dataset_ids.append(user["user_dataset_id"])
+
+        if creator_dataset_id:
+            creator_dataset = fetch_datasets_by_ids([creator_dataset_id])
+            creator_dataset_df = combine_datasets_to_dataframe(creator_dataset)
+        datasets_data = fetch_datasets_by_ids(user_dataset_ids)
+        if not datasets_data:
+            return jsonify({"error": "No datasets found for the provided IDs."}), 404
+
+        combined_df = combine_datasets_to_dataframe(datasets_data)
+
+        return combined_df, threshold, creator_dataset_df
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1997,19 +2034,58 @@ def store_qc_results_in_mongo(collab_uuid, results_array, key: str):
 @app.route('/api/datasets/<collab_uuid>', methods=['POST'])
 def initiate_qc(collab_uuid):
     try:
-        df, threshold = get_combined_datasets(collab_uuid)
+        request_data = request.get_json() or {}
+        qc_methods = request_data.get('qc_scheme', ['Sample Relatedness'])  # Default to sample relatedness
+        
+        print(f"QC methods requested: {qc_methods}")
+        
+        all_results = {}
+        
+        # Handle Sample Relatedness QC
+        if 'Sample Relatedness' in qc_methods:
+            print("Processing Sample Relatedness QC...")
+            df, threshold = get_combined_datasets(collab_uuid)
 
-        if isinstance(df, dict):
-            return df
+            if isinstance(df, dict):
+                return df
 
-        results = compute_coefficients_array(df)
+            sample_results = compute_coefficients_array(df)
 
-        if results:
-            store_qc_results_in_mongo(collab_uuid, results, "full_qc")
-
-            return jsonify(results), 200
+            if sample_results:
+                store_qc_results_in_mongo(collab_uuid, sample_results, "full_qc")
+                all_results['sample_relatedness'] = sample_results
+                print("✅ Sample Relatedness QC completed")
+            else:
+                return jsonify({"error": "No results returned from compute_coefficients_array."}), 404
+        
+        # Handle Population Stratification QC
+        if 'Population Stratification' in qc_methods:
+            print("Processing Population Stratification QC...")
+            try:
+                # Get combined datasets for PCA
+                df, threshold, creator_df = get_combined_datasets_for_pca(collab_uuid)
+                
+                if isinstance(df, dict):
+                    return df
+                
+                # Calculate pairwise distances for population stratification
+                pairwise_results = calculate_pairwise_distances_pca(df, creator_df)
+                
+               
+                
+                store_qc_results_in_mongo(collab_uuid, pairwise_results, "population_stratification")
+                all_results['population_stratification'] = pairwise_results
+                print("✅ Population Stratification QC completed")
+                
+            except Exception as e:
+                print(f"Error in Population Stratification QC: {str(e)}")
+                return jsonify({"error": f"Population Stratification QC failed: {str(e)}"}), 500
+        
+        # Return combined results
+        if all_results:
+            return jsonify(all_results), 200
         else:
-            return jsonify({"error": "No results returned from compute_coefficients_array."}), 404
+            return jsonify({"error": "No QC methods were processed successfully."}), 404
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2021,13 +2097,30 @@ def get_initial_qc_matrix(collab_uuid):
         if not collaboration_data:
             return jsonify({"error": "Collaboration not found."}), 404
 
-        full_qc_results = collaboration_data.get("full_qc", [])
-        threshold_value = collaboration_data.get("threshold", None)
+        # Get QC method from query parameter (default to sample relatedness for backward compatibility)
+        qc_method = request.args.get('qc_scheme', 'Sample Relatedness')
+        print(f"QC method: {qc_method}")
+        
+        if qc_method == 'Sample Relatedness':
+            full_qc_results = collaboration_data.get("full_qc", [])
+            threshold_value = collaboration_data.get("threshold", None)
 
-        if not full_qc_results:
-            return jsonify({"message": "No QC results available for this collaboration."}), 201
+            if not full_qc_results:
+                return jsonify({"message": "No Sample Relatedness QC results available for this collaboration."}), 201
 
-        return jsonify(full_qc_results=full_qc_results, threshold=threshold_value), 200
+            return jsonify(full_qc_results=full_qc_results, threshold=threshold_value), 200
+            
+        elif qc_method == 'Population Stratification':
+            pop_strat_results = collaboration_data.get("population_stratification", {})
+            threshold_value = collaboration_data.get("threshold", None)
+
+            if not pop_strat_results:
+                return jsonify({"message": "No Population Stratification QC results available for this collaboration."}), 201
+
+            return jsonify(population_stratification=pop_strat_results, threshold=threshold_value), 200
+            
+        else:
+            return jsonify({"error": f"Unknown QC method: {qc_method}"}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2039,8 +2132,11 @@ def get_filtered_qc_results(collab_uuid):
         if not collaboration_data:
             return jsonify({"error": "Collaboration not found."}), 404
 
-        threshold = request.json.get("threshold", collaboration_data.get("threshold", 0.08))
-        print("Threshold received:", threshold)
+        request_data = request.get_json() or {}
+        threshold = request_data.get("threshold", collaboration_data.get("threshold", 0.08))
+        qc_method = request_data.get("qc_scheme", "Sample Relatedness")  # Default to sample relatedness
+        
+        print(f"Threshold received: {threshold}, QC method: {qc_method}")
 
         collaboration_collection = db["collaborations"]
 
@@ -2060,61 +2156,105 @@ def get_filtered_qc_results(collab_uuid):
         if threshold_update_result.matched_count == 0:
             return jsonify({"error": "Failed to update threshold."}), 500
 
-        full_qc_results = collaboration_data.get("full_qc", [])
-
         final_results = {}
 
-        for result in full_qc_results:
+        if qc_method == "Sample Relatedness":
+            qc_results = collaboration_data.get("full_qc", [])
+            value_key = "phi_value"
+            # For Sample Relatedness: higher values = more related, so we keep samples with phi_value <= threshold
+            keep_condition = lambda value: value <= threshold
+            
+        elif qc_method == "Population Stratification":
+            qc_results = collaboration_data.get("population_stratification", [])
+            value_key = "distance"
+            # For Population Stratification: lower distances = more similar, so we keep samples with distance <= threshold
+            keep_condition = lambda value: value <= threshold
+            
+        else:
+            return jsonify({"error": f"Unknown QC method: {qc_method}"}), 400
+
+        if not qc_results:
+            return jsonify({"message": f"No {qc_method} QC results available for this collaboration."}), 201
+
+        # Process results based on the QC method
+        for result in qc_results:
             user1, sample1 = result["user1"], result["sample1"]
             user2, sample2 = result["user2"], result["sample2"]
-            phi_value = result["phi_value"]
+            value = result[value_key]
 
             if user1 not in final_results:
                 final_results[user1] = set()
             if user2 not in final_results:
                 final_results[user2] = set()
 
-            if phi_value > threshold:
-                final_results[user1].discard(sample1)
-                final_results[user2].discard(sample2)
-            else:
+            if keep_condition(value):
                 final_results[user1].add(sample1)
                 final_results[user2].add(sample2)
+            else:
+                # If condition fails, only remove user2's sample (keep user1's sample)
+                final_results[user2].discard(sample2)
 
+        # Convert sets to lists for JSON serialization
         for user_id in final_results:
             final_results[user_id] = list(final_results[user_id])
 
+        # Store filtered results with method-specific key
+        filtered_key = f"filtered_qc_{qc_method.lower().replace(' ', '_')}"
         filtered_qc_update_result = collaboration_collection.update_one(
             {"uuid": collab_uuid},
-            {"$set": {"filtered_qc": final_results}}
+            {"$set": {filtered_key: final_results}}
         )
 
         if filtered_qc_update_result.matched_count == 0:
             return jsonify({"error": "Failed to update filtered QC results."}), 500
 
-        return jsonify(final_results), 200
+        return jsonify({
+            "filtered_results": final_results,
+            "qc_method": qc_method,
+            "threshold": threshold
+        }), 200
 
     except Exception as e:
         print(f"Error retrieving and filtering QC results: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
-def process_qc_result(result, threshold, final_results):
+def process_qc_result(result, threshold, final_results, qc_method="Sample Relatedness"):
+    """
+    Process a single QC result and update the final_results dictionary.
+    
+    Args:
+        result: QC result dictionary containing user1, user2, sample1, sample2, and value
+        threshold: Threshold value for filtering
+        final_results: Dictionary to store filtered results
+        qc_method: QC method type ("Sample Relatedness" or "Population Stratification")
+    """
     user1, sample1 = result["user1"], result["sample1"]
     user2, sample2 = result["user2"], result["sample2"]
-    phi_value = result["phi_value"]
+    
+    # Determine value key and condition based on QC method
+    if qc_method == "Sample Relatedness":
+        value = result["phi_value"]
+        # For Sample Relatedness: higher values = more related, so we keep samples with phi_value <= threshold
+        keep_sample = value <= threshold
+    elif qc_method == "Population Stratification":
+        value = result["distance"]
+        # For Population Stratification: lower distances = more similar, so we keep samples with distance <= threshold
+        keep_sample = value <= threshold
+    else:
+        raise ValueError(f"Unknown QC method: {qc_method}")
 
     if user1 not in final_results:
         final_results[user1] = set()
     if user2 not in final_results:
         final_results[user2] = set()
 
-    if phi_value > threshold:
-        final_results[user1].discard(sample1)
-        final_results[user2].discard(sample2)
-    else:
+    if keep_sample:
         final_results[user1].add(sample1)
         final_results[user2].add(sample2)
+    else:
+        # If condition fails, only remove user2's sample (keep user1's sample)
+        final_results[user2].discard(sample2)
 
 def handle_error(error_message, status_code):
     logging.error(error_message)
@@ -2130,33 +2270,41 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
         stats = collaboration.get('stats', {})
         if not stats:
             return {"error": "No SNP data found in the stats field"}, 400
+        # Determine the list of valid participants (initiator + accepted users)
+        obligated_user_ids = {str(collaboration['creator_id'])}
+        for iu in collaboration.get('invited_users', []):
+            if iu.get("status") == "accepted":
+                obligated_user_ids.add(str(iu.get("user_id")))
+
+        print(obligated_user_ids)
 
         chi_square_results = {}
         aggregated_snp_data = {}
 
         for user_id, user_stats in stats.items():
-            user_snp_stats = {}
+            if user_id in obligated_user_ids:
+                user_snp_stats = {}
 
-            for snp_id, snp_data in user_stats.items():
-                case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
-                control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
+                for snp_id, snp_data in user_stats.items():
+                    case_counts = [snp_data.get("case", {}).get(str(i), 0) for i in range(3)]
+                    control_counts = [snp_data.get("control", {}).get(str(i), 0) for i in range(3)]
 
-                # Replace zero counts with 0.5 to avoid issues with zero expected frequencies
-                case_counts = [0.5 if count == 0 else count for count in case_counts]
-                control_counts = [0.5 if count == 0 else count for count in control_counts]
+                    # Replace zero counts with 0.5 to avoid issues with zero expected frequencies
+                    case_counts = [0.5 if count == 0 else count for count in case_counts]
+                    control_counts = [0.5 if count == 0 else count for count in control_counts]
 
-                user_snp_stats[snp_id] = [case_counts, control_counts]
+                    user_snp_stats[snp_id] = [case_counts, control_counts]
 
-                # Aggregate SNP data across users
-                if snp_id not in aggregated_snp_data:
-                    aggregated_snp_data[snp_id] = {}
-                if user_id not in aggregated_snp_data[snp_id]:
-                    aggregated_snp_data[snp_id][user_id] = np.zeros((2, 3))
+                    # Aggregate SNP data across users
+                    if snp_id not in aggregated_snp_data:
+                        aggregated_snp_data[snp_id] = {}
+                    if user_id not in aggregated_snp_data[snp_id]:
+                        aggregated_snp_data[snp_id][user_id] = np.zeros((2, 3))
 
                     aggregated_snp_data[snp_id][user_id][0] += np.array(case_counts)
                     aggregated_snp_data[snp_id][user_id][1] += np.array(control_counts)
 
-            chi_square_results[user_id] = calc_chi_pvalue(user_snp_stats)
+                chi_square_results[user_id] = calc_chi_pvalue(user_snp_stats)
 
         # Compute chi-square results for the aggregated table
         aggregated_results = {}
@@ -2171,7 +2319,7 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
             # Ensure chi-square calculation is performed only on valid tables
             aggregated_results[snp_id] = calc_chi_pvalue({snp_id: total_table})[snp_id]
 
-            chi_square_results["aggregated"] = aggregated_results
+        chi_square_results["aggregated"] = aggregated_results
 
         # Storing chi-square results in the database
         db['collaborations'].update_one(
@@ -2221,6 +2369,48 @@ def get_chi_square_results(collab_uuid):
         print(f"Unexpected error: {str(e)}")
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
+def calculate_pairwise_distances_pca(df, creator_df=None):
+    """
+    Calculate pairwise distances for population stratification using PCA data.
+    Args:
+        df: Combined dataset for PCA analysis (MultiIndex: sample_id, user_id)
+        creator_df: Creator dataset (MultiIndex: sample_id, user_id)
+    Returns:
+        list: Pairwise distance results in the same structure as compute_coefficients_array, but with 'distance'.
+    """
+    if df is None or creator_df is None or df.empty or creator_df.empty:
+        return []
+
+    # Remove any non-numeric columns if present
+    df_numeric = df.select_dtypes(include=[float, int])
+    creator_df_numeric = creator_df.select_dtypes(include=[float, int])
+
+    # Get index info for mapping back
+    df_index = list(df_numeric.index)
+    creator_index = list(creator_df_numeric.index)
+
+    # Compute pairwise distances (rows in creator_df vs rows in df)
+    distances = pairwise_distances(creator_df_numeric.values, df_numeric.values, metric='euclidean')
+
+    # Normalize distances to [0, 1]
+    min_dist = distances.min()
+    max_dist = distances.max()
+    if max_dist > min_dist:
+        norm_distances = (distances - min_dist) / (max_dist - min_dist)
+    else:
+        norm_distances = distances  # All distances are the same
+
+    results = []
+    for i, (sample1, user1) in enumerate(creator_index):
+        for j, (sample2, user2) in enumerate(df_index):
+            results.append({
+                'sample1': sample1,
+                'user1': user1,
+                'sample2': sample2,
+                'user2': user2,
+                'distance': float(norm_distances[i, j])
+            })
+    return results
 
 if __name__ == '__main__':
     app.run(debug=True)

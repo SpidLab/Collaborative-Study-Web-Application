@@ -44,6 +44,7 @@ const CollaborationDetails = () => {
   const [filteredResults, setFilteredResults] = useState([]);
   const [gwasResults, setGwasResults] = useState([]);
   const [gwasResultsAvailable, setGwasResultsAvailable] = useState(false);
+  const [isGwasInitiateLoading, setIsGwasInitiateLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const prevFilteredResultsRef = useRef();
   // const [matrix, setMatrix] = useState([]);
@@ -77,12 +78,21 @@ const CollaborationDetails = () => {
         setCollabName(response.data.name);
         setExperimentList(response.data.experiments || []);
         setQcScheme(response.data.collabQcScheme || []);
+        console.log("QC Scheme: ", response.data.collabQcScheme);
         setPhenotype(response.data.creator_datasets.phenotype || []);
         setCreator(response.data.creator_datasets || []);
         setCollaborationUuid(response.data.uuid);
         setSenderInfo({ is_sender: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
         setInvitedUsers(response.data.invited_users || []);
         determineUserRole(response.data);
+        
+        // After fetching collaboration details, check QC status
+        if (response.data.collabQcScheme && response.data.collabQcScheme.length > 0) {
+          await checkQcStatus(response.data.collabQcScheme);
+        }
+        
+        // Also check GWAS status when component mounts
+        await checkGwasStatus();
       } catch (error) {
         console.error('Error fetching collaboration details:', error);
         setSnackbar({
@@ -159,6 +169,56 @@ const CollaborationDetails = () => {
       });
     }
   };
+  // Helper function to get the current user's dataset ID
+  const getCurrentUserDatasetId = () => {
+    if (!collaboration || !current_user_id || !collaboration.invited_users) {
+      return null;
+    }
+
+    // Check if current user is the creator
+    if (collaboration.sender_id === current_user_id) {
+      return collaboration.creator_dataset_id;
+    }
+
+    // Check if current user is an invited user
+    const invitedUser = collaboration.invited_users.find(user => user.user_id === current_user_id);
+    if (invitedUser) {
+      return invitedUser.user_dataset_id;
+    }
+
+    return null;
+  };
+
+  // Helper function to get the current user's information
+  const getCurrentUserInfo = () => {
+    if (!collaboration || !current_user_id || !collaboration.invited_users) {
+      return null;
+    }
+
+    // Check if current user is the creator
+    if (collaboration.sender_id === current_user_id) {
+      return {
+        name: collaboration.sender_name,
+        phenotype: collaboration.creator_datasets?.phenotype,
+        number_of_samples: collaboration.creator_datasets?.samples,
+        isCreator: true
+      };
+    }
+
+    // Check if current user is an invited user
+    const invitedUser = collaboration.invited_users.find(user => user.user_id === current_user_id);
+    if (invitedUser) {
+      return {
+        name: invitedUser.name,
+        phenotype: invitedUser.phenotype,
+        number_of_samples: invitedUser.number_of_samples,
+        isCreator: false
+      };
+    }
+
+    return null;
+  };
+
   //Updates DB with the user's dataset file
   const handleQcUpload = async () => {
     if (!file) {
@@ -166,9 +226,20 @@ const CollaborationDetails = () => {
       return;
     }
 
+    // Get the current user's dataset ID dynamically
+    const currentUserDatasetId = getCurrentUserDatasetId();
+    if (!currentUserDatasetId) {
+      setSnackbar({ 
+        open: true, 
+        message: "Could not determine your dataset. Please refresh the page and try again.", 
+        severity: 'error' 
+      });
+      return;
+    }
+
     const qcData = new FormData();
     qcData.append('file', file);
-    qcData.append('dataset_id', collaboration.invited_users[0].user_dataset_id);
+    qcData.append('dataset_id', currentUserDatasetId);
 
     try {
       //waiting for the endpoint to be created
@@ -334,7 +405,7 @@ const CollaborationDetails = () => {
     try {
       const response = await axios.post(`${URL}/api/datasets/${uuid}/qc-results`, {
         threshold: newThreshold,
-        qc_scheme: qcScheme
+        qc_scheme: qcScheme[0] // Send the first QC scheme as a string
       },
         {
           headers: {
@@ -343,20 +414,17 @@ const CollaborationDetails = () => {
         }
       );
       if (response.status === 200) {
-        setThresholdDefined(false);
+        setThresholdDefined(true);
         setThreshold(newThreshold);
         setTimeout(() => {
           window.location.reload(); // reloads the page after 2 seconds
         }, 1000);
+        setSnackbar({
+          open: true,
+          message: 'Threshold applied successfully.',
+          severity: 'success',
+        });
       }
-      // setThresholdDefined(false);
-      // setThreshold(newThreshold);
-
-      setSnackbar({
-        open: true,
-        message: 'Threshold applied and QC results in process.',
-        severity: 'success',
-      });
     } catch (error) {
       console.error('Error submitting threshold:', error);
 
@@ -369,10 +437,19 @@ const CollaborationDetails = () => {
   };
 
 
-  const checkQcStatus = async () => {
-    // for(const scheme of qcScheme){ // Checks the status for all qcShecmes for the collaborations
+  const checkQcStatus = async (schemeToCheck = null) => {
+    // Use provided scheme or fall back to state
+    const scheme = schemeToCheck || qcScheme;
+    
+    // Check if qcScheme is available
+    if (!scheme || scheme.length === 0) {
+      console.log("No QC scheme available");
+      setQcResultsAvailable(false);
+      return false;
+    }
+    
     try {
-      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results`, {
+      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results?qc_scheme=${scheme[0]}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
@@ -395,12 +472,11 @@ const CollaborationDetails = () => {
 
         return true;
       } else {
-        // console.error(`Unexpected response status: ${response.status}`);
         setQcResultsAvailable(false);
         return false;
       }
     } catch (error) {
-      // console.error('Error checking QC status:', error);
+      console.error('Error checking QC status:', error);
       setQcResultsAvailable(false); // Default to unavailable in case of error
       return false;
     }
@@ -417,24 +493,26 @@ const CollaborationDetails = () => {
         },
       });
       console.log('GWAS Results:', response.data.chi_square_results);
-      if (response.status === 200) {
+      if (response.status === 200 && response.data.chi_square_results) {
         setGwasResults(response.data.chi_square_results);
         setGwasResultsAvailable(true);
+        return true; // Results are available
       } else {
-        // console.error(`Unexpected response status: ${response.status}`);
         setGwasResultsAvailable(false);
-        return false;
+        return false; // Results are not available
       }
     } catch (error) {
-      // console.error('Error checking QC status:', error);
+      console.log('GWAS results not yet available:', error.message);
       setGwasResultsAvailable(false); // Default to unavailable in case of error
-      return false;
+      return false; // Results are not available
     }
   };
 
 
   const handleGwasInitiate = async () => {
     try {
+      setIsGwasInitiateLoading(true);
+      
       const resultsAvailable = await checkGwasStatus();
 
       if (resultsAvailable) {
@@ -443,6 +521,7 @@ const CollaborationDetails = () => {
           message: 'GWAS calculations are already completed.',
           severity: 'info',
         });
+        setIsGwasInitiateLoading(false);
         return; // Exit early if results are available
       }
 
@@ -460,9 +539,30 @@ const CollaborationDetails = () => {
       console.log('GWAS Results:', response);
       setSnackbar({
         open: true,
-        message: 'GWAS Calculations successfully Initiated. Come back later for the GWAS Results',
+        message: 'GWAS Calculations successfully initiated. Results will be checked automatically.',
         severity: 'success',
       });
+      
+      // Check GWAS status after a delay to see if results are ready
+      setTimeout(async () => {
+        await checkGwasStatus();
+      }, 5000);
+      
+      // Set up periodic checking for GWAS results
+      const checkInterval = setInterval(async () => {
+        const resultsAvailable = await checkGwasStatus();
+        if (resultsAvailable) {
+          clearInterval(checkInterval);
+          // Results are now available - the UI will automatically update
+          // and show the "Get GWAS Results" button
+        }
+      }, 10000); // Check every 10 seconds
+      
+      // Clear interval after 5 minutes to avoid infinite checking
+      setTimeout(() => {
+        clearInterval(checkInterval);
+      }, 300000);
+      
     } catch (error) {
       console.error('Error initiating GWAS calculations:', error);
       setSnackbar({
@@ -470,6 +570,8 @@ const CollaborationDetails = () => {
         message: 'Failed to initiate GWAS calculations. Please try again.',
         severity: 'error',
       });
+    } finally {
+      setIsGwasInitiateLoading(false);
     }
   };
 
@@ -505,6 +607,7 @@ const CollaborationDetails = () => {
     setIsQcInitiateLoading(true);
     try {
       const resultsAvailable = await checkQcStatus();
+      console.log("qcScheme main: ", qcScheme);
       if (resultsAvailable) {
         setSnackbar({
           open: true,
@@ -524,20 +627,18 @@ const CollaborationDetails = () => {
           },
         }
       );
-      // console.log('response:', response);
+      
       if (response.status === 200) {
+        setSnackbar({
+          open: true,
+          message: 'QC Calculations successfully Initiated. Please wait a moment and check for results.',
+          severity: 'success',
+        });
+        // Auto refresh after 2 seconds
         setTimeout(() => {
-          window.location.reload(); // reloads the page after 2 seconds
-        }, 1000);
+          window.location.reload();
+        }, 2000);
       }
-
-
-      setSnackbar({
-        open: true,
-        message: 'QC Calculations successfully Initiated. Come back later for the QC Results',
-        severity: 'success',
-      });
-      setQcInitiated(true);
     } catch (error) {
       console.error('Error initiating QC calculations:', error);
       setSnackbar({
@@ -545,9 +646,7 @@ const CollaborationDetails = () => {
         message: 'Failed to initiate QC calculations. Please try again.',
         severity: 'error',
       });
-    } finally {
       setIsQcInitiateLoading(false);
-      setQcResultsAvailable(true);
     }
   };
   // handleQcResults function might not be necessary since we are already checking the results in checkQcStatus function --- verify later
@@ -559,7 +658,7 @@ const CollaborationDetails = () => {
 
     setIsQcResultsLoading(true);
     try {
-      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results`, {
+      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results?qc_scheme=${qcScheme[0]}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
@@ -570,7 +669,7 @@ const CollaborationDetails = () => {
       if (response.status === 200) {
         setSnackbar({ open: true, message: 'Results are available.', severity: 'success' });
         setQcResultsAvailable(true);
-        setQcResults(response.data.full_qc_results ?? response.data.popuulation_stratification); // Store QC results
+        setQcResults(response.data.full_qc_results ?? response.data.population_stratification); // Store QC results
         // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
         if (response.data.threshold !== null) {
           setThreshold(response.data.threshold);
@@ -747,36 +846,104 @@ const CollaborationDetails = () => {
     };
 
     const userSamples = {};
-    const allUniqueSamples = new Set();
     const selectedUniqueSamples = new Set();
 
-    // Filtered data for display (phi < threshold)
-    const filteredData = qcResults.filter(({ phi_value }) => phi_value < newThreshold);
+    // Determine the value key based on the first result
+    const firstResult = qcResults[0];
+    const valueKey = firstResult.phi_value !== undefined ? 'phi_value' : 'distance';
+    
+    // Filtered data for display based on the appropriate value key
+    const filteredData = qcResults.filter((result) => {
+      const value = result[valueKey];
+      return valueKey === 'phi_value' ? value < newThreshold : value <= newThreshold;
+    });
+
+    // The collaboration data has incorrect sample counts, so let's find the correct source
+    // Let's examine the actual data structure to find where the real sample counts are stored
+    
+    console.log('Full collaboration data:', { creator, invitedUsers });
+    console.log('Creator data structure:', creator);
+    console.log('Invited users data structure:', invitedUsers);
+    
+    // Try to find sample counts in different possible locations
+    let totalSamples = 0;
+    
+    // Method 1: Check if samples are stored in a different field
+    if (creator?.number_of_samples) {
+      totalSamples += parseInt(creator.number_of_samples) || 0;
+      console.log('Found creator samples in number_of_samples:', creator.number_of_samples);
+    } else if (creator?.samples) {
+      totalSamples += parseInt(creator.samples) || 0;
+      console.log('Found creator samples in samples field:', creator.samples);
+    }
+    
+    invitedUsers.forEach(user => {
+      if (user.number_of_samples) {
+        const userSamples = parseInt(user.number_of_samples) || 0;
+        totalSamples += userSamples;
+        console.log(`${user.name} samples from number_of_samples:`, userSamples);
+      } else if (user.samples) {
+        const userSamples = parseInt(user.samples) || 0;
+        totalSamples += userSamples;
+        console.log(`${user.name} samples from samples field:`, userSamples);
+      }
+    });
+    
+    console.log('Total calculated samples:', totalSamples);
+    console.log('QC results length (pairwise comparisons):', qcResults.length);
+    
+    // Method 2: Calculate from QC results by identifying unique users and their samples
+    // This is the source of truth since it contains the actual processed samples
+    const userSampleCounts = {};
+    
+    qcResults.forEach((result) => {
+      const { user1, sample1, user2, sample2 } = result;
+      
+      // Initialize user sample sets
+      if (!userSampleCounts[user1]) userSampleCounts[user1] = new Set();
+      if (!userSampleCounts[user2]) userSampleCounts[user2] = new Set();
+      
+      // Add samples to user sets
+      userSampleCounts[user1].add(sample1);
+      userSampleCounts[user2].add(sample2);
+    });
+    
+    // Calculate total from QC results (this is the reliable source)
+    const totalFromQC = Object.values(userSampleCounts).reduce((sum, samples) => sum + samples.size, 0);
+    console.log('User sample counts from QC (source of truth):', Object.fromEntries(
+      Object.entries(userSampleCounts).map(([user, samples]) => [user, samples.size])
+    ));
+    console.log('Total samples from QC results:', totalFromQC);
+    
+    // Always use QC-based count as it's the source of truth
+    totalSamples = totalFromQC;
+    console.log('Using QC-based sample count as collaboration data is incorrect');
 
     // Process ALL QC results to determine sample inclusion
-    qcResults.forEach(({ user1, sample1, user2, sample2, phi_value }) => {
-      // Track all unique samples
-      allUniqueSamples.add(sample1);
-      allUniqueSamples.add(sample2);
-
+    qcResults.forEach((result) => {
+      const { user1, sample1, user2, sample2 } = result;
+      const value = result[valueKey];
+      
       // Initialize user sets if needed
       if (!userSamples[user1]) userSamples[user1] = new Set();
       if (!userSamples[user2]) userSamples[user2] = new Set();
 
       // Add/remove samples based on threshold comparison
-      if (phi_value > newThreshold) {
-        userSamples[user1].delete(sample1);
-        userSamples[user2].delete(sample2);
-      } else {
-        userSamples[user1].add(sample1);
+      // Always keep user1's sample (initiator)
+      userSamples[user1].add(sample1);
+      
+      const shouldKeep = valueKey === 'phi_value' ? value < newThreshold : value <= newThreshold;
+      
+      if (shouldKeep) {
         userSamples[user2].add(sample2);
+      } else {
+        userSamples[user2].delete(sample2);
       }
     });
 
-    // Calculate selected samples from final user sets
-    Object.values(userSamples).forEach(samples => {
-      samples.forEach(sample => selectedUniqueSamples.add(sample));
-    });
+    // Calculate selected samples by summing individual user sample counts
+    // This avoids counting duplicates that might appear in multiple pairwise comparisons
+    const selectedSamplesCount = Object.values(userSamples).reduce((sum, samples) => sum + samples.size, 0);
 
     // Convert sets to arrays for output
     const userSamplesList = {};
@@ -788,8 +955,8 @@ const CollaborationDetails = () => {
       userCounts: Object.fromEntries(
         Object.entries(userSamples).map(([user, samples]) => [user, samples.size])
       ),
-      totalSamples: allUniqueSamples.size,
-      selectedSamples: selectedUniqueSamples.size,
+      totalSamples: totalSamples,
+      selectedSamples: selectedSamplesCount,
       filteredData, // Maintain original filtered data for display
       userSamplesList
     };
@@ -807,7 +974,7 @@ const CollaborationDetails = () => {
   }, [qcResults, newThreshold]);
 
   console.log("Total Number of Selected Samples: ",filteredResults?.userSamplesList);
-  console.log("Total Number of Samples: ",filteredResults?.allUniqueSamples);
+  console.log("Total Number of Samples: ",filteredResults?.totalSamples);
 
 
   // const downloadSamples = (samples, filename) => {
@@ -836,11 +1003,15 @@ const CollaborationDetails = () => {
 
 
   useEffect(() => {
-    checkQcStatus();
+    // Check QC status when qcScheme is available
+    if (qcScheme && qcScheme.length > 0) {
+      checkQcStatus();
+    }
     checkGwasStatus();
-  }, [qcResultsAvailable]);
+  }, [qcScheme, qcResultsAvailable]);
 
-  console.log('Number of samples Creator:', creator?.samples, invitedUsers[0]?.number_of_samples, invitedUsers[0]?.name, senderInfo?.name);
+  const currentUserInfo = getCurrentUserInfo();
+  console.log('Number of samples Creator:', creator?.samples, currentUserInfo?.number_of_samples, currentUserInfo?.name, senderInfo?.name);
   const downloadSamples = (samples, filename) => {
     try {
       if (!samples || samples.length === 0) {
@@ -872,6 +1043,23 @@ const CollaborationDetails = () => {
     setNewThreshold(newValue);
     // setThreshold(newValue);
   };
+
+  // Function to get histogram data for current threshold
+  const getHistogramData = (threshold) => {
+    if (!qcResults || !Array.isArray(qcResults)) return [];
+    
+    const { userCounts } = getGroupedSampleCounts(qcResults, threshold);
+    
+    return Object.entries(userCounts).map(([userId, count]) => ({
+      userId,
+      userName: getUserName(userId),
+      sampleCount: count,
+      isCurrentUser: userId === current_user_id
+    }));
+  };
+
+  // Get current histogram data based on newThreshold
+  const histogramData = getHistogramData(newThreshold || 0.5);
 
   // utility functions for Data Export
   const convertToCSV = (data, file_name) => {
@@ -1231,7 +1419,7 @@ const CollaborationDetails = () => {
                       secondary={
                         <Box display={'inline-flex'} gap={2} sx={{ color: 'text.primary' }}>
                           <Typography variant="body2">{senderInfo?.name} : {creator?.samples}</Typography>
-                          <Typography variant="body2">{invitedUsers[0]?.name}: {invitedUsers[0]?.number_of_samples}</Typography>
+                          <Typography variant="body2">{getCurrentUserInfo()?.name}: {getCurrentUserInfo()?.number_of_samples}</Typography>
                         </Box>
                       }
                     />
@@ -1284,7 +1472,7 @@ const CollaborationDetails = () => {
                             </Button>
                             <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
                               <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                              <Typography variant="body2">{file.name} will be linked to {invitedUsers[0].phenotype} for this collaboration.</Typography>
+                              <Typography variant="body2">{file.name} will be linked to {getCurrentUserInfo()?.phenotype} for this collaboration.</Typography>
                             </Box>
                           </>
                         )}
@@ -1488,6 +1676,73 @@ const CollaborationDetails = () => {
                                         </Typography>
                                       )}
                                     </Box>
+
+                                    {/* Dynamic Histogram */}
+                                    {histogramData.length > 0 && (
+                                      <Box sx={{ mt: 3, mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                                        <Typography variant="h6" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
+                                          Sample Count Preview (Threshold: {newThreshold?.toFixed(3)})
+                                        </Typography>
+                                        
+                                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                          {histogramData.map((userData) => {
+                                            const maxCount = Math.max(...histogramData.map(d => d.sampleCount));
+                                            const totalSamples = histogramData.reduce((sum, d) => sum + d.sampleCount, 0);
+                                            const barPercentage = maxCount > 0 ? (userData.sampleCount / maxCount) * 100 : 0;
+                                            const samplePercentage = totalSamples > 0 ? (userData.sampleCount / totalSamples) * 100 : 0;
+                                            
+                                            return (
+                                              <Box key={userData.userId} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                                <Box sx={{ minWidth: 120, textAlign: 'right' }}>
+                                                  <Typography 
+                                                    variant="body2" 
+                                                    fontWeight={userData.isCurrentUser ? 600 : 400}
+                                                    color={userData.isCurrentUser ? 'primary.main' : 'text.primary'}
+                                                  >
+                                                    {userData.userName}
+                                                  </Typography>
+                                                </Box>
+                                                
+                                                <Box sx={{ flex: 1, position: 'relative', bgcolor: 'grey.100', borderRadius: 1, height: 32 }}>
+                                                  <Box
+                                                    sx={{
+                                                      width: `${Math.max(barPercentage, 10)}%`, // Minimum width for visibility
+                                                      height: '100%',
+                                                      bgcolor: userData.isCurrentUser ? 'primary.main' : 'secondary.main',
+                                                      borderRadius: 1,
+                                                      display: 'flex',
+                                                      alignItems: 'center',
+                                                      justifyContent: 'center',
+                                                      transition: 'all 0.3s ease',
+                                                      opacity: userData.isCurrentUser ? 1 : 0.8,
+                                                      position: 'relative'
+                                                    }}
+                                                  >
+                                                    <Typography 
+                                                      variant="body2" 
+                                                      color="white" 
+                                                      fontWeight={600}
+                                                      sx={{ 
+                                                        textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                                                        fontSize: '0.75rem'
+                                                      }}
+                                                    >
+                                                      {userData.sampleCount} ({samplePercentage.toFixed(1)}%)
+                                                    </Typography>
+                                                  </Box>
+                                                </Box>
+                                              </Box>
+                                            );
+                                          })}
+                                        </Box>
+                                        
+                                        <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                                          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                                            Total samples that will be included: {histogramData.reduce((sum, d) => sum + d.sampleCount, 0)}
+                                          </Typography>
+                                        </Box>
+                                      </Box>
+                                    )}
                                     <Tooltip arrow title={newThreshold === threshold ? 'Threshold Defined' : 'Confirm your selected threshold value'} placement="bottom">
                                       <Button variant="contained" color="primary" onClick={handleSubmitThreshold} sx={{ borderRadius: 10 }} disabled={newThreshold === threshold}>
                                         {(newThreshold === threshold) ? 'Threshold Defined' : `Confirm Threshold`}
@@ -2070,16 +2325,25 @@ const CollaborationDetails = () => {
                                         onClick={isGwasResultsEnabled ? handleGwasResults : handleGwasInitiate}
                                         disabled={
                                           (!isGwasInitiateEnabled && !isGwasResultsEnabled) ||
-                                          role === 'receiver'
+                                          role === 'receiver' ||
+                                          isGwasInitiateLoading
                                         }
                                         fullWidth
                                         sx={{ borderRadius: 20 }}
+                                        startIcon={
+                                          isGwasInitiateLoading && (
+                                            <CircularProgress size={20} color="inherit" />
+                                          )
+                                        }
                                       >
-                                        {isGwasResultsEnabled ? "Get GWAS Results" : "Initiate GWAS Calculation"}
+                                        {isGwasResultsEnabled ? "Get GWAS Results" : 
+                                         isGwasInitiateLoading ? "Initiating..." : "Initiate GWAS Calculation"}
                                       </Button>
                                     </span>
                                   </Tooltip>
                                 </Box>
+                                
+
 
                                 {/* GWAS Initiate Button */}
                                 {/* <Box sx={{ flex: 1 }}>
