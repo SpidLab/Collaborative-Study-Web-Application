@@ -570,16 +570,52 @@ def get_user_invitations():
         
         user_id = current_user.get_id()
         
+        # Get pagination parameters
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 50))  # Default to 50 items per page
+        skip = (page - 1) * limit
+        
         # Find collaborations where the user is either the creator (sender) or an invited user (receiver)
-        collaborations = db.collaborations.find({
+        # Only fetch the fields we actually need to reduce data transfer
+        collaborations = list(db.collaborations.find({
             '$or': [
                 {'creator_id': ObjectId(user_id)},  # If the user is the sender (creator)
                 {'invited_users.user_id': ObjectId(user_id)}  # If the user is an invited user (receiver)
             ]
+        }, {
+            'uuid': 1,
+            'name': 1,
+            'creator_id': 1,
+            'invited_users': 1,
+            'experiments': 1,
+            'qc_scheme': 1
+        }).sort('_id', -1).skip(skip).limit(limit))
+        
+        # Get total count for pagination info
+        total_count = db.collaborations.count_documents({
+            '$or': [
+                {'creator_id': ObjectId(user_id)},
+                {'invited_users.user_id': ObjectId(user_id)}
+            ]
         })
         
-
-        #invitations_list = []
+        # Collect all unique user IDs to fetch in batch
+        user_ids_to_fetch = set()
+        for collaboration in collaborations:
+            creator_id = collaboration.get("creator_id")
+            if creator_id:
+                user_ids_to_fetch.add(creator_id)
+            
+            for iu in collaboration.get('invited_users', []):
+                if iu.get("user_id"):
+                    user_ids_to_fetch.add(iu["user_id"])
+        
+        # Batch fetch all users - only fetch name and email fields we need
+        users_docs = list(db.users.find(
+            {"_id": {"$in": list(user_ids_to_fetch)}},
+            {"name": 1, "email": 1}
+        ))
+        users_cache = {str(user["_id"]): user for user in users_docs}
         
         response_list = []
         processed_collab_uuids = set()
@@ -590,71 +626,85 @@ def get_user_invitations():
             collaboration_name = collaboration.get("name", "No name")
             creator_id = collaboration.get("creator_id")
 
-            # Sender (initiator) info
-            sender_user = db.users.find_one({"_id": ObjectId(creator_id)})
-            sender_email = sender_user["email"] if sender_user else "Unknown"
-            sender_name = sender_user["name"] if sender_user else "Unknown"
+            # Sender (initiator) info from cache
+            sender_user = users_cache.get(str(creator_id), {})
+            sender_email = sender_user.get("email", "Unknown")
+            sender_name = sender_user.get("name", "Unknown")
             is_initiator = (str(creator_id) == user_id)
-            experiments = collaboration.get('experiments', []),
+            experiments = collaboration.get('experiments', [])
             qcSchemes = collaboration.get('qc_scheme', [])
 
+            # Build all participants list once (avoid duplication)
+            all_participants = []
+            any_pending = False
+            all_accepted = True if collaboration.get('invited_users') else False
+            
+            for iu in collaboration.get('invited_users', []):
+                iu_user = users_cache.get(str(iu["user_id"]), {})
+                status = iu.get("status", "pending")
+                all_participants.append({
+                    "user_id": str(iu["user_id"]), 
+                    "name": iu_user.get("name", "Unknown"), 
+                    "status": status
+                })
+                if status == 'pending': 
+                    any_pending = True
+                if status != 'accepted': 
+                    all_accepted = False
             
             if is_initiator:
-                all_participants = []
-                any_pending = False
-                all_accepted = True if collaboration.get('invited_users') else False
-                for iu in collaboration.get('invited_users', []):
-                    iu_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
-                    status = iu.get("status", "pending")
-                    all_participants.append({ "user_id": str(iu["user_id"]), "name": iu_doc.get("name") if iu_doc else "Unknown", "status": status })
-                    if status == 'pending': any_pending = True
-                    if status != 'accepted': all_accepted = False
-                
                 overall_status = "setup"
                 if collaboration.get('invited_users'):
-                    if any_pending: overall_status = "pending_responses"
-                    elif all_accepted: overall_status = "active_all_accepted"
-                    else: overall_status = "active_mixed_responses"
+                    if any_pending: 
+                        overall_status = "pending_responses"
+                    elif all_accepted: 
+                        overall_status = "active_all_accepted"
+                    else: 
+                        overall_status = "active_mixed_responses"
 
                 response_list.append({
-                    "uuid": collaboration_uuid, "collab_name": collaboration.get("name", "Untitled"),
-                    "view_type": "initiator_summary", "creator_name": sender_name,
+                    "uuid": collaboration_uuid, 
+                    "collab_name": collaboration.get("name", "Untitled"),
+                    "view_type": "initiator_summary", 
+                    "creator_name": sender_name,
                     "all_participants": all_participants,
                     "overall_status_for_initiator_tab": overall_status,
                     'experiments': experiments,
                     'collabQcScheme': qcSchemes,
-
                 })
                 processed_collab_uuids.add(collaboration_uuid)
-
-            # Sending all participants to the collaboration -- Quick View Feature
-            all_particiapants = []
-            for iu in collaboration.get('invited_users', []):
-                iu_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
-                status = iu.get("status", "pending")
-                all_particiapants.append({ "user_id": str(iu["user_id"]), "name": iu_doc.get("name") if iu_doc else "Unknown", "status": status })
-                if status == 'pending': any_pending = True
-                if status != 'accepted': all_accepted = False
 
             # --- For Invitee's View ---
             else:
                 for iu in collaboration.get('invited_users', []):
                     if str(iu.get("user_id")) == user_id:
-                        invitee_doc = db.users.find_one({"_id": ObjectId(iu["user_id"])})
+                        invitee_user = users_cache.get(user_id, {})
                         response_list.append({
-                            "uuid": collaboration_uuid, "collab_name": collaboration.get("name", "Untitled"),
-                            "all_participants": all_particiapants,
+                            "uuid": collaboration_uuid, 
+                            "collab_name": collaboration.get("name", "Untitled"),
+                            "all_participants": all_participants,
                             "view_type": "invitee_specific",
                             "my_status_as_invitee": iu.get("status"),
-                            "sender_id": str(collaboration["creator_id"]), "sender_name": sender_name,
-                            "receiver_id": user_id, "receiver_name": invitee_doc.get("name") if invitee_doc else "You",
+                            "sender_id": str(collaboration["creator_id"]), 
+                            "sender_name": sender_name,
+                            "receiver_id": user_id, 
+                            "receiver_name": invitee_user.get("name", "You"),
                             'experiments': experiments,
                             'collabQcScheme': qcSchemes,
                         })
                         processed_collab_uuids.add(collaboration_uuid)
                         break
             
-        return jsonify({"invitations": response_list, "current_user_id": user_id}), 200
+        return jsonify({
+            "invitations": response_list, 
+            "current_user_id": user_id,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_count,
+                "total_pages": (total_count + limit - 1) // limit
+            }
+        }), 200
     except Exception as e:
         logging.error(f"Error getting user invitations: {str(e)}")
         return jsonify({"error": str(e)}), 500

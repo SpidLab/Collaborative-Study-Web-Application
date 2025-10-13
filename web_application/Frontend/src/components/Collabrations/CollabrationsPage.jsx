@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
-import { Container, Typography, Button, Box, Snackbar, Paper, Alert, Card, Avatar, Tabs, Tab, Tooltip, Grid, Chip, Divider } from '@mui/material';
+import { Container, Typography, Button, Box, Snackbar, Paper, Alert, Card, Avatar, Tabs, Tab, Tooltip, Grid, Chip, Divider, CircularProgress, Skeleton } from '@mui/material';
 import GroupIcon from '@mui/icons-material/Group';
 import axios from 'axios';
 import URL from '../../config';
@@ -8,6 +8,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { Cancel as CancelIcon } from '@mui/icons-material';
 import Popover from '@mui/material/Popover';
 import { appColors, fonts } from '../Utils/utils';
+import PropTypes from 'prop-types';
 
 const getToken = () => localStorage.getItem('token');
 
@@ -23,6 +24,12 @@ const TabPanel = (props) => {
             {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
         </div>
     );
+};
+
+TabPanel.propTypes = {
+    children: PropTypes.node,
+    value: PropTypes.number.isRequired,
+    index: PropTypes.number.isRequired,
 };
 
 const CollaborationCard = ({
@@ -252,6 +259,22 @@ const CollaborationCard = ({
     );
 };
 
+CollaborationCard.propTypes = {
+    collaboration: PropTypes.shape({
+        uuid: PropTypes.string,
+        collab_name: PropTypes.string,
+        initiator_id: PropTypes.string,
+        view_type: PropTypes.string,
+        sender_name: PropTypes.string,
+        all_participants: PropTypes.array,
+        experiments: PropTypes.array,
+        collabQcScheme: PropTypes.array,
+    }).isRequired,
+    currentUserId: PropTypes.string.isRequired,
+    handleAction: PropTypes.func.isRequired,
+    navigate: PropTypes.func.isRequired,
+};
+
 const CollaborationsPage = () => {
     const [pendingInvitations, setPendingInvitations] = useState([]);
     const [sentInvitations, setSentInvitations] = useState([]);
@@ -260,11 +283,27 @@ const CollaborationsPage = () => {
     const [message, setMessage] = useState('');
     const [openSnackbar, setOpenSnackbar] = useState(false);
     const [currentUserId, setCurrentUserId] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [actionLoading, setActionLoading] = useState(false);
+    const [lastFetchTime, setLastFetchTime] = useState(0);
     const navigate = useNavigate();
     const [tabValue, setTabValue] = useState(0);
+    
+    // Cache duration: 30 seconds
+    const CACHE_DURATION = 30000;
 
-    const fetchInvitations = async () => {
+    const fetchInvitations = async (forceRefresh = false) => {
+        const now = Date.now();
+        
+        // Check if we should use cached data
+        if (!forceRefresh && lastFetchTime && (now - lastFetchTime) < CACHE_DURATION) {
+            console.log("Using cached invitation data");
+            return;
+        }
+        
         try {
+            setLoading(true);
+            console.log("Fetching fresh invitation data...");
             const response = await axios.get(`${URL}/api/invitations`, { headers: { Authorization: `Bearer ${getToken()}` } });
             const { current_user_id, invitations } = response.data;
             setCurrentUserId(current_user_id);
@@ -290,8 +329,12 @@ const CollaborationsPage = () => {
             setPendingInvitations(pending);
             setSentInvitations(sent);
             setAcceptedCollaborations(accepted);
+            setLastFetchTime(now);
         } catch (error) {
+            console.error("Error fetching invitations:", error);
             setError('Failed to fetch invitations');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -305,6 +348,7 @@ const CollaborationsPage = () => {
             revoke: '/api/revoke_invitation'
         };
         try {
+            setActionLoading(true);
             await axios.post(
                 `${URL}${endpointMap[action]}`,
                 { uuid: collabUuid, receiver_id: receiverId },
@@ -312,10 +356,12 @@ const CollaborationsPage = () => {
             );
             setMessage(`Invitation ${action}ed!`);
             setOpenSnackbar(true);
-            fetchInvitations();
+            fetchInvitations(true); // Force refresh after action
         } catch (error) {
             setMessage(error.response?.data?.message || `Failed to ${action}.`);
             setOpenSnackbar(true);
+        } finally {
+            setActionLoading(false);
         }
     };
 
@@ -324,58 +370,107 @@ const CollaborationsPage = () => {
 
     if (error) return <Container sx={{ mt: 4 }}><Alert severity="error">{error}</Alert></Container>;
 
+    const LoadingSkeleton = () => (
+        <Box>
+            {[1, 2, 3].map((item) => (
+                <Card key={item} sx={{ mb: 2, p: 2, borderRadius: 3, border: 1, borderColor: appColors.borderV2, boxShadow: 'none' }}>
+                    <Grid container alignItems="center">
+                        <Grid item xs={12} sm={8}>
+                            <Box display="flex" alignItems="center">
+                                <Skeleton variant="circular" width={40} height={40} sx={{ mr: 2 }} />
+                                <Box>
+                                    <Skeleton variant="text" width={200} height={24} />
+                                    <Skeleton variant="text" width={150} height={20} />
+                                </Box>
+                            </Box>
+                        </Grid>
+                        <Grid item xs={12} sm={4} sx={{ textAlign: 'right' }}>
+                            <Skeleton variant="rectangular" width={100} height={32} sx={{ borderRadius: 10, mr: 1, display: 'inline-block' }} />
+                            <Skeleton variant="rectangular" width={120} height={32} sx={{ borderRadius: 10, display: 'inline-block' }} />
+                        </Grid>
+                    </Grid>
+                </Card>
+            ))}
+        </Box>
+    );
+
     return (
         <Container component="div" maxWidth="lg" sx={{ my: 4 }}>
             <Typography variant="h4" align="center" gutterBottom>Collaborations</Typography>
-            <Paper sx={{ mb: 2, border: 1, borderRadius: 10, borderColor: 'divider', boxShadow: 'none' }}>
-                <Tabs value={tabValue} onChange={handleTabChange} variant="fullWidth" sx={{ borderRadius: 10 }}>
-                    <Tab label={`Pending (${pendingInvitations.length})`} />
-                    <Tab label={`Accepted (${acceptedCollaborations.length})`} />
-                    <Tab label={`Sent (${sentInvitations.length})`} />
-                </Tabs>
-            </Paper>
-            <TabPanel value={tabValue} index={0}>
-                {pendingInvitations.length === 0 ? <Typography>No pending invitations.</Typography> :
-                    pendingInvitations.map((inv) => (
-                        <CollaborationCard
-                            key={inv.uuid}
-                            collaboration={inv}
-                            currentUserId={currentUserId}
-                            handleAction={handleAction}
-                            navigate={navigate}
-                        />
-                    ))
-                }
-            </TabPanel>
-            <TabPanel value={tabValue} index={1}>
-                {acceptedCollaborations.length === 0 ? <Typography>No accepted invitations.</Typography> :
-                    acceptedCollaborations.map((item) => (
-                        <CollaborationCard
-                            key={item.uuid}
-                            collaboration={item}
-                            currentUserId={currentUserId}
-                            handleAction={handleAction}
-                            navigate={navigate}
-                        />
-                    ))
-                }
-            </TabPanel>
-            <TabPanel value={tabValue} index={2}>
-                {sentInvitations.length === 0 ? <Typography>No invitations sent.</Typography> :
-                    sentInvitations.map((item) => (
-                        <CollaborationCard
-                            key={item.uuid}
-                            collaboration={item}
-                            currentUserId={currentUserId}
-                            handleAction={handleAction}
-                            navigate={navigate}
-                        />
-                    ))
-                }
-            </TabPanel>
+            
+            {loading ? (
+                <Paper sx={{ mb: 2, border: 1, borderRadius: 10, borderColor: 'divider', boxShadow: 'none' }}>
+                    <Tabs value={0} variant="fullWidth" sx={{ borderRadius: 10 }}>
+                        <Tab label={<Skeleton variant="text" width={80} />} />
+                        <Tab label={<Skeleton variant="text" width={80} />} />
+                        <Tab label={<Skeleton variant="text" width={80} />} />
+                    </Tabs>
+                </Paper>
+            ) : (
+                <Paper sx={{ mb: 2, border: 1, borderRadius: 10, borderColor: 'divider', boxShadow: 'none' }}>
+                    <Tabs value={tabValue} onChange={handleTabChange} variant="fullWidth" sx={{ borderRadius: 10 }}>
+                        <Tab label={`Pending (${pendingInvitations.length})`} />
+                        <Tab label={`Accepted (${acceptedCollaborations.length})`} />
+                        <Tab label={`Sent (${sentInvitations.length})`} />
+                    </Tabs>
+                </Paper>
+            )}
+            
+            {loading ? (
+                <LoadingSkeleton />
+            ) : (
+                <>
+                    <TabPanel value={tabValue} index={0}>
+                        {pendingInvitations.length === 0 ? <Typography>No pending invitations.</Typography> :
+                            pendingInvitations.map((inv) => (
+                                <CollaborationCard
+                                    key={inv.uuid}
+                                    collaboration={inv}
+                                    currentUserId={currentUserId}
+                                    handleAction={handleAction}
+                                    navigate={navigate}
+                                />
+                            ))
+                        }
+                    </TabPanel>
+                    <TabPanel value={tabValue} index={1}>
+                        {acceptedCollaborations.length === 0 ? <Typography>No accepted invitations.</Typography> :
+                            acceptedCollaborations.map((item) => (
+                                <CollaborationCard
+                                    key={item.uuid}
+                                    collaboration={item}
+                                    currentUserId={currentUserId}
+                                    handleAction={handleAction}
+                                    navigate={navigate}
+                                />
+                            ))
+                        }
+                    </TabPanel>
+                    <TabPanel value={tabValue} index={2}>
+                        {sentInvitations.length === 0 ? <Typography>No invitations sent.</Typography> :
+                            sentInvitations.map((item) => (
+                                <CollaborationCard
+                                    key={item.uuid}
+                                    collaboration={item}
+                                    currentUserId={currentUserId}
+                                    handleAction={handleAction}
+                                    navigate={navigate}
+                                />
+                            ))
+                        }
+                    </TabPanel>
+                </>
+            )}
+            
             <Snackbar open={openSnackbar} autoHideDuration={4000} onClose={handleCloseSnackbar}>
                 <Alert onClose={handleCloseSnackbar} severity={message.toLowerCase().includes('failed') ? 'error' : 'success'} sx={{ width: '100%' }}>{message}</Alert>
             </Snackbar>
+            
+            {actionLoading && (
+                <Box sx={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 9999 }}>
+                    <CircularProgress />
+                </Box>
+            )}
         </Container>
     );
 };
