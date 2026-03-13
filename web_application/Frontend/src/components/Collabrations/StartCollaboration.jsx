@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Container, TextField, Button, Checkbox, IconButton, Typography, Box, Divider,
-  Snackbar, Alert, CircularProgress, Grid, Card, CardContent, Chip, FormControl, InputLabel, Select, MenuItem
+  Snackbar, Alert, CircularProgress, Grid, Card, CardContent, Chip, FormControl, InputLabel, Select, MenuItem, Slider, Collapse
 } from '@mui/material';
 import { Add, Delete, Upload, Info, RadioButtonUncheckedRounded } from '@mui/icons-material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
@@ -10,6 +10,12 @@ import axios from 'axios';
 import URL from '../../config';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+
+const QC_METHOD_DEFAULTS = {
+  'Minor Allele Frequency (MAF)': { threshold: 0.05, min: 0.001, max: 0.5, step: 0.001, label: 'MAF Threshold', description: 'SNPs below this frequency are removed' },
+  'Hardy-Weinberg Equilibrium (HWE)': { threshold: 0.000001, label: 'HWE p-value Threshold', description: 'SNPs with p-value below this are removed', isTextField: true },
+  'Missing Data QC': { threshold: 0.10, min: 0.01, max: 1.0, step: 0.01, label: 'Missing Rate Threshold', description: 'Samples/SNPs above this missing rate are removed' },
+};
 
 
 
@@ -32,6 +38,7 @@ const StartCollaboration = () => {
   const [selectedDataset, setSelectedDataset] = useState('');
   const [qcScheme, setQcSchemes] = useState([]);
   const [selectedQcSchemes, setSelectedQcSchemes] = useState([]);
+  const [qcMethodParams, setQcMethodParams] = useState({});
 
 
 
@@ -44,14 +51,15 @@ const StartCollaboration = () => {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
         });
-        const fetchedQcSchemes = response.data.qc_schemes[0].quality_control_scheme;
+        const fetchedQcSchemes = response.data.qc_schemes[0]?.quality_control_scheme || [];
         setQcSchemes(fetchedQcSchemes);
-        setExperimentOptions(response.data.experiments[0].experiment_types);
-        setDatasets(response.data.datasets);
-
+        setExperimentOptions(response.data.experiments[0]?.experiment_types || []);
+        setDatasets(response.data.datasets || []);
         // Ensure the first QC scheme is selected by default
         if (fetchedQcSchemes.length > 0) {
           setSelectedQcSchemes([fetchedQcSchemes[0]]);
+          const defaults = QC_METHOD_DEFAULTS[fetchedQcSchemes[0]];
+          if (defaults) setQcMethodParams({ [fetchedQcSchemes[0]]: { threshold: defaults.threshold } });
         }
 
       } catch (error) {
@@ -101,11 +109,24 @@ const StartCollaboration = () => {
     setExperimentList(updatedList);
   };
   const handleQcScheme = (label) => {
-    setSelectedQcSchemes((prevSelected) =>
-      prevSelected.includes(label)
-        ? prevSelected.filter((item) => item !== label) // Remove if already selected
-        : [...prevSelected, label] // Add if not selected
-    );
+    setSelectedQcSchemes((prevSelected) => {
+      if (prevSelected.includes(label)) {
+        setQcMethodParams(prev => { const next = { ...prev }; delete next[label]; return next; });
+        return prevSelected.filter((item) => item !== label);
+      }
+      const defaults = QC_METHOD_DEFAULTS[label];
+      if (defaults) {
+        setQcMethodParams(prev => ({ ...prev, [label]: { threshold: defaults.threshold } }));
+      }
+      return [...prevSelected, label];
+    });
+  };
+
+  const handleQcParamChange = (method, value) => {
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+      setQcMethodParams(prev => ({ ...prev, [method]: { ...prev[method], threshold: num } }));
+    }
   };
 
   // const handleFileUpload = (e, setData) => {
@@ -143,14 +164,14 @@ const StartCollaboration = () => {
 
 
     setIsLoading(true);
+    const collabQcSchemePayload = selectedQcSchemes.map(method => ({
+      method,
+      params: qcMethodParams[method] || {}
+    }));
     const collaborationData = {
       collabName,
       experiments: experimentList,
-      collabQcScheme: selectedQcSchemes,
-      // collabQcScheme: ,
-      // phenoType,
-      // samples,
-      // rawData: rawData ? rawData.name : null,
+      collabQcScheme: collabQcSchemePayload,
       creatorDatasetId: selectedDataset.dataset_id,
       invitedUsers: selectedUsers.map(user => ({
         _id: user._id,
@@ -389,72 +410,68 @@ const StartCollaboration = () => {
 
               {/* Place Holder Choose Quality Control Scheme  */}
               <Box sx={{ p: 1.5, backgroundColor: '#FAFAFA', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-                Choose your QC Scheme
-                <Box display="flex" gap={2} sx={{ mt: 1.5 }}>
-                  {/* {qcScheme.map((label, index) => (
-                    <Box
-                      key={index}
-                      display="flex"
-                      alignItems="center"
-                      sx={{
-                        pr: 1.5,
-                        borderRadius: 10,
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        boxShadow: "0px",
-                        cursor: "pointer",
-                        transition: "background 0.3s",
-                        "&:hover": { backgroundColor: "#e8f1fa" },
-                      }}
-                    >
-                      <Checkbox
-                        defaultChecked={index === 0} // First one checked by default
-                        // onChange={() => handleExperimentChange(index)}
-                        icon={<RadioButtonUncheckedRounded />}
-                        checkedIcon={<CheckCircleIcon />}
-                        sx={{
-                          color: "#1976d2",
-                          "&.Mui-checked": { color: "#1565c0" },
-                          "& .MuiSvgIcon-root": { borderRadius: "50%" }, // Make checkbox circular
-                        }}
-                      />
-                      <Typography variant="body1" sx={{ fontSize: 14 }}>{label}</Typography>
-                    </Box>
-                  ))} */}
-
-                  {qcScheme.map((label, index) => (
-                    <Box
-                      key={index}
-                      display="flex"
-                      alignItems="center"
-                      sx={{
-                        pr: 1.5,
-                        borderRadius: 10,
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        boxShadow: "0px",
-                        cursor: "pointer",
-                        transition: "background 0.3s",
-                        "&:hover": { backgroundColor: "#e8f1fa" },
-                      }}
-                      onClick={() => handleQcScheme(label)} // Toggle selection
-                    >
-                      <Checkbox
-                        checked={selectedQcSchemes.includes(label)} // Check if selected
-                        icon={<RadioButtonUncheckedRounded />}
-                        checkedIcon={<CheckCircleIcon />}
-                        sx={{
-                          color: "#1976d2",
-                          "&.Mui-checked": { color: "#1565c0" },
-                          "& .MuiSvgIcon-root": { borderRadius: "50%" },
-                        }}
-                      />
-                      <Typography variant="body1" sx={{ fontSize: 14 }}>{label}</Typography>
-                    </Box>
-                  ))}
+                <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>Choose QC Scheme (select multiple to chain)</Typography>
+                <Box display="flex" flexWrap="wrap" gap={1.5} sx={{ mt: 1 }}>
+                  {qcScheme.map((label, index) => {
+                    const isSelected = selectedQcSchemes.includes(label);
+                    const defaults = QC_METHOD_DEFAULTS[label];
+                    return (
+                      <Box key={index} sx={{ minWidth: 200, flex: '1 1 200px' }}>
+                        <Box
+                          display="flex" alignItems="center"
+                          sx={{
+                            pr: 1.5, borderRadius: 10,
+                            border: '1px solid',
+                            borderColor: isSelected ? 'primary.main' : 'divider',
+                            bgcolor: isSelected ? '#e8f1fa' : 'transparent',
+                            cursor: "pointer", transition: "background 0.3s",
+                            "&:hover": { backgroundColor: "#e8f1fa" },
+                          }}
+                          onClick={() => handleQcScheme(label)}
+                        >
+                          <Checkbox
+                            checked={isSelected}
+                            icon={<RadioButtonUncheckedRounded />}
+                            checkedIcon={<CheckCircleIcon />}
+                            sx={{ color: "#1976d2", "&.Mui-checked": { color: "#1565c0" }, "& .MuiSvgIcon-root": { borderRadius: "50%" } }}
+                          />
+                          <Typography variant="body2">{label}</Typography>
+                        </Box>
+                        <Collapse in={isSelected && !!defaults}>
+                          {defaults && isSelected && (
+                            <Box sx={{ mt: 0.5, px: 1.5, pb: 0.5 }}>
+                              <Typography variant="caption" color="text.secondary">{defaults.description}</Typography>
+                              {defaults.isTextField ? (
+                                <TextField
+                                  size="small" type="number" label={defaults.label}
+                                  value={qcMethodParams[label]?.threshold ?? defaults.threshold}
+                                  onChange={(e) => handleQcParamChange(label, e.target.value)}
+                                  inputProps={{ step: "0.000001", min: 0, max: 1 }}
+                                  fullWidth sx={{ mt: 0.5 }}
+                                />
+                              ) : (
+                                <Box sx={{ mt: 0.5 }}>
+                                  <Typography variant="caption" sx={{ fontWeight: 500 }}>
+                                    {defaults.label}: {qcMethodParams[label]?.threshold ?? defaults.threshold}
+                                  </Typography>
+                                  <Slider
+                                    size="small"
+                                    value={qcMethodParams[label]?.threshold ?? defaults.threshold}
+                                    onChange={(_, v) => handleQcParamChange(label, v)}
+                                    min={defaults.min} max={defaults.max} step={defaults.step}
+                                    valueLabelDisplay="auto"
+                                  />
+                                </Box>
+                              )}
+                            </Box>
+                          )}
+                        </Collapse>
+                      </Box>
+                    );
+                  })}
                 </Box>
               </Box>
-              {/* **New Dropdown for Selecting Datasets** */}
+              {/* **Dropdown for Selecting Datasets (includes QC datasets)** */}
               <FormControl fullWidth sx={{ mt: 2 }}>
                 <InputLabel id="dataset-select-label">Select Dataset</InputLabel>
                 <Select
@@ -468,19 +485,21 @@ const StartCollaboration = () => {
                   {datasets.length > 0 ? (
                     datasets.map((dataset, index) => (
                       <MenuItem key={index} value={dataset}>
-                        {`${dataset.phenotype} | ${dataset.number_of_samples}`}
+                        {dataset.is_qc_data 
+                          ? `🔬 ${dataset.phenotype} | ${dataset.number_of_samples} samples`
+                          : `📄 ${dataset.phenotype} | ${dataset.number_of_samples} samples`
+                        }
                       </MenuItem>
                     ))
                   ) : (
                     <MenuItem value="">
-                      No Datasets Available. You can upload your datasets
-                      <a href="/upload" target="_blank" rel="noopener noreferrer" style={{ color: 'primary.main', textDecoration: 'underline', marginLeft: '5px' }}>
-                        here
-                      </a>.
+                      No Datasets Available. Upload metadata first.
                     </MenuItem>
                   )}
                 </Select>
               </FormControl>
+
+              {/* QC datasets are created in CollaborationDetails after collaboration is started */}
 
               {/* <Button
                 variant="outlined"
@@ -613,6 +632,7 @@ const StartCollaboration = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
     </Container>
   );
 };

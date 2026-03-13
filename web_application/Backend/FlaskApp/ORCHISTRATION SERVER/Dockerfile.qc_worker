@@ -1,0 +1,42 @@
+# QC Worker Container - Processes QC requests in isolation
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install Python dependencies using pre-built wheels (no compilation needed)
+# numpy, scipy, scikit-learn, pandas all have wheels for Python 3.10 on Linux x86_64
+# If installation fails, uncomment the apt-get lines below
+COPY ["ORCHISTRATION SERVER/requirements-worker.txt", "requirements.txt"]
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Fallback: If above fails, uncomment these lines to install build tools:
+# RUN apt-get update && \
+#     apt-get install -y --no-install-recommends gcc g++ && \
+#     apt-get clean && \
+#     rm -rf /var/lib/apt/lists/* && \
+#     pip install --no-cache-dir -r requirements.txt
+
+# Copy QC modules from Collaborator_Server (copy all at once for better caching)
+COPY Collaborator_Server/minor_allele_freq.py \
+     Collaborator_Server/hardy_weinberg_qc.py \
+     Collaborator_Server/missing_data_qc.py \
+     Collaborator_Server/pca_handler.py \
+     Collaborator_Server/privacy_transform.py \
+     ./
+
+# Copy data and models (only if needed - these are small ~1MB total)
+COPY Collaborator_Server/data /app/data
+COPY Collaborator_Server/models /app/models
+
+# Copy worker script, GWAS summary module, and case/control ID files (handle space in directory name)
+COPY ["ORCHISTRATION SERVER/qc_worker.py", "ORCHISTRATION SERVER/gwas_summary.py", "."]
+COPY ["ORCHISTRATION SERVER/case_ids.txt", "ORCHISTRATION SERVER/control_ids.txt", "."]
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+ENV MONGO_USERNAME=CollaboratorDB
+ENV MONGO_PASSWORD=CollaboratorDB@123
+ENV MONGO_CLUSTER=collaboratordb.68hkp69.mongodb.net
+
+CMD ["python", "qc_worker.py"]

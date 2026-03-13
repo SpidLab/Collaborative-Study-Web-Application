@@ -1,0 +1,134 @@
+---
+# ServiceAccount for Orchestrator
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qc-orchestrator-sa
+  namespace: default
+---
+# RBAC: Give the Orchestrator permission to manage Pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: qc-pod-manager-role
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: qc-orchestrator-binding
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: qc-orchestrator-sa
+    namespace: default
+roleRef:
+  kind: Role
+  name: qc-pod-manager-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ConfigMap for MongoDB credentials
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qc-orchestrator-config
+  namespace: default
+data:
+  MONGO_USERNAME: "CollaboratorDB"
+  MONGO_CLUSTER: "collaboratordb.68hkp69.mongodb.net"
+  MAX_PODS: "10"
+  WORKER_IMAGE: "qc-worker:latest"
+  ORCHESTRATOR_URL: "http://qc-orchestrator-service"
+---
+# Secret for MongoDB password
+apiVersion: v1
+kind: Secret
+metadata:
+  name: qc-orchestrator-secret
+  namespace: default
+type: Opaque
+stringData:
+  MONGO_PASSWORD: "CollaboratorDB@123"
+---
+# QC Orchestrator Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qc-orchestrator
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qc-orchestrator
+  template:
+    metadata:
+      labels:
+        app: qc-orchestrator
+    spec:
+      serviceAccountName: qc-orchestrator-sa
+      containers:
+        - name: orchestrator
+          image: qc-orchestrator:latest
+          imagePullPolicy: Never # Use local image for development
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: qc-orchestrator-config
+            - secretRef:
+                name: qc-orchestrator-secret
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+# Service to expose the QC Orchestrator
+apiVersion: v1
+kind: Service
+metadata:
+  name: qc-orchestrator-service
+  namespace: default
+spec:
+  selector:
+    app: qc-orchestrator
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
+---
+# Optional: NodePort service for external access during development
+apiVersion: v1
+kind: Service
+metadata:
+  name: qc-orchestrator-nodeport
+  namespace: default
+spec:
+  selector:
+    app: qc-orchestrator
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+      nodePort: 30001
+  type: NodePort

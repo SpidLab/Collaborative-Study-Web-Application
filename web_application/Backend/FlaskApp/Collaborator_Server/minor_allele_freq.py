@@ -375,69 +375,6 @@ class MAFQualityControl:
         
         return filtered_df, qc_results
     
-    def generate_qc_report(self, qc_results, output_dir):
-        report_path = os.path.join(output_dir, 'maf_qc_report.txt')
-        
-        removed_count = len(self.removed_snps)
-        pass_rate = (self.filtered_snp_count / self.original_snp_count) * 100 if self.original_snp_count > 0 else 0
-        
-        if self.method == 'combined':
-            maf_values = [r['maf_combined'] for r in qc_results]
-        else:
-            maf_values = []
-            for r in qc_results:
-                maf_values.extend([r['maf_cases'], r['maf_controls']])
-        
-        maf_stats = {
-            'mean': np.mean(maf_values) if maf_values else 0,
-            'median': np.median(maf_values) if maf_values else 0,
-            'min': np.min(maf_values) if maf_values else 0,
-            'max': np.max(maf_values) if maf_values else 0
-        }
-        
-        with open(report_path, 'w') as f:
-            f.write("=" * 60 + "\n")
-            f.write("MINOR ALLELE FREQUENCY QUALITY CONTROL REPORT\n")
-            f.write("=" * 60 + "\n\n")
-            
-            f.write(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"MAF Threshold: {self.threshold}\n")
-            f.write(f"Calculation Method: {self.method}\n\n")
-            
-            f.write("SUMMARY STATISTICS\n")
-            f.write("-" * 30 + "\n")
-            f.write(f"Original SNP Count: {self.original_snp_count:,}\n")
-            f.write(f"Filtered SNP Count: {self.filtered_snp_count:,}\n")
-            f.write(f"Removed SNP Count: {removed_count:,}\n")
-            f.write(f"Pass Rate: {pass_rate:.2f}%\n\n")
-            
-            f.write("MAF DISTRIBUTION\n")
-            f.write("-" * 30 + "\n")
-            f.write(f"Mean MAF: {maf_stats['mean']:.4f}\n")
-            f.write(f"Median MAF: {maf_stats['median']:.4f}\n")
-            f.write(f"Min MAF: {maf_stats['min']:.4f}\n")
-            f.write(f"Max MAF: {maf_stats['max']:.4f}\n\n")
-            
-            if self.removed_snps:
-                f.write("REMOVED SNPs\n")
-                f.write("-" * 30 + "\n")
-                for snp in self.removed_snps[:50]:
-                    if self.method == 'combined':
-                        f.write(f"{snp['snp_id']}: MAF = {snp['maf_combined']:.4f}\n")
-                    else:
-                        f.write(f"{snp['snp_id']}: Cases MAF = {snp['maf_cases']:.4f}, Controls MAF = {snp['maf_controls']:.4f}\n")
-                
-                if len(self.removed_snps) > 50:
-                    f.write(f"... and {len(self.removed_snps) - 50} more SNPs\n")
-        
-        if self.removed_snps:
-            removed_df = pd.DataFrame(self.removed_snps)
-            removed_csv_path = os.path.join(output_dir, 'removed_snps.csv')
-            removed_df.to_csv(removed_csv_path, index=False)
-            self.logger.info(f"Removed SNPs saved to: {removed_csv_path}")
-        
-        self.logger.info(f"QC report saved to: {report_path}")
-    
     def process_file(self, input_file, output_file=None, phenotype_col=None):
         try:
             df = pd.read_csv(input_file)
@@ -453,17 +390,11 @@ class MAFQualityControl:
         
         filtered_df, qc_results = self.filter_dataset(df, phenotype_col)
         
-        if output_file is None:
-            input_path = Path(input_file)
-            output_file = input_path.parent / f"{input_path.stem}_maf_filtered{input_path.suffix}"
+        if output_file:
+            filtered_df.to_csv(output_file, index=False)
+            self.logger.info(f"Filtered dataset saved to: {output_file}")
         
-        filtered_df.to_csv(output_file, index=False)
-        self.logger.info(f"Filtered dataset saved to: {output_file}")
-        
-        output_dir = os.path.dirname(output_file)
-        self.generate_qc_report(qc_results, output_dir)
-        
-        return filtered_df, qc_results
+        return filtered_df
 
 
 def main():

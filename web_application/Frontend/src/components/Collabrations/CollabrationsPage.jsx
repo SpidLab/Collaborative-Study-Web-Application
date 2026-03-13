@@ -243,12 +243,12 @@ const CollaborationCard = ({
                         QC Schemes 
                     </Typography>
                     {(collaboration.collabQcScheme || []).length === 0 ? (
-                        <Typography variant="body2" color="text.secondary">No QcShemes.</Typography>
+                        <Typography variant="body2" color="text.secondary">No QC schemes.</Typography>
                     ) : (
                         (collaboration.collabQcScheme || []).map((scheme, idx) => (
                             <Chip
-                                key={scheme || idx}
-                                label={typeof scheme === 'string' ? scheme : (scheme.name || '')}
+                                key={typeof scheme === 'object' && scheme?.method ? scheme.method + idx : (scheme || idx)}
+                                label={typeof scheme === 'string' ? scheme : (scheme.method || scheme.name || '')}
                                 size="small"
                                 sx={{ mr: 1, mb: 1, fontSize: fonts.chipsText, bgcolor: appColors.chipBg, color: appColors.chipTx }}
                             />
@@ -288,7 +288,7 @@ const CollaborationsPage = () => {
     const [lastFetchTime, setLastFetchTime] = useState(0);
     const navigate = useNavigate();
     const [tabValue, setTabValue] = useState(0);
-    
+
     // Cache duration: 30 seconds
     const CACHE_DURATION = 30000;
 
@@ -407,58 +407,58 @@ const CollaborationsPage = () => {
                     </Tabs>
                 </Paper>
             ) : (
-                <Paper sx={{ mb: 2, border: 1, borderRadius: 10, borderColor: 'divider', boxShadow: 'none' }}>
-                    <Tabs value={tabValue} onChange={handleTabChange} variant="fullWidth" sx={{ borderRadius: 10 }}>
-                        <Tab label={`Pending (${pendingInvitations.length})`} />
-                        <Tab label={`Accepted (${acceptedCollaborations.length})`} />
-                        <Tab label={`Sent (${sentInvitations.length})`} />
-                    </Tabs>
-                </Paper>
+            <Paper sx={{ mb: 2, border: 1, borderRadius: 10, borderColor: 'divider', boxShadow: 'none' }}>
+                <Tabs value={tabValue} onChange={handleTabChange} variant="fullWidth" sx={{ borderRadius: 10 }}>
+                    <Tab label={`Pending (${pendingInvitations.length})`} />
+                    <Tab label={`Accepted (${acceptedCollaborations.length})`} />
+                    <Tab label={`Sent (${sentInvitations.length})`} />
+                </Tabs>
+            </Paper>
             )}
             
             {loading ? (
                 <LoadingSkeleton />
             ) : (
                 <>
-                    <TabPanel value={tabValue} index={0}>
-                        {pendingInvitations.length === 0 ? <Typography>No pending invitations.</Typography> :
-                            pendingInvitations.map((inv) => (
-                                <CollaborationCard
-                                    key={inv.uuid}
-                                    collaboration={inv}
-                                    currentUserId={currentUserId}
-                                    handleAction={handleAction}
-                                    navigate={navigate}
-                                />
-                            ))
-                        }
-                    </TabPanel>
-                    <TabPanel value={tabValue} index={1}>
-                        {acceptedCollaborations.length === 0 ? <Typography>No accepted invitations.</Typography> :
-                            acceptedCollaborations.map((item) => (
-                                <CollaborationCard
-                                    key={item.uuid}
-                                    collaboration={item}
-                                    currentUserId={currentUserId}
-                                    handleAction={handleAction}
-                                    navigate={navigate}
-                                />
-                            ))
-                        }
-                    </TabPanel>
-                    <TabPanel value={tabValue} index={2}>
-                        {sentInvitations.length === 0 ? <Typography>No invitations sent.</Typography> :
-                            sentInvitations.map((item) => (
-                                <CollaborationCard
-                                    key={item.uuid}
-                                    collaboration={item}
-                                    currentUserId={currentUserId}
-                                    handleAction={handleAction}
-                                    navigate={navigate}
-                                />
-                            ))
-                        }
-                    </TabPanel>
+            <TabPanel value={tabValue} index={0}>
+                {pendingInvitations.length === 0 ? <Typography>No pending invitations.</Typography> :
+                    pendingInvitations.map((inv) => (
+                        <CollaborationCard
+                            key={inv.uuid}
+                            collaboration={inv}
+                            currentUserId={currentUserId}
+                            handleAction={handleAction}
+                            navigate={navigate}
+                        />
+                    ))
+                }
+            </TabPanel>
+            <TabPanel value={tabValue} index={1}>
+                {acceptedCollaborations.length === 0 ? <Typography>No accepted invitations.</Typography> :
+                    acceptedCollaborations.map((item) => (
+                        <CollaborationCard
+                            key={item.uuid}
+                            collaboration={item}
+                            currentUserId={currentUserId}
+                            handleAction={handleAction}
+                            navigate={navigate}
+                        />
+                    ))
+                }
+            </TabPanel>
+            <TabPanel value={tabValue} index={2}>
+                {sentInvitations.length === 0 ? <Typography>No invitations sent.</Typography> :
+                    sentInvitations.map((item) => (
+                        <CollaborationCard
+                            key={item.uuid}
+                            collaboration={item}
+                            currentUserId={currentUserId}
+                            handleAction={handleAction}
+                            navigate={navigate}
+                        />
+                    ))
+                }
+            </TabPanel>
                 </>
             )}
             

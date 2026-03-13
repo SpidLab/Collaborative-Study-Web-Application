@@ -342,81 +342,7 @@ class HardyWeinbergQC:
         else:
             return self.filter_dataset_individual_format(df, phenotype_col)
     
-    def generate_report(self, hwe_results, output_file=None):
-        report_lines = []
-        report_lines.append("=" * 80)
-        report_lines.append("Hardy-Weinberg Equilibrium Quality Control Report")
-        report_lines.append("=" * 80)
-        report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        report_lines.append(f"Method: {self.method}")
-        report_lines.append(f"Population: {self.population}")
-        report_lines.append(f"HWE p-value threshold: {self.threshold:.2e}")
-        report_lines.append("")
-        
-        report_lines.append("Summary Statistics")
-        report_lines.append("-" * 80)
-        report_lines.append(f"Total SNPs tested: {len(hwe_results)}")
-        report_lines.append(f"SNPs removed: {len(self.removed_snps)}")
-        report_lines.append(f"SNPs passing: {len(hwe_results) - len(self.removed_snps)}")
-        if len(hwe_results) > 0:
-            removal_rate = len(self.removed_snps) / len(hwe_results) * 100
-            report_lines.append(f"Removal rate: {removal_rate:.2f}%")
-        else:
-            report_lines.append("Removal rate: N/A (no SNPs tested)")
-        report_lines.append("")
-        
-        report_lines.append("Detailed HWE Test Results")
-        report_lines.append("-" * 80)
-        
-
-        results_data = []
-        for snp_id, results in hwe_results.items():
-            if isinstance(results, dict) and len(results) > 0:
-                for pop, result in results.items():
-                    if result.get('valid', False):
-                        results_data.append({
-                            'SNP_ID': snp_id,
-                            'Population': pop,
-                            'P_value': result.get('p_value', np.nan),
-                            'Chi2_stat': result.get('chi2_stat', np.nan),
-                            'P_allele_freq': result.get('p_allele_freq', np.nan),
-                            'Q_allele_freq': result.get('q_allele_freq', np.nan),
-                            'Observed_AA': result.get('observed', [0, 0, 0])[0],
-                            'Observed_Aa': result.get('observed', [0, 0, 0])[1],
-                            'Observed_aa': result.get('observed', [0, 0, 0])[2],
-                            'Expected_AA': result.get('expected', [0, 0, 0])[0],
-                            'Expected_Aa': result.get('expected', [0, 0, 0])[1],
-                            'Expected_aa': result.get('expected', [0, 0, 0])[2],
-                            'Total_individuals': result.get('total_individuals', 0),
-                            'Passed': result.get('p_value', 1.0) >= self.threshold
-                        })
-        
-        if results_data:
-            results_df = pd.DataFrame(results_data)
-            report_lines.append(results_df.to_string(index=False))
-            report_lines.append("")
-        
-        if self.removed_snps:
-            report_lines.append("Removed SNPs")
-            report_lines.append("-" * 80)
-            for removed in self.removed_snps:
-                report_lines.append(f"SNP: {removed['snp_id']}")
-                report_lines.append(f"  Reason: {removed['reason']}")
-                for pop, result in removed['results'].items():
-                    if result.get('valid', False):
-                        report_lines.append(f"  {pop}: p-value = {result.get('p_value', np.nan):.2e}")
-                report_lines.append("")
-        
-        report_content = "\n".join(report_lines)
-        
-        if output_file:
-            with open(output_file, 'w') as f:
-                f.write(report_content)
-            self.logger.info(f"HWE report written to {output_file}")
-        
-        return report_content
-    
-    def process_file(self, input_file, output_file=None, phenotype_col=None, report_file=None):
+    def process_file(self, input_file, output_file=None, phenotype_col=None):
         self.logger.info(f"Reading input file: {input_file}")
         df = pd.read_csv(input_file)
         
@@ -431,7 +357,6 @@ class HardyWeinbergQC:
         if format_type == 'aggregated':
             self.original_snp_count = len(df)
         else:
-            id_col = df.columns[0]
             snp_columns = [col for col in df.columns[1:] if col != phenotype_col] if phenotype_col else df.columns[1:]
             self.original_snp_count = len(snp_columns)
         
@@ -449,20 +374,11 @@ class HardyWeinbergQC:
         self.logger.info(f"Filtered {self.original_snp_count} SNPs to {self.filtered_snp_count} SNPs")
         self.logger.info(f"Removed {len(self.removed_snps)} SNPs with HWE p-value < {self.threshold:.2e}")
         
-        if output_file is None:
-            input_path = Path(input_file)
-            output_file = input_path.parent / f"{input_path.stem}_hwe_filtered{input_path.suffix}"
+        if output_file:
+            filtered_df.to_csv(output_file, index=False)
+            self.logger.info(f"Filtered dataset saved to: {output_file}")
         
-        filtered_df.to_csv(output_file, index=False)
-        self.logger.info(f"Filtered dataset saved to: {output_file}")
-        
-        if report_file is None:
-            input_path = Path(input_file)
-            report_file = input_path.parent / f"{input_path.stem}_hwe_report.txt"
-        
-        self.generate_report(hwe_results, report_file)
-        
-        return filtered_df, hwe_results
+        return filtered_df
 
 
 def main():

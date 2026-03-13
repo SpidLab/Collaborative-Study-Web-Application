@@ -1,10 +1,10 @@
 from scipy.stats import chi2_contingency
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
+import os
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import numpy as np
-from scipy.stats import chi2_contingency
+# Use all available CPU cores for parallel chi-square computation
+_MAX_WORKERS = min(64, (os.cpu_count() or 4) + 4)
 
 
 def calc_chi_pvalue_for_snp(snp_id, counts):
@@ -42,7 +42,7 @@ def calc_chi_pvalue(snp_stats):
     """
     gwas_result = {}
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
         future_to_snp = {
             executor.submit(calc_chi_pvalue_for_snp, snp_id, counts): snp_id
             for snp_id, counts in snp_stats.items()

@@ -1,11 +1,23 @@
-# Dependencies for Minor Allele Frequency Quality Control Script
+# QC Controller Dependencies
 
-# Core data processing
+# Web Framework
+flask>=2.0.0
+flask-cors>=3.0.0
+
+# Data Processing
 pandas>=1.3.0
 numpy>=1.20.0
+scipy>=1.7.0
 
-# Optional: For enhanced functionality
-scipy>=1.7.0  # For additional statistical functions if needed
+# Machine Learning (for PCA)
+scikit-learn>=1.0.0
+
+# MongoDB with SSL support
+pymongo[srv,tls]>=4.0.0
+certifi>=2020.12.5
+
+# HTTP Client (for health checks)
+requests>=2.25.0
 
 # Standard library modules used (no installation required):
 # - argparse (command line interface)
@@ -14,4 +26,7 @@ scipy>=1.7.0  # For additional statistical functions if needed
 # - os (file operations)
 # - datetime (timestamp generation)
 # - pathlib (path handling)
-
+# - io (string IO)
+# - pickle (model serialization)
+# - traceback (error handling)
+# - urllib.parse (URL encoding)

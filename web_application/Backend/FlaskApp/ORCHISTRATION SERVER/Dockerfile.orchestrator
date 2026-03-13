@@ -1,0 +1,6 @@
+FROM node:18-alpine
+WORKDIR /app
+# Fix: Pin kubernetes client to 0.21.0 to support 'require()' syntax
+RUN npm install express @kubernetes/client-node@0.21.0
+COPY server.js .
+CMD ["node", "server.js"]

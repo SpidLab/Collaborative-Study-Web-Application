@@ -196,96 +196,7 @@ class MissingDataQC:
         
         return filtered_df
     
-    def generate_report(self, output_file=None):
-        """Generate missing data QC report"""
-        report_lines = []
-        report_lines.append("=" * 80)
-        report_lines.append("Missing Data Quality Control Report")
-        report_lines.append("=" * 80)
-        report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        report_lines.append(f"Missing threshold: {self.missing_threshold:.1%} (genotyping rate ≥ {(1.0 - self.missing_threshold):.1%})")
-        report_lines.append(f"Filter individuals: {self.filter_individuals}")
-        report_lines.append(f"Filter SNPs: {self.filter_snps}")
-        report_lines.append("")
-        
-        report_lines.append("Summary Statistics")
-        report_lines.append("-" * 80)
-        report_lines.append(f"Original individuals: {self.original_individual_count}")
-        report_lines.append(f"Filtered individuals: {self.filtered_individual_count}")
-        if self.filter_individuals:
-            report_lines.append(f"Removed individuals: {len(self.removed_individuals)}")
-            if self.original_individual_count > 0:
-                removal_rate = len(self.removed_individuals) / self.original_individual_count * 100
-                report_lines.append(f"Individual removal rate: {removal_rate:.2f}%")
-            else:
-                report_lines.append("Individual removal rate: N/A")
-        report_lines.append("")
-        
-        report_lines.append(f"Original SNPs: {self.original_snp_count}")
-        report_lines.append(f"Filtered SNPs: {self.filtered_snp_count}")
-        if self.filter_snps:
-            report_lines.append(f"Removed SNPs: {len(self.removed_snps)}")
-            if self.original_snp_count > 0:
-                removal_rate = len(self.removed_snps) / self.original_snp_count * 100
-                report_lines.append(f"SNP removal rate: {removal_rate:.2f}%")
-            else:
-                report_lines.append("SNP removal rate: N/A")
-        report_lines.append("")
-        
-        if self.filter_individuals and self.removed_individuals:
-            report_lines.append("Removed Individuals")
-            report_lines.append("-" * 80)
-            for removed in sorted(self.removed_individuals, key=lambda x: x['missing_rate'], reverse=True):
-                report_lines.append(f"Individual: {removed['individual_id']}")
-                report_lines.append(f"  Missing rate: {removed['missing_rate']:.2%}")
-                report_lines.append(f"  Genotyping rate: {removed['genotyping_rate']:.2%}")
-                report_lines.append(f"  Missing count: {removed['missing_count']} / {removed['total_snps']}")
-                report_lines.append("")
-        
-        if self.filter_snps and self.removed_snps:
-            report_lines.append("Removed SNPs")
-            report_lines.append("-" * 80)
-            for removed in sorted(self.removed_snps, key=lambda x: x['missing_rate'], reverse=True):
-                report_lines.append(f"SNP: {removed['snp_id']}")
-                report_lines.append(f"  Missing rate: {removed['missing_rate']:.2%}")
-                report_lines.append(f"  Genotyping rate: {removed['genotyping_rate']:.2%}")
-                report_lines.append(f"  Missing count: {removed['missing_count']} / {removed['total_individuals']}")
-                report_lines.append("")
-        
-        if self.filter_individuals and self.individual_missing_rates:
-            report_lines.append("Individual Missing Data Statistics")
-            report_lines.append("-" * 80)
-            all_rates = [stats['missing_rate'] for stats in self.individual_missing_rates.values()]
-            if all_rates:
-                report_lines.append(f"Mean missing rate: {np.mean(all_rates):.2%}")
-                report_lines.append(f"Median missing rate: {np.median(all_rates):.2%}")
-                report_lines.append(f"Min missing rate: {np.min(all_rates):.2%}")
-                report_lines.append(f"Max missing rate: {np.max(all_rates):.2%}")
-                report_lines.append(f"Std missing rate: {np.std(all_rates):.2%}")
-            report_lines.append("")
-        
-        if self.filter_snps and self.snp_missing_rates:
-            report_lines.append("SNP Missing Data Statistics")
-            report_lines.append("-" * 80)
-            all_rates = [stats['missing_rate'] for stats in self.snp_missing_rates.values()]
-            if all_rates:
-                report_lines.append(f"Mean missing rate: {np.mean(all_rates):.2%}")
-                report_lines.append(f"Median missing rate: {np.median(all_rates):.2%}")
-                report_lines.append(f"Min missing rate: {np.min(all_rates):.2%}")
-                report_lines.append(f"Max missing rate: {np.max(all_rates):.2%}")
-                report_lines.append(f"Std missing rate: {np.std(all_rates):.2%}")
-            report_lines.append("")
-        
-        report_content = "\n".join(report_lines)
-        
-        if output_file:
-            with open(output_file, 'w') as f:
-                f.write(report_content)
-            self.logger.info(f"Missing data QC report written to {output_file}")
-        
-        return report_content
-    
-    def process_file(self, input_file, output_file=None, phenotype_col=None, report_file=None):
+    def process_file(self, input_file, output_file=None, phenotype_col=None):
         self.logger.info(f"Reading input file: {input_file}")
         df = pd.read_csv(input_file)
         
@@ -299,18 +210,9 @@ class MissingDataQC:
         
         filtered_df = self.filter_dataset(df, phenotype_col)
         
-        if output_file is None:
-            input_path = Path(input_file)
-            output_file = input_path.parent / f"{input_path.stem}_missing_filtered{input_path.suffix}"
-        
-        filtered_df.to_csv(output_file, index=False)
-        self.logger.info(f"Filtered dataset saved to: {output_file}")
-        
-        if report_file is None:
-            input_path = Path(input_file)
-            report_file = input_path.parent / f"{input_path.stem}_missing_report.txt"
-        
-        self.generate_report(report_file)
+        if output_file:
+            filtered_df.to_csv(output_file, index=False)
+            self.logger.info(f"Filtered dataset saved to: {output_file}")
         
         return filtered_df
 

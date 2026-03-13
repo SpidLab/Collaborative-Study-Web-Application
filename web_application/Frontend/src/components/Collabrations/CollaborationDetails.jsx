@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Checkbox, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails
+  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Checkbox, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails,
 } from '@mui/material';
 import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, DownloadRounded, RadioButtonUncheckedRounded } from '@mui/icons-material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -11,6 +11,9 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import statSampleImage from "../../assets/Stat Sample.png";
 import InfoIcon from '@mui/icons-material/Info';
+
+// QC Methods that skip threshold and show SNP list instead
+const SNP_FILTER_QC_METHODS = ['Minor Allele Frequency', 'MAF', 'Hardy-Weinberg Equilibrium', 'HWE', 'Missing Data QC', 'Missing'];
 
 
 const CollaborationDetails = () => {
@@ -45,6 +48,7 @@ const CollaborationDetails = () => {
   const [gwasResults, setGwasResults] = useState([]);
   const [gwasResultsAvailable, setGwasResultsAvailable] = useState(false);
   const [isGwasInitiateLoading, setIsGwasInitiateLoading] = useState(false);
+  const [isCreatingGwasDataset, setIsCreatingGwasDataset] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const prevFilteredResultsRef = useRef();
   // const [matrix, setMatrix] = useState([]);
@@ -54,6 +58,18 @@ const CollaborationDetails = () => {
   const [originalPhenoType, setOriginalPhenoType] = useState('');
   const [originalSamples, setOriginalSamples] = useState('');
   const [selectedTab, setSelectedTab] = useState(0); // for GWAS results
+
+  const [isCreatingQcDataset, setIsCreatingQcDataset] = useState(false);
+  
+  // Check if current QC scheme uses SNP filtering (skip threshold)
+  const qcMethodNames = qcScheme.map(s => s.method || s);
+  const hasPairwiseQc = qcMethodNames.some(m => 
+    m.includes('Sample Relatedness') || m.includes('Population Stratification')
+  );
+  const hasFilterQc = qcMethodNames.some(m =>
+    SNP_FILTER_QC_METHODS.some(method => m.toLowerCase().includes(method.toLowerCase()))
+  );
+  const isFilterOnlyQc = hasFilterQc && !hasPairwiseQc;
 
   const determineUserRole = (data) => {
     if (data.is_sender) {
@@ -67,6 +83,18 @@ const CollaborationDetails = () => {
 
   useEffect(() => {
     const fetchCollaborationDetails = async () => {
+      // Reset all QC and GWAS related state when UUID changes (new collaboration loaded)
+      setQcResultsAvailable(false);
+      setQcResults(null);
+      setGwasResultsAvailable(false);
+      setGwasResults([]);
+      setThreshold(null);
+      setThresholdDefined(false);
+      setNewThreshold(null);
+      setdisplayQcResults(false);
+      setActiveStep(0);
+      setIsQcInitiateLoading(false);
+      
       try {
         const response = await axios.get(`${URL}/api/collaboration/${uuid}`, {
           headers: {
@@ -77,8 +105,12 @@ const CollaborationDetails = () => {
         setCollaboration(response.data);
         setCollabName(response.data.name);
         setExperimentList(response.data.experiments || []);
-        setQcScheme(response.data.collabQcScheme || []);
-        console.log("QC Scheme: ", response.data.collabQcScheme);
+        const rawQcScheme = response.data.collabQcScheme || [];
+        const normalizedQc = rawQcScheme.map(item =>
+          typeof item === 'string' ? { method: item, params: {} } : item
+        );
+        setQcScheme(normalizedQc);
+        console.log("QC Scheme: ", normalizedQc);
         setPhenotype(response.data.creator_datasets.phenotype || []);
         setCreator(response.data.creator_datasets || []);
         setCollaborationUuid(response.data.uuid);
@@ -126,6 +158,65 @@ const CollaborationDetails = () => {
   // Stat upload handlers
   const handleFileUpload = (e) => {
     setFile(e.target.files[0]);
+  };
+
+  const handleChainedQcCreate = async () => {
+    if (!uuid) {
+      setSnackbar({ open: true, message: 'Collaboration not found.', severity: 'error' });
+      return;
+    }
+    setIsCreatingQcDataset(true);
+    try {
+      const response = await axios.post(
+        `${URL}/api/qc/create_chained`,
+        { uuid },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      if (response.status === 200) {
+        setSnackbar({ open: true, message: 'QC dataset created successfully. Data filtered and ready.', severity: 'success' });
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    } catch (error) {
+      const msg = error.response?.data?.error || error.message || 'Failed to create QC dataset';
+      setSnackbar({ open: true, message: msg, severity: 'error' });
+    } finally {
+      setIsCreatingQcDataset(false);
+    }
+  };
+
+  const handleCreateGwasDataset = async () => {
+    // For filter-only QC, use surviving_samples from collaboration; for pairwise, use filteredResults
+    let sampleIds;
+    if (isFilterOnlyQc && collaboration?.surviving_samples?.[current_user_id]) {
+      sampleIds = collaboration.surviving_samples[current_user_id];
+    } else {
+      sampleIds = filteredResults?.userSamplesList?.[current_user_id];
+    }
+    if (!sampleIds || !Array.isArray(sampleIds) || sampleIds.length === 0) {
+      setSnackbar({ open: true, message: 'No QC-filtered samples available.', severity: 'error' });
+      return;
+    }
+    if (!uuid) {
+      setSnackbar({ open: true, message: 'Collaboration not found.', severity: 'error' });
+      return;
+    }
+    setIsCreatingGwasDataset(true);
+    try {
+      const response = await axios.post(
+        `${URL}/api/create_gwas_dataset`,
+        { uuid, sample_ids: sampleIds },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      if (response.status === 200) {
+        setSnackbar({ open: true, message: 'GWAS dataset created successfully.', severity: 'success' });
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    } catch (error) {
+      const msg = error.response?.data?.error || error.message || 'Failed to create GWAS dataset';
+      setSnackbar({ open: true, message: msg, severity: 'error' });
+    } finally {
+      setIsCreatingGwasDataset(false);
+    }
   };
 
   const handleSubmitStat = async () => {
@@ -218,6 +309,8 @@ const CollaborationDetails = () => {
 
     return null;
   };
+
+  
 
   //Updates DB with the user's dataset file
   const handleQcUpload = async () => {
@@ -405,7 +498,7 @@ const CollaborationDetails = () => {
     try {
       const response = await axios.post(`${URL}/api/datasets/${uuid}/qc-results`, {
         threshold: newThreshold,
-        qc_scheme: qcScheme[0] // Send the first QC scheme as a string
+        qc_scheme: qcMethodNames.find(m => m.includes('Sample Relatedness') || m.includes('Population Stratification')) || qcMethodNames[0]
       },
         {
           headers: {
@@ -447,9 +540,18 @@ const CollaborationDetails = () => {
       setQcResultsAvailable(false);
       return false;
     }
+
+    // Find the pairwise method in the scheme (Sample Relatedness or Population Stratification)
+    const methods = scheme.map(s => s.method || s);
+    const pairwiseMethod = methods.find(m => m.includes('Sample Relatedness') || m.includes('Population Stratification'));
+    if (!pairwiseMethod) {
+      console.log("Filter-only QC - no pairwise results to check");
+      setQcResultsAvailable(false);
+      return false;
+    }
     
     try {
-      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results?qc_scheme=${scheme[0]}`, {
+      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results?qc_scheme=${pairwiseMethod}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
@@ -493,12 +595,18 @@ const CollaborationDetails = () => {
         },
       });
       console.log('GWAS Results:', response.data.chi_square_results);
-      if (response.status === 200 && response.data.chi_square_results) {
-        setGwasResults(response.data.chi_square_results);
+      const results = response.data?.chi_square_results ?? {};
+      const hasResults = response.status === 200 &&
+        response.data?.status === 'complete' &&
+        typeof results === 'object' &&
+        Object.keys(results).length > 0;
+      if (hasResults) {
+        setGwasResults(results);
         setGwasResultsAvailable(true);
         return true; // Results are available
       } else {
         setGwasResultsAvailable(false);
+        setGwasResults({});
         return false; // Results are not available
       }
     } catch (error) {
@@ -576,26 +684,33 @@ const CollaborationDetails = () => {
   };
 
   const handleGwasResults = async () => {
-    if (gwasResults) {
+    const hasResults = gwasResultsAvailable && gwasResults && Object.keys(gwasResults).length > 0;
+    if (hasResults) {
       setSnackbar({ open: true, message: 'Results are already available.', severity: 'info' });
       return;
     }
 
     try {
-      //change the endpooint here
       const response = await axios.get(`${URL}/api/calculate_chi_square_results/${uuid}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
+      const results = response.data?.chi_square_results ?? {};
+      const hasNewResults = response.status === 200 &&
+        response.data?.status === 'complete' &&
+        typeof results === 'object' &&
+        Object.keys(results).length > 0;
 
-      if (response.status === 200) {
+      if (hasNewResults) {
         setSnackbar({ open: true, message: 'Results are available.', severity: 'success' });
-        setGwasResults(response.data.chi_square_results); // check with backend
-        // below condition ensures if the threshold already defined by user earlier, it shall be used when user interacts with the UI again.
+        setGwasResults(results);
+        setGwasResultsAvailable(true);
       } else {
         setSnackbar({ open: true, message: 'Results are not available.', severity: 'info' });
+        setGwasResultsAvailable(false);
+        setGwasResults({});
       }
     } catch (error) {
       console.error('Error fetching Gwas results:', error);
@@ -620,7 +735,7 @@ const CollaborationDetails = () => {
       // Proceed with QC initiation if no results are available
       const response = await axios.post(
         `${URL}/api/datasets/${uuid}`,
-        {qc_scheme: qcScheme}, // Passing the list in the request body
+        {qc_scheme: qcScheme.map(s => s.method || s)},
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem('token')}`,
@@ -658,7 +773,8 @@ const CollaborationDetails = () => {
 
     setIsQcResultsLoading(true);
     try {
-      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results?qc_scheme=${qcScheme[0]}`, {
+      const pairwiseMethodName = qcMethodNames.find(m => m.includes('Sample Relatedness') || m.includes('Population Stratification')) || qcMethodNames[0];
+      const response = await axios.get(`${URL}/api/datasets/${uuid}/qc-results?qc_scheme=${pairwiseMethodName}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
@@ -1100,19 +1216,22 @@ const CollaborationDetails = () => {
 
 
   const gwasResultPreview = useMemo(() => {
-    if (!gwasResults) return [];
+    if (!gwasResults || typeof gwasResults !== 'object') return [];
 
     return Object.entries(gwasResults).map(([userId, userSnps]) => {
+      if (!userSnps || typeof userSnps !== 'object') return { userId, sortedSnps: [] };
       const sortedSnps = Object.entries(userSnps)
         .map(([snpKey, values]) => {
-          // const snpNumber = snpKey.match(/(\d+)$/)?.[1] || 'N/A';
+          const chi = values?.chi_square;
+          const pValue = values?.p_value;
           return {
             snpKey,
-            chi: values.chi_square,
-            pValue: values.p_value
+            chi: chi != null ? chi : null,
+            pValue: pValue != null ? pValue : null
           };
         })
-        .sort((a, b) => a.pValue - b.pValue);
+        .filter(snp => snp.chi != null && snp.pValue != null)
+        .sort((a, b) => (a.pValue ?? Infinity) - (b.pValue ?? Infinity));
 
       return { userId, sortedSnps };
     });
@@ -1142,7 +1261,8 @@ const CollaborationDetails = () => {
     getAcceptedUsers().every(user => user.is_dataset_uploaded);
   
   // check if sender and collaboration can proceed and all accepted users have uploaded the dataset and qc results are not available
-  const isQcInitiateEnabled = role === 'sender' && allUsersResponded && allAcceptedUsersUploaded && !qcResultsAvailable;
+  // For filter-only QC, skip pairwise QC initiation entirely
+  const isQcInitiateEnabled = role === 'sender' && allUsersResponded && allAcceptedUsersUploaded && !qcResultsAvailable && !isFilterOnlyQc;
   
   // Debug logging
   console.log('Collaboration Status:', {
@@ -1159,8 +1279,15 @@ const CollaborationDetails = () => {
 
   const isQcResultsEnabled = !isQcInitiateEnabled && qcResultsAvailable;
 
+  // For filter-only QC: skip threshold step, enable GWAS when all users have surviving data
+  const allUsersHaveSurvivingData = isFilterOnlyQc && collaboration?.surviving_samples &&
+    Object.keys(collaboration.surviving_samples).length > 0;
+  const filterOnlyQcComplete = isFilterOnlyQc && allUsersHaveSurvivingData;
+
   const isGwasInitiateEnabled =
-    role === 'sender' && qcResultsAvailable && thresholdDefined && !gwasResultsAvailable;
+    role === 'sender' && !gwasResultsAvailable && (
+      (qcResultsAvailable && thresholdDefined) || filterOnlyQcComplete
+    );
 
   const isGwasResultsEnabled = !isGwasInitiateEnabled && gwasResultsAvailable;
 
@@ -1210,7 +1337,7 @@ const CollaborationDetails = () => {
     //   return;
     // }
 
-    if (thresholdDefined && !collaboration?.stat_uploaded) {
+    if ((thresholdDefined || filterOnlyQcComplete) && !collaboration?.stat_uploaded) {
       setProgressActiveStep(2);
       return;
     }
@@ -1431,7 +1558,7 @@ const CollaborationDetails = () => {
                       secondary={
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                           {qcScheme.map((scheme, index) => (
-                            <Chip key={index} label={scheme} color="primary" variant="contained" sx={{ backgroundColor: "#D1E3F6", color: '#0D3B69' }} />
+                            <Chip key={index} label={scheme.method || scheme} color="primary" variant="contained" sx={{ backgroundColor: "#D1E3F6", color: '#0D3B69' }} />
                           ))}
                         </Box>
                       }
@@ -1440,48 +1567,85 @@ const CollaborationDetails = () => {
                 </List>
               </Box>
 
-              {/*Quality Control Data Upload - After user accepts the request, upload the data for their phenotype color: #f9_fdff*/}
-              {(allUsersResponded && !allAcceptedUsersUploaded) && role === 'receiver' && (
+              {/*Quality Control Data Creation (AUTO) - chained QC runs automatically once collaboration starts */}
+              {hasFilterQc && allUsersResponded && (() => {
+                const userHasSurvivingData = collaboration?.surviving_samples?.[current_user_id]?.length > 0;
+                if (userHasSurvivingData) return false;
+                if (role === 'sender') return true;
+                const currentUserInvited = invitedUsers.find(u => u.user_id === current_user_id);
+                return currentUserInvited?.status === 'accepted';
+              })() && (
                 <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                   <List>
                     <ListItem sx={{ width: '100%', display: 'block' }}>
                       <ListItemText
-                        primary={<Typography variant="h6" fontWeight="bold">Upload Quality Control Data</Typography>}
+                        primary={<Typography variant="h6" fontWeight="bold">QC Dataset Creation</Typography>}
+                        secondary={
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            QC datasets are created automatically when the collaboration starts. Selected filter methods:
+                            {' '}
+                            {qcMethodNames.filter(m => !m.includes('Sample Relatedness') && !m.includes('Population Stratification')).join(' → ')}
+                          </Typography>
+                        }
                       />
-                      <Box>
-                        <Tooltip placement="bottom" arrow title={file ? "File already selected" : "Upload file must be in CSV or JSON format."}>
-                          <span>
-                            <Button
-                              variant="outlined"
-                              component="label"
-                              fullWidth
-                              sx={{ mt: 1, borderRadius: 10 }}
-                            >
-                              {file ? file.name : "Select QC Data"}
-                              <input type="file" hidden onChange={handleFileUpload} />
-                            </Button>
-                          </span>
-                        </Tooltip>
-
-
-                        {/* Submit Button */}
-                        {file && (
-                          <>
-                            <Button variant="contained" color="primary" fullWidth sx={{ mt: 2, borderRadius: 10 }} onClick={handleQcUpload}>
-                              Upload QC Data
-                            </Button>
-                            <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
-                              <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                              <Typography variant="body2">{file.name} will be linked to {getCurrentUserInfo()?.phenotype} for this collaboration.</Typography>
-                            </Box>
-                          </>
+                      <Box sx={{ mt: 2 }}>
+                        <Box sx={{ bgcolor: '#e8f1fa', p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', display: 'flex', gap: 2, alignItems: 'center' }}>
+                          <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                          <Typography variant="body2">
+                            Waiting for your QC dataset to be generated automatically. If it takes too long, you can manually retry.
+                          </Typography>
+                        </Box>
+                        <Button
+                          variant="outlined" color="primary" fullWidth
+                          sx={{ borderRadius: 10 }}
+                          disabled={isCreatingQcDataset || !hasFilterQc}
+                          onClick={handleChainedQcCreate}
+                          startIcon={isCreatingQcDataset ? <CircularProgress size={20} color="inherit" /> : null}
+                        >
+                          {isCreatingQcDataset ? 'Retrying QC Chain...' : 'Retry QC Dataset Creation'}
+                        </Button>
+                        {!hasFilterQc && (
+                          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                            No per-user QC methods selected for this collaboration.
+                          </Typography>
                         )}
-
                       </Box>
                     </ListItem>
                   </List>
                 </Box>
               )}
+              {/* Filter-only QC results: show surviving samples/SNPs directly */}
+              {isFilterOnlyQc && collaboration?.surviving_samples?.[current_user_id] && (
+                <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 'bold', flexGrow: 1 }}>QC Filter Results</Typography>
+                    <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 3, mb: 2 }}>
+                    <Box sx={{ p: 1.5, bgcolor: '#e8f1fa', borderRadius: 2, flex: 1, textAlign: 'center' }}>
+                      <Typography variant="h5" color="primary" fontWeight="bold">
+                        {collaboration.surviving_samples[current_user_id]?.length || 0}
+                      </Typography>
+                      <Typography variant="caption">Surviving Samples</Typography>
+                    </Box>
+                    <Box sx={{ p: 1.5, bgcolor: '#e8f1fa', borderRadius: 2, flex: 1, textAlign: 'center' }}>
+                      <Typography variant="h5" color="primary" fontWeight="bold">
+                        {collaboration.surviving_snps?.[current_user_id]?.length || 0}
+                      </Typography>
+                      <Typography variant="caption">Surviving SNPs</Typography>
+                    </Box>
+                  </Box>
+                  <Box sx={{ maxHeight: 300, overflowY: 'auto', border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ mb: 1 }}>Samples included in GWAS:</Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {(collaboration.surviving_samples[current_user_id] || []).map((sample, i) => (
+                        <Chip key={i} label={sample} size="small" variant="outlined" />
+                      ))}
+                    </Box>
+                  </Box>
+                </Box>
+              )}
+
               {(isQcInitiateEnabled || isQcResultsEnabled) && (
                 <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
                   <List sx={{ py: 0 }}>
@@ -1624,6 +1788,62 @@ const CollaborationDetails = () => {
                       <>
                         {role === 'sender' && (
                           <>
+                            {/* For SNP Filter QC methods (MAF, HWE, Missing) - skip threshold, show SNP info */}
+                            {isFilterOnlyQc ? (
+                              <ListItem disableGutters sx={{ mt: 2 }}>
+                                <ListItemText
+                                  primary={<strong>SNP Quality Control Results</strong>}
+                                  secondary={
+                                    <Box sx={{ mt: 1 }}>
+                                      <Box sx={{ p: 2, bgcolor: '#e8f1fa', borderRadius: 2, mb: 2 }}>
+                                        <Typography variant="body1" fontWeight={500} gutterBottom>
+                                          QC Method: {qcScheme.join(', ')}
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                          SNP filtering has been applied automatically. Low-quality SNPs have been removed based on the selected QC criteria.
+                                        </Typography>
+                                      </Box>
+                                      
+                                      {qcResults && (
+                                        <Box sx={{ mb: 2 }}>
+                                          <Typography variant="body2" gutterBottom>
+                                            <strong>SNPs Retained:</strong> The filtered dataset is ready for GWAS analysis.
+                                          </Typography>
+                                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1, maxHeight: 200, overflow: 'auto', p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                                            {Array.isArray(qcResults) && qcResults.slice(0, 50).map((result, idx) => (
+                                              <Chip 
+                                                key={idx} 
+                                                label={result.snp_id || result.sample1 || `SNP ${idx + 1}`} 
+                                                size="small" 
+                                                variant="outlined"
+                                                color="primary"
+                                              />
+                                            ))}
+                                            {Array.isArray(qcResults) && qcResults.length > 50 && (
+                                              <Chip label={`+${qcResults.length - 50} more`} size="small" color="secondary" />
+                                            )}
+                                          </Box>
+                                        </Box>
+                                      )}
+                                      
+                                      <Button 
+                                        variant="contained" 
+                                        color="primary" 
+                                        onClick={() => {
+                                          setThresholdDefined(true);
+                                          setThreshold(1); // Set to 1 to indicate no threshold filtering needed
+                                        }} 
+                                        sx={{ borderRadius: 10 }}
+                                        disabled={thresholdDefined}
+                                      >
+                                        {thresholdDefined ? 'QC Applied' : 'Confirm QC Results'}
+                                      </Button>
+                                    </Box>
+                                  }
+                                />
+                              </ListItem>
+                            ) : (
+                            /* For Sample Relatedness & Population Stratification - show threshold slider */
                             <ListItem disableGutters sx={{ mt: 2 }}>
                               <ListItemText
                                 primary={<strong>Select Threshold Value</strong>}
@@ -1761,6 +1981,7 @@ const CollaborationDetails = () => {
                                 }
                               />
                             </ListItem>
+                            )}
                             <Divider sx={{ borderColor: 'primary.main' }} />
                           </>
                         )}
@@ -2008,7 +2229,7 @@ const CollaborationDetails = () => {
                     )}
                     <>
                       <ListItem disableGutters>
-                        {(thresholdDefined && !collaboration?.stat_uploaded) && (
+                        {((thresholdDefined || filterOnlyQcComplete) && !collaboration?.stat_uploaded) && (
                           <>
                             {collaboration?.missing_stat_user?.includes(current_user_id) ? (<ListItemText
                               primary={
@@ -2020,7 +2241,7 @@ const CollaborationDetails = () => {
                                   width: '100%',
                                   pr: 4 // Right padding for icon spacing
                                 }}>
-                                  <strong>Upload Stat</strong>
+                                  <strong>Stat Data</strong>
                                   <Accordion
                                     expanded={expanded}
                                     onChange={() => setExpanded(!expanded)}
@@ -2085,6 +2306,30 @@ const CollaborationDetails = () => {
                               }
                               secondary={
                                 <>
+                                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2, flexWrap: 'wrap' }}>
+                                    <Button
+                                      variant="contained"
+                                      color="primary"
+                                      disabled={isCreatingGwasDataset || !(
+                                        filteredResults?.userSamplesList?.[current_user_id]?.length ||
+                                        collaboration?.surviving_samples?.[current_user_id]?.length
+                                      )}
+                                      onClick={handleCreateGwasDataset}
+                                      sx={{ borderRadius: 2, textTransform: 'none' }}
+                                    >
+                                      {isCreatingGwasDataset ? 'Creating...' : 'Create GWAS Dataset from QC Sample List'}
+                                    </Button>
+                                    {(filteredResults?.userSamplesList?.[current_user_id]?.length > 0 ||
+                                      collaboration?.surviving_samples?.[current_user_id]?.length > 0) && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        {filteredResults?.userSamplesList?.[current_user_id]?.length ||
+                                         collaboration?.surviving_samples?.[current_user_id]?.length || 0} samples from QC
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                    Or upload stat file manually:
+                                  </Typography>
                                   <AccordionDetails sx={{
                                     p: expanded ? 2 : 0,
                                     bgcolor: '#e8f1fa',
@@ -2523,8 +2768,8 @@ const CollaborationDetails = () => {
                                           {userData.sortedSnps.map(snp => (
                                             <TableRow key={snp.snpKey}>
                                               <TableCell align="center">{snp.snpKey}</TableCell>
-                                              <TableCell align="center">{snp.chi.toFixed(3)}</TableCell>
-                                              <TableCell align="center">{snp.pValue.toFixed(3)}</TableCell>
+                                              <TableCell align="center">{snp.chi != null ? Number(snp.chi).toFixed(3) : 'N/A'}</TableCell>
+                                              <TableCell align="center">{snp.pValue != null ? Number(snp.pValue).toFixed(3) : 'N/A'}</TableCell>
                                             </TableRow>
                                           ))}
                                         </TableBody>
