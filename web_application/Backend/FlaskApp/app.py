@@ -42,9 +42,38 @@ except ImportError:
     ORCHESTRATOR_AVAILABLE = False
     print("⚠️  Orchestrator client not available - will use direct QC Controller")
 
+# Import FL pipeline (Federated Learning experiment type)
+try:
+    from fl import pipeline as fl_pipeline
+    from fl.fl_config import (
+        DEFAULT_BATCH_SIZE as FL_DEFAULT_BATCH_SIZE,
+        DEFAULT_EMD_THRESHOLD as FL_DEFAULT_EMD_THRESHOLD,
+        DEFAULT_EPSILON as FL_DEFAULT_EPSILON,
+        DEFAULT_FL_ROUNDS as FL_DEFAULT_ROUNDS,
+        DEFAULT_LEARNING_RATE as FL_DEFAULT_LR,
+        DEFAULT_LOCAL_EPOCHS as FL_DEFAULT_LOCAL_EPOCHS,
+        SUPER_POPULATIONS as FL_SUPER_POPULATIONS,
+    )
+    FL_AVAILABLE = True
+except ImportError as _fl_exc:
+    FL_AVAILABLE = False
+    print(f"⚠️  FL pipeline not available: {_fl_exc}")
+
 # Experiment type constants
 EXPERIMENT_GWAS = "GWAS"
-ALLOWED_EXPERIMENT_TYPES = [EXPERIMENT_GWAS]
+EXPERIMENT_FL = "Federated Learning"
+ALLOWED_EXPERIMENT_TYPES = [EXPERIMENT_GWAS, EXPERIMENT_FL]
+
+# FL's fixed QC scheme: PCA projection with local DP noise is the only
+# preprocessing step shared with the server (per Sub Aim 1.3).
+FL_QC_METHOD = "Public PCA + DP Projection"
+FL_QC_SCHEME_DEFAULT = [{
+    "method": FL_QC_METHOD,
+    "params": {
+        "epsilon": float(FL_DEFAULT_EPSILON) if FL_AVAILABLE else 3.0,
+        "clip_norm": 5.0,
+    },
+}]
 
 # from stats import calc_chi_pvalue
 
@@ -956,12 +985,19 @@ def accept_invitation():
         if result.modified_count == 0:
             return jsonify({'message': 'No matching user found in invited_users'}), 404
 
-        # If this was the last pending response, automatically trigger chained QC creation
-        # for initiator + accepted collaborators (fire-and-forget via orchestrator).
+        # If this was the last pending response, automatically kick off the
+        # relevant per-experiment workflow for initiator + accepted collaborators.
+        # GWAS → chained filter QC via orchestrator.
+        # Federated Learning → PCA projection + EMD pipeline in-process.
         try:
-            _maybe_trigger_auto_chained_qc(uuid)
+            collab_doc = db.collaborations.find_one({"uuid": uuid}, {"experiments": 1})
+            experiments_for_hook = (collab_doc or {}).get('experiments') or []
+            if EXPERIMENT_FL in experiments_for_hook:
+                _maybe_trigger_auto_fl(uuid)
+            else:
+                _maybe_trigger_auto_chained_qc(uuid)
         except Exception as e:
-            logging.warning(f"Auto chained QC trigger skipped/failed for {uuid}: {e}")
+            logging.warning(f"Auto experiment trigger skipped/failed for {uuid}: {e}")
 
         return jsonify({'message': 'Invitation status updated successfully to accepted'}), 200
     else:
@@ -1052,16 +1088,74 @@ def reject_invitation():
         if result.modified_count == 0:
             return jsonify({'message': 'No matching user found in invited_users'}), 404
 
-        # If this was the last pending response, automatically trigger chained QC creation
-        # for initiator + accepted collaborators (fire-and-forget via orchestrator).
+        # If this was the last pending response, automatically kick off the
+        # relevant per-experiment workflow for initiator + accepted collaborators.
+        # GWAS → chained filter QC via orchestrator.
+        # Federated Learning → PCA projection + EMD pipeline in-process.
         try:
-            _maybe_trigger_auto_chained_qc(uuid)
+            collab_doc = db.collaborations.find_one({"uuid": uuid}, {"experiments": 1})
+            experiments_for_hook = (collab_doc or {}).get('experiments') or []
+            if EXPERIMENT_FL in experiments_for_hook:
+                _maybe_trigger_auto_fl(uuid)
+            else:
+                _maybe_trigger_auto_chained_qc(uuid)
         except Exception as e:
-            logging.warning(f"Auto chained QC trigger skipped/failed for {uuid}: {e}")
+            logging.warning(f"Auto experiment trigger skipped/failed for {uuid}: {e}")
 
         return jsonify({'message': 'Invitation status updated successfully to accepted'}), 200
     else:
         return jsonify({'message': 'No matching collaboration found'}), 404
+
+
+def _maybe_trigger_auto_fl(collaboration_uuid: str):
+    """Kick off the FL pipeline (PCA projection → EMD) once all invitees have
+    responded to an FL-typed collaboration. Idempotent — `fl_state.stage`
+    advances past 'idle' exactly once.
+    """
+    if not collaboration_uuid or not FL_AVAILABLE:
+        return
+    collab = db['collaborations'].find_one({"uuid": str(collaboration_uuid)})
+    if not collab:
+        return
+    experiments = collab.get('experiments') or []
+    if EXPERIMENT_FL not in experiments:
+        return  # not an FL collaboration
+    invited = collab.get('invited_users', []) or []
+    if not invited:
+        return
+    if any((iu.get('status', 'pending') == 'pending') for iu in invited):
+        return  # still waiting on responses
+
+    fl_state = collab.get('fl_state') or {}
+    stage = fl_state.get('stage')
+    if stage and stage not in (fl_pipeline.STAGE_IDLE, fl_pipeline.STAGE_FAILED):
+        return  # already running or done
+
+    accepted = [iu for iu in invited if iu.get('status') == 'accepted']
+    if not accepted:
+        # Nothing to federate — mark complete-ish so UI can surface a clean message.
+        db['collaborations'].update_one(
+            {"uuid": str(collaboration_uuid)},
+            {"$set": {
+                "fl_state.stage": fl_pipeline.STAGE_FAILED,
+                "fl_state.error": "No accepted invitees — cannot run federated learning.",
+            }}
+        )
+        return
+
+    try:
+        fl_pipeline.bootstrap_fl_state(db['collaborations'], str(collaboration_uuid))
+        fl_pipeline.launch_projection_and_emd(db['collaborations'], str(collaboration_uuid))
+        logging.info(f"✅ FL pipeline launched for {collaboration_uuid}")
+    except Exception as exc:
+        logging.exception("Failed to launch FL pipeline for %s", collaboration_uuid)
+        db['collaborations'].update_one(
+            {"uuid": str(collaboration_uuid)},
+            {"$set": {
+                "fl_state.stage": fl_pipeline.STAGE_FAILED,
+                "fl_state.error": f"{type(exc).__name__}: {exc}",
+            }}
+        )
 
 
 def _maybe_trigger_auto_chained_qc(collaboration_uuid: str):
@@ -1257,7 +1351,7 @@ def get_experiment_list():
                     {"$set": {"quality_control_scheme": existing_schemes}}
                 )
             
-            # Surface GWAS; drop legacy types (Chi-Square etc.)
+            # Surface GWAS + Federated Learning; drop legacy types (Chi-Square etc.)
             raw_types = experiment.get('experiment_types', [])
             experiment_types = [t for t in raw_types if t in ALLOWED_EXPERIMENT_TYPES]
             for default_type in ALLOWED_EXPERIMENT_TYPES:
@@ -1570,6 +1664,24 @@ def post_start_collaboration():
                 collabQcScheme.append({"method": item, "params": {}})
             elif isinstance(item, dict) and "method" in item:
                 collabQcScheme.append(item)
+        # Federated Learning has a fixed preprocessing scheme (public-PCA + DP
+        # projection only). If FL was selected, override whatever the UI sent so
+        # the rest of the pipeline can rely on a canonical shape.
+        if EXPERIMENT_FL in experiments:
+            epsilon = FL_DEFAULT_EPSILON if FL_AVAILABLE else 3.0
+            # Allow the UI to pass through a user-chosen epsilon.
+            for item in raw_qc_scheme:
+                if isinstance(item, dict) and item.get('method') == FL_QC_METHOD:
+                    params = item.get('params') or {}
+                    if 'epsilon' in params:
+                        try:
+                            epsilon = float(params['epsilon'])
+                        except (TypeError, ValueError):
+                            pass
+            collabQcScheme = [{
+                "method": FL_QC_METHOD,
+                "params": {"epsilon": float(epsilon), "clip_norm": 5.0},
+            }]
         invited_users = data.get('invitedUsers', [])
         creator_dataset_id = data.get('creatorDatasetId')
         logging.info(invited_users)
@@ -1632,6 +1744,15 @@ def post_start_collaboration():
 
         result = db.collaborations.insert_one(collaboration)
         logging.info(f"Inserted collaboration with id: {result.inserted_id}")
+
+        # Bootstrap FL state so the pipeline has somewhere to write progress as
+        # invitees respond. The auto-trigger (see _maybe_trigger_auto_fl) will
+        # flip the stage from idle → projecting once the quorum is reached.
+        if EXPERIMENT_FL in experiments and FL_AVAILABLE:
+            try:
+                fl_pipeline.bootstrap_fl_state(db['collaborations'], collaboration['uuid'])
+            except Exception as fl_exc:
+                logging.warning(f"FL state bootstrap failed for {collaboration['uuid']}: {fl_exc}")
 
         return jsonify({
             'message': 'Collaboration created successfully',
@@ -3950,6 +4071,160 @@ def calculate_pairwise_distances_pca(df, creator_df=None):
                 'distance': float(norm_distances[i, j])
             })
     return results
+
+# ---------------------------------------------------------------------------
+# Federated Learning — HTTP surface
+# ---------------------------------------------------------------------------
+
+def _fl_unavailable_response():
+    return jsonify({
+        "error": "FL pipeline is not available on this server.",
+        "hint": "Install flwr, torch, scipy and ensure the fl/ module imports cleanly.",
+    }), 503
+
+
+def _fl_state_for_response(collab_doc):
+    """Trim the fl_state for API consumers (strip big matrices when not needed)."""
+    state = collab_doc.get('fl_state') or {}
+    return state
+
+
+@app.route('/api/fl/state/<collab_uuid>', methods=['GET'])
+def fl_get_state(collab_uuid):
+    if not FL_AVAILABLE:
+        return _fl_unavailable_response()
+    collab = db['collaborations'].find_one({"uuid": collab_uuid})
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    if EXPERIMENT_FL not in (collab.get('experiments') or []):
+        return jsonify({"error": "Not a Federated Learning collaboration"}), 400
+    return jsonify({
+        "uuid": collab_uuid,
+        "experiment": EXPERIMENT_FL,
+        "fl_state": _fl_state_for_response(collab),
+        "creator_id": str(collab.get('creator_id')),
+        "super_populations": FL_SUPER_POPULATIONS,
+    }), 200
+
+
+@app.route('/api/fl/kickoff/<collab_uuid>', methods=['POST'])
+def fl_kickoff(collab_uuid):
+    """Manual trigger for stage 1+2 (use when the auto-trigger missed / to retry)."""
+    if not FL_AVAILABLE:
+        return _fl_unavailable_response()
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    collab = db['collaborations'].find_one({"uuid": collab_uuid})
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    if str(collab.get('creator_id')) != str(current_user.id):
+        return jsonify({"error": "Only the initiator can kick off FL"}), 403
+    if EXPERIMENT_FL not in (collab.get('experiments') or []):
+        return jsonify({"error": "Not a Federated Learning collaboration"}), 400
+    fl_pipeline.bootstrap_fl_state(db['collaborations'], collab_uuid)
+    fl_pipeline.launch_projection_and_emd(db['collaborations'], collab_uuid)
+    return jsonify({"message": "FL projection + EMD pipeline launched"}), 202
+
+
+@app.route('/api/fl/apply_threshold', methods=['POST'])
+def fl_apply_threshold():
+    """Initiator applies an EMD threshold → backend recomputes surviving set."""
+    if not FL_AVAILABLE:
+        return _fl_unavailable_response()
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    data = request.get_json() or {}
+    collab_uuid = data.get('uuid')
+    threshold = data.get('threshold')
+    if not collab_uuid or threshold is None:
+        return jsonify({"error": "uuid and threshold are required"}), 400
+    try:
+        threshold = float(threshold)
+    except (TypeError, ValueError):
+        return jsonify({"error": "threshold must be numeric"}), 400
+
+    collab = db['collaborations'].find_one({"uuid": collab_uuid})
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    if str(collab.get('creator_id')) != str(current_user.id):
+        return jsonify({"error": "Only the initiator can apply the EMD threshold"}), 403
+    try:
+        rows = fl_pipeline.apply_threshold(db['collaborations'], collab_uuid, threshold)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify({
+        "uuid": collab_uuid,
+        "threshold": threshold,
+        "survivors": rows,
+    }), 200
+
+
+@app.route('/api/fl/start_training', methods=['POST'])
+def fl_start_training():
+    """Initiator confirms the surviving set → kick off FedAvg training."""
+    if not FL_AVAILABLE:
+        return _fl_unavailable_response()
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    data = request.get_json() or {}
+    collab_uuid = data.get('uuid')
+    if not collab_uuid:
+        return jsonify({"error": "uuid is required"}), 400
+
+    collab = db['collaborations'].find_one({"uuid": collab_uuid})
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    if str(collab.get('creator_id')) != str(current_user.id):
+        return jsonify({"error": "Only the initiator can start FL training"}), 403
+
+    fl_state = collab.get('fl_state') or {}
+    survivors = fl_state.get('survivors') or []
+    if len(survivors) < 2:
+        return jsonify({
+            "error": "Need ≥ 2 surviving collaborators to train.",
+            "hint": "Loosen the EMD threshold and re-apply.",
+        }), 409
+
+    # Optionally allow overriding hyper-parameters at start time.
+    patch = {}
+    for key in ("num_rounds", "local_epochs", "batch_size"):
+        val = data.get(key)
+        if val is not None:
+            try:
+                patch[f"fl_state.config.{key}"] = int(val)
+            except (TypeError, ValueError):
+                return jsonify({"error": f"{key} must be an integer"}), 400
+    lr = data.get('learning_rate')
+    if lr is not None:
+        try:
+            patch["fl_state.config.learning_rate"] = float(lr)
+        except (TypeError, ValueError):
+            return jsonify({"error": "learning_rate must be numeric"}), 400
+    if patch:
+        db['collaborations'].update_one({"uuid": collab_uuid}, {"$set": patch})
+
+    fl_pipeline.launch_training(db['collaborations'], collab_uuid)
+    return jsonify({"message": "FL training launched", "survivors": survivors}), 202
+
+
+@app.route('/api/fl/config', methods=['GET'])
+def fl_get_defaults():
+    """Expose FL defaults so the frontend can render sensible sliders."""
+    if not FL_AVAILABLE:
+        return _fl_unavailable_response()
+    return jsonify({
+        "epsilon": float(FL_DEFAULT_EPSILON),
+        "emd_threshold": float(FL_DEFAULT_EMD_THRESHOLD),
+        "num_rounds": int(FL_DEFAULT_ROUNDS),
+        "local_epochs": int(FL_DEFAULT_LOCAL_EPOCHS),
+        "batch_size": int(FL_DEFAULT_BATCH_SIZE),
+        "learning_rate": float(FL_DEFAULT_LR),
+        "super_populations": FL_SUPER_POPULATIONS,
+        "fl_qc_method": FL_QC_METHOD,
+    }), 200
 
 
 if __name__ == '__main__':

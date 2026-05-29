@@ -17,6 +17,14 @@ const QC_METHOD_DEFAULTS = {
   'Missing Data QC': { threshold: 0.10, min: 0.01, max: 1.0, step: 0.01, label: 'Missing Rate Threshold', description: 'Samples/SNPs above this missing rate are removed' },
 };
 
+const EXPERIMENT_FL = 'Federated Learning';
+const FL_QC_METHOD = 'Public PCA + DP Projection';
+const FL_EPSILON_DEFAULT = 3.0;
+const FL_EPSILON_MIN = 0.1;
+const FL_EPSILON_MAX = 10.0;
+
+
+
 //we need to make changes here
 const StartCollaboration = () => {
   const [collabName, setCollabName] = useState('');
@@ -37,6 +45,9 @@ const StartCollaboration = () => {
   const [qcScheme, setQcSchemes] = useState([]);
   const [selectedQcSchemes, setSelectedQcSchemes] = useState([]);
   const [qcMethodParams, setQcMethodParams] = useState({});
+  const [flEpsilon, setFlEpsilon] = useState(FL_EPSILON_DEFAULT);
+
+  const isFederatedLearning = experimentList.includes(EXPERIMENT_FL);
 
 
 
@@ -162,10 +173,15 @@ const StartCollaboration = () => {
 
 
     setIsLoading(true);
-    const collabQcSchemePayload = selectedQcSchemes.map(method => ({
-      method,
-      params: qcMethodParams[method] || {}
-    }));
+    // For Federated Learning, the backend ignores `collabQcScheme` and installs
+    // the fixed FL preprocessing (public PCA + DP), but we still ship the
+    // user-chosen epsilon so it shows up in the collaboration doc.
+    const collabQcSchemePayload = isFederatedLearning
+      ? [{ method: FL_QC_METHOD, params: { epsilon: Number(flEpsilon) } }]
+      : selectedQcSchemes.map(method => ({
+          method,
+          params: qcMethodParams[method] || {}
+        }));
     const collaborationData = {
       collabName,
       experiments: experimentList,
@@ -406,7 +422,41 @@ const StartCollaboration = () => {
                 onChange={(e) => setSamples(e.target.value)}
               /> */}
 
+              {/* Federated Learning has a fixed preprocessing pipeline: public PCA
+                  projection + Laplace LDP noise. The user tunes epsilon only. */}
+              {isFederatedLearning && (
+                <Box sx={{ p: 1.5, backgroundColor: '#F0F7FF', border: '1px solid', borderColor: '#90CAF9', borderRadius: 2, mb: 2 }}>
+                  <Typography variant="body2" sx={{ mb: 1, fontWeight: 600 }}>
+                    Federated Learning Preprocessing
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    FL uses a single shared preprocessing step: each site projects its genotype
+                    matrix through a public PCA model and adds Laplace noise calibrated to the
+                    local DP budget ε. The noisy projections are what the server sees for
+                    Earth Mover&apos;s Distance compatibility assessment — never raw genotypes.
+                  </Typography>
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 500 }}>
+                      DP budget ε: {flEpsilon} &nbsp;
+                      <Typography component="span" variant="caption" color="text.secondary">
+                        (lower = stronger privacy, noisier EMD)
+                      </Typography>
+                    </Typography>
+                    <Slider
+                      size="small"
+                      value={flEpsilon}
+                      onChange={(_, v) => setFlEpsilon(Array.isArray(v) ? v[0] : v)}
+                      min={FL_EPSILON_MIN}
+                      max={FL_EPSILON_MAX}
+                      step={0.1}
+                      valueLabelDisplay="auto"
+                    />
+                  </Box>
+                </Box>
+              )}
+
               {/* Place Holder Choose Quality Control Scheme  */}
+              {!isFederatedLearning && (
               <Box sx={{ p: 1.5, backgroundColor: '#FAFAFA', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
                 <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>Choose QC Scheme (select multiple to chain)</Typography>
                 <Box display="flex" flexWrap="wrap" gap={1.5} sx={{ mt: 1 }}>
@@ -469,6 +519,7 @@ const StartCollaboration = () => {
                   })}
                 </Box>
               </Box>
+              )}
               {/* **Dropdown for Selecting Datasets (includes QC datasets)** */}
               <FormControl fullWidth sx={{ mt: 2 }}>
                 <InputLabel id="dataset-select-label">Select Dataset</InputLabel>

@@ -11,6 +11,9 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import statSampleImage from "../../assets/Stat Sample.png";
 import InfoIcon from '@mui/icons-material/Info';
+import FLCollaborationView from './FLCollaborationView';
+
+const EXPERIMENT_FL = 'Federated Learning';
 
 // QC Methods that skip threshold and show SNP list instead
 const SNP_FILTER_QC_METHODS = ['Minor Allele Frequency', 'MAF', 'Hardy-Weinberg Equilibrium', 'HWE', 'Missing Data QC', 'Missing'];
@@ -1423,6 +1426,32 @@ const CollaborationDetails = () => {
     }
   }
 
+
+  const isFLCollaboration = (experimentList || []).some(exp => {
+    if (typeof exp === 'string') return exp === EXPERIMENT_FL;
+    if (exp && typeof exp === 'object') {
+      if (exp.name === EXPERIMENT_FL) return true;
+      if (Array.isArray(exp.experiment_types) && exp.experiment_types.includes(EXPERIMENT_FL)) return true;
+    }
+    return false;
+  });
+
+  if (isFLCollaboration && collaboration) {
+    return (
+      <FLCollaborationView
+        collaboration={{
+          ...collaboration,
+          uuid: collaborationUuid || uuid,
+          current_user_id: senderInfo?.is_sender ? senderInfo?.id : collaboration?.receiver_id,
+          creator_id: collaboration?.creator_id || senderInfo?.id,
+          is_sender: senderInfo?.is_sender,
+          collab_name: collabName,
+          invitedUsers,
+          all_participants: invitedUsers,
+        }}
+      />
+    );
+  }
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>

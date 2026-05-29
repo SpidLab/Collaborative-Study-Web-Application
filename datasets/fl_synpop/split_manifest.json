@@ -1,0 +1,107 @@
+{
+  "synpop_source": "/Users/sahithreddyj/Downloads/FL-pp/dataset/synpop_snps.csv",
+  "num_sites": 5,
+  "reference_fraction": 0.2,
+  "n_components": 20,
+  "seed": 42,
+  "reference_samples": 498,
+  "super_populations": [
+    "EUR",
+    "AFR",
+    "EAS",
+    "SAS",
+    "AMR"
+  ],
+  "public_pca_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/web_application/Backend/FlaskApp/fl/models/public_pca.pkl",
+  "public_scaler_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/web_application/Backend/FlaskApp/fl/models/public_scaler.pkl",
+  "public_feature_list_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/web_application/Backend/FlaskApp/fl/models/public_feature_list.json",
+  "explained_variance_ratio": [
+    0.07387296110391617,
+    0.04474839195609093,
+    0.01884443499147892,
+    0.016913671046495438,
+    0.016423512250185013,
+    0.013804486952722073,
+    0.01325079333037138,
+    0.011248165741562843,
+    0.010224604979157448,
+    0.009793811477720737,
+    0.009447114542126656,
+    0.00923839583992958,
+    0.008747240528464317,
+    0.008260462433099747,
+    0.00804070197045803,
+    0.007754783146083355,
+    0.007421206217259169,
+    0.0073104496113955975,
+    0.0071189990267157555,
+    0.006690260488539934
+  ],
+  "sites": [
+    {
+      "site": 1,
+      "num_samples": 401,
+      "super_pop_counts": {
+        "EUR": 261,
+        "SAS": 40,
+        "EAS": 40,
+        "AFR": 40,
+        "AMR": 20
+      },
+      "data_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_1_data.csv",
+      "labels_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_1_labels.csv"
+    },
+    {
+      "site": 2,
+      "num_samples": 401,
+      "super_pop_counts": {
+        "AFR": 281,
+        "SAS": 40,
+        "EAS": 40,
+        "EUR": 20,
+        "AMR": 20
+      },
+      "data_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_2_data.csv",
+      "labels_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_2_labels.csv"
+    },
+    {
+      "site": 3,
+      "num_samples": 401,
+      "super_pop_counts": {
+        "EAS": 261,
+        "EUR": 40,
+        "SAS": 40,
+        "AFR": 40,
+        "AMR": 20
+      },
+      "data_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_3_data.csv",
+      "labels_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_3_labels.csv"
+    },
+    {
+      "site": 4,
+      "num_samples": 400,
+      "super_pop_counts": {
+        "SAS": 180,
+        "AMR": 140,
+        "EAS": 40,
+        "EUR": 20,
+        "AFR": 20
+      },
+      "data_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_4_data.csv",
+      "labels_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_4_labels.csv"
+    },
+    {
+      "site": 5,
+      "num_samples": 323,
+      "super_pop_counts": {
+        "SAS": 80,
+        "AFR": 80,
+        "AMR": 78,
+        "EUR": 62,
+        "EAS": 23
+      },
+      "data_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_5_data.csv",
+      "labels_path": "/Users/sahithreddyj/Downloads/Collaborative-Study-Web-Application/datasets/fl_synpop/site_5_labels.csv"
+    }
+  ]
+}
