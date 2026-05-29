@@ -226,18 +226,24 @@ const CollaborationCard = ({
                     <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 500 }}>
                         Experiments 
                     </Typography>
-                    {(collaboration.experiments || []).flat().length === 0 ? (
-                        <Typography variant="body2" color="text.secondary">No experiments.</Typography>
-                    ) : (
-                        (collaboration.experiments || []).flat().map((exp, idx) => (
+                    {(() => {
+                        const raw = (collaboration.experiments || []).flat();
+                        const labels = [];
+                        raw.forEach((exp) => {
+                            if (typeof exp === 'string' && exp) labels.push(exp);
+                            else if (exp?.experiment_types?.length) labels.push(...exp.experiment_types);
+                            else if (exp?.name) labels.push(exp.name);
+                        });
+                        const displayLabels = labels.length > 0 ? labels : ['GWAS'];
+                        return displayLabels.map((label, idx) => (
                             <Chip
-                                key={exp || idx}
-                                label={typeof exp === 'string' ? exp : (exp.name || '')}
+                                key={`${label}-${idx}`}
+                                label={label}
                                 size="small"
                                 sx={{ mr: 1, mb: 1, fontSize: fonts.chipsText, bgcolor: appColors.chipBg, color: appColors.chipTx }}
                             />
-                        ))
-                    )}
+                        ));
+                    })()}
                    <Divider sx={{ flexGrow: 30, borderColor: appColors.borderV1, my: 0.5 }} />
                     <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 500 }}>
                         QC Schemes 
@@ -254,6 +260,20 @@ const CollaborationCard = ({
                             />
                         ))
                     )}
+                    {collaboration.my_dataset_info && (
+                        <>
+                            <Divider sx={{ flexGrow: 30, borderColor: appColors.borderV1, my: 0.5 }} />
+                            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 500 }}>
+                                Your Dataset
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                                Phenotype: {collaboration.my_dataset_info.phenotype || 'N/A'}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                                Samples: {collaboration.my_dataset_info.number_of_samples || '0'}
+                            </Typography>
+                        </>
+                    )}
                 </Popover>
         </Box>
     );
@@ -269,6 +289,10 @@ CollaborationCard.propTypes = {
         all_participants: PropTypes.array,
         experiments: PropTypes.array,
         collabQcScheme: PropTypes.array,
+        my_dataset_info: PropTypes.shape({
+            phenotype: PropTypes.string,
+            number_of_samples: PropTypes.string,
+        }),
     }).isRequired,
     currentUserId: PropTypes.string.isRequired,
     handleAction: PropTypes.func.isRequired,

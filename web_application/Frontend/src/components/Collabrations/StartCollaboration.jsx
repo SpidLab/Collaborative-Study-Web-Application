@@ -17,8 +17,6 @@ const QC_METHOD_DEFAULTS = {
   'Missing Data QC': { threshold: 0.10, min: 0.01, max: 1.0, step: 0.01, label: 'Missing Rate Threshold', description: 'Samples/SNPs above this missing rate are removed' },
 };
 
-
-
 //we need to make changes here
 const StartCollaboration = () => {
   const [collabName, setCollabName] = useState('');

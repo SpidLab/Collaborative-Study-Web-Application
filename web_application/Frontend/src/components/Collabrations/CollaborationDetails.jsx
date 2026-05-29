@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Checkbox, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails,
 } from '@mui/material';
-import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, DownloadRounded, RadioButtonUncheckedRounded } from '@mui/icons-material';
+import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, DownloadRounded, RadioButtonUncheckedRounded, Summarize as SummarizeIcon, Refresh as RefreshIcon, ShieldOutlined as ShieldIcon } from '@mui/icons-material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import axios from 'axios';
 import URL from '../../config';
@@ -60,6 +60,11 @@ const CollaborationDetails = () => {
   const [selectedTab, setSelectedTab] = useState(0); // for GWAS results
 
   const [isCreatingQcDataset, setIsCreatingQcDataset] = useState(false);
+
+  // One-page summary (privacy-preserving) of GWAS chi-square results
+  const [aiSummary, setAiSummary] = useState(null);
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
+  const [aiSummaryError, setAiSummaryError] = useState(null);
   
   // Check if current QC scheme uses SNP filtering (skip threshold)
   const qcMethodNames = qcScheme.map(s => s.method || s);
@@ -717,6 +722,57 @@ const CollaborationDetails = () => {
       setSnackbar({ open: true, message: 'Error fetching results.', severity: 'error' });
     }
   };
+
+  // Fetch any cached one-page summary for this collaboration (initiator only).
+  const fetchAiSummary = async () => {
+    if (role !== 'sender') return;
+    try {
+      const response = await axios.get(`${URL}/api/collaboration/${uuid}/gwas-summary`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      const summary = response?.data?.ai_summary ?? null;
+      setAiSummary(summary);
+      setAiSummaryError(null);
+    } catch (error) {
+      if (error?.response?.status === 403) {
+        return;
+      }
+      console.log('No cached summary yet:', error.message);
+      setAiSummary(null);
+    }
+  };
+
+  const handleGenerateAiSummary = async () => {
+    setAiSummaryLoading(true);
+    setAiSummaryError(null);
+    try {
+      const response = await axios.post(
+        `${URL}/api/collaboration/${uuid}/gwas-summary`,
+        {},
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      const summary = response?.data?.ai_summary ?? null;
+      setAiSummary(summary);
+      setSnackbar({ open: true, message: 'Result summary generated.', severity: 'success' });
+    } catch (error) {
+      const msg = error?.response?.data?.error || error.message || 'Failed to generate summary';
+      console.error('AI summary generation error:', msg);
+      setAiSummaryError(msg);
+      setSnackbar({ open: true, message: msg, severity: 'error' });
+    } finally {
+      setAiSummaryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (role === 'sender' && gwasResultsAvailable && uuid) {
+      fetchAiSummary();
+    } else {
+      setAiSummary(null);
+      setAiSummaryError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role, gwasResultsAvailable, uuid]);
 
   const handleQcInitiate = async () => {
     setIsQcInitiateLoading(true);
@@ -2786,6 +2842,16 @@ const CollaborationDetails = () => {
                         </Box>
                       </Box>
                     )}
+                    {role === 'sender' && gwasResultsAvailable && (
+                      <GwasSummaryCard
+                        summary={aiSummary}
+                        loading={aiSummaryLoading}
+                        error={aiSummaryError}
+                        onGenerate={handleGenerateAiSummary}
+                        invitedUsers={invitedUsers}
+                        senderInfo={senderInfo}
+                      />
+                    )}
                   </List>
                 </Box>
               )}
@@ -2947,6 +3013,288 @@ const CollaborationDetails = () => {
         </Alert>
       </Snackbar>
     </Container >
+  );
+};
+
+// Minimal markdown renderer for LLM section strings.
+// Supports: paragraphs, "- " / "* " bullet lists, **bold**, `code`, scientific p-values.
+const renderSimpleMarkdown = (text) => {
+  if (!text || typeof text !== 'string') return null;
+  const lines = text.split(/\r?\n/);
+  const blocks = [];
+  let bulletBuffer = [];
+  const flushBullets = () => {
+    if (bulletBuffer.length) {
+      blocks.push({ type: 'ul', items: bulletBuffer });
+      bulletBuffer = [];
+    }
+  };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flushBullets(); continue; }
+    const bulletMatch = line.match(/^[-*]\s+(.*)$/);
+    if (bulletMatch) {
+      bulletBuffer.push(bulletMatch[1]);
+    } else {
+      flushBullets();
+      blocks.push({ type: 'p', text: line });
+    }
+  }
+  flushBullets();
+
+  const formatInline = (s) => {
+    const parts = [];
+    const regex = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+    let lastIndex = 0;
+    let match;
+    let key = 0;
+    while ((match = regex.exec(s)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(s.slice(lastIndex, match.index));
+      }
+      if (match[1] !== undefined) {
+        parts.push(<strong key={`b${key++}`}>{match[1]}</strong>);
+      } else if (match[2] !== undefined) {
+        parts.push(<code key={`c${key++}`} style={{ background: '#f3f4f6', padding: '0 4px', borderRadius: 3, fontFamily: 'monospace' }}>{match[2]}</code>);
+      }
+      lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < s.length) parts.push(s.slice(lastIndex));
+    return parts;
+  };
+
+  return blocks.map((block, i) => {
+    if (block.type === 'ul') {
+      return (
+        <Box key={`b${i}`} component="ul" sx={{ pl: 3, mb: 1.5, mt: 0.5 }}>
+          {block.items.map((item, j) => (
+            <li key={j} style={{ marginBottom: 4 }}>
+              <Typography variant="body2" component="span" sx={{ lineHeight: 1.6 }}>
+                {formatInline(item)}
+              </Typography>
+            </li>
+          ))}
+        </Box>
+      );
+    }
+    return (
+      <Typography key={`b${i}`} variant="body2" sx={{ mb: 1.5, lineHeight: 1.6 }}>
+        {formatInline(block.text)}
+      </Typography>
+    );
+  });
+};
+
+const VERDICT_STYLE = {
+  continue: { label: 'Recommended: Continue', bg: '#e8f5e9', dot: '#2e7d32', border: '#a5d6a7' },
+  continue_with_caveats: { label: 'Continue with Caveats', bg: '#fff8e1', dot: '#ed6c02', border: '#ffcc80' },
+  reconsider: { label: 'Reconsider Collaboration', bg: '#fdecea', dot: '#c62828', border: '#ef9a9a' },
+};
+
+const GwasSummaryCard = ({
+  summary,
+  loading,
+  error,
+  onGenerate,
+  invitedUsers = [],
+  senderInfo = {},
+}) => {
+  const generatedAt = summary?.generated_at ? new Date(summary.generated_at) : null;
+  const content = summary?.content || null;
+  const recommendation = content?.recommendation || null;
+  const verdictKey = recommendation?.verdict || 'continue_with_caveats';
+  const verdict = VERDICT_STYLE[verdictKey] || VERDICT_STYLE.continue_with_caveats;
+  const labelMap = summary?.site_label_map || {};
+
+  // Reverse map: user_id -> site label, so we can offer a "Show real names" hint.
+  const siteEntries = Object.entries(labelMap).map(([label, userId]) => {
+    let realName = null;
+    if (senderInfo?.id && String(senderInfo.id) === String(userId)) {
+      realName = `${senderInfo.name || ''} (Initiator)`.trim();
+    } else {
+      const match = invitedUsers.find((u) => String(u.user_id) === String(userId));
+      if (match) realName = match.name;
+    }
+    return { label, realName };
+  });
+
+  return (
+    <Box
+      sx={{
+        mt: 2,
+        p: 0,
+        borderRadius: 3,
+        border: 1,
+        borderColor: '#85b1e6',
+        bgcolor: '#ffffff',
+        overflow: 'hidden',
+      }}
+    >
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          px: 2,
+          py: 1.5,
+          borderBottom: 1,
+          borderColor: '#e3eaf5',
+          bgcolor: '#f7fafd',
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <SummarizeIcon sx={{ mr: 1, color: '#1876D1' }} />
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>Result Summary</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {generatedAt && (
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              Generated {generatedAt.toLocaleString()}
+            </Typography>
+          )}
+          <Button
+            size="small"
+            variant={summary ? 'outlined' : 'contained'}
+            color="primary"
+            startIcon={loading ? <CircularProgress size={14} color="inherit" /> : (summary ? <RefreshIcon /> : <SummarizeIcon />)}
+            onClick={onGenerate}
+            disabled={loading}
+            sx={{ borderRadius: 10, textTransform: 'none' }}
+          >
+            {loading ? 'Generating…' : (summary ? 'Regenerate' : 'Generate Summary')}
+          </Button>
+        </Box>
+      </Box>
+
+      <Box sx={{ p: 2.5 }}>
+        {error && !loading && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        {!summary && !loading && !error && (
+          <Box sx={{ textAlign: 'center', py: 3 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
+              Generate a one-page summary of the joint and individual chi-square results,
+              including a recommendation on whether this collaboration is a good fit to continue.
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+              Uses aggregated statistics only. No raw genotypes or sample IDs are used.
+            </Typography>
+          </Box>
+        )}
+
+        {loading && (
+          <Box sx={{ textAlign: 'center', py: 3 }}>
+            <CircularProgress size={28} />
+            <Typography variant="body2" sx={{ mt: 1.5, color: 'text.secondary' }}>
+              Analyzing aggregated chi-square results…
+            </Typography>
+          </Box>
+        )}
+
+        {!loading && summary && content && (
+          <>
+            {recommendation && (
+              <Box
+                sx={{
+                  mb: 2.5,
+                  p: 2,
+                  borderRadius: 2,
+                  border: 1,
+                  borderColor: verdict.border,
+                  bgcolor: verdict.bg,
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: verdict.dot, mr: 1 }} />
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, color: verdict.dot, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    {verdict.label}
+                  </Typography>
+                </Box>
+                {recommendation.headline && (
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5 }}>
+                    {recommendation.headline}
+                  </Typography>
+                )}
+                {recommendation.rationale && (
+                  <Box sx={{ mb: 1 }}>{renderSimpleMarkdown(recommendation.rationale)}</Box>
+                )}
+                {recommendation.next_steps && (
+                  <>
+                    <Typography variant="body2" sx={{ fontWeight: 600, mt: 1.5, mb: 0.5 }}>
+                      Recommended next steps
+                    </Typography>
+                    {renderSimpleMarkdown(recommendation.next_steps)}
+                  </>
+                )}
+              </Box>
+            )}
+
+            {content.overview && (
+              <Box sx={{ mb: 2.5 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1876D1', textTransform: 'uppercase', letterSpacing: 0.5, mb: 1 }}>
+                  Overview
+                </Typography>
+                {renderSimpleMarkdown(content.overview)}
+              </Box>
+            )}
+
+            {content.top_snps && (
+              <Box sx={{ mb: 2.5 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1876D1', textTransform: 'uppercase', letterSpacing: 0.5, mb: 1 }}>
+                  Top SNPs driving the signal
+                </Typography>
+                {renderSimpleMarkdown(content.top_snps)}
+              </Box>
+            )}
+
+            {content.per_collaborator && (
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1876D1', textTransform: 'uppercase', letterSpacing: 0.5, mb: 1 }}>
+                  Per-collaborator contribution
+                </Typography>
+                {renderSimpleMarkdown(content.per_collaborator)}
+              </Box>
+            )}
+
+            {siteEntries.length > 0 && (
+              <Accordion sx={{ boxShadow: 'none', border: 1, borderColor: '#e3eaf5', borderRadius: 2, '&:before': { display: 'none' } }}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    Site label mapping ({siteEntries.length} sites)
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <List dense disablePadding>
+                    {siteEntries.map(({ label, realName }) => (
+                      <ListItem key={label} disableGutters sx={{ py: 0.25 }}>
+                        <ListItemText
+                          primary={
+                            <Typography variant="body2">
+                              <strong>{label}</strong> &nbsp;→&nbsp; {realName || 'Unknown participant'}
+                            </Typography>
+                          }
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </AccordionDetails>
+              </Accordion>
+            )}
+
+            <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary' }}>
+              <ShieldIcon fontSize="small" />
+              <Typography variant="caption">
+                Generated from aggregated chi-square statistics only. No raw genotypes or sample IDs were used.
+                {summary?.model && ` · Engine: ${summary.model}`}
+              </Typography>
+            </Box>
+          </>
+        )}
+      </Box>
+    </Box>
   );
 };
 

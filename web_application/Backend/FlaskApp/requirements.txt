@@ -26,6 +26,9 @@ MarkupSafe==2.1.1
 outcome==1.2.0
 packaging==21.3
 pymongo>=4.6.0
+# PyMongo TLS uses PyOpenSSL + service_identity for hostname verification; keep these aligned.
+pyopenssl>=23.2.0
+service-identity>=24.1.0
 pyparsing==3.0.9
 pyrsistent==0.18.1
 PySocks==1.7.1
@@ -52,3 +55,7 @@ PyJWT==2.8.0
 pandas==2.2.2
 numpy==1.26.4
 scipy==1.12.0
+
+# LLM client for GWAS one-page summary (privacy-preserving: only aggregated digest is sent).
+# Requires OPENAI_API_KEY in the backend env.
+openai>=1.40.0

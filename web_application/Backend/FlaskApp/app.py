@@ -42,6 +42,10 @@ except ImportError:
     ORCHESTRATOR_AVAILABLE = False
     print("⚠️  Orchestrator client not available - will use direct QC Controller")
 
+# Experiment type constants
+EXPERIMENT_GWAS = "GWAS"
+ALLOWED_EXPERIMENT_TYPES = [EXPERIMENT_GWAS]
+
 # from stats import calc_chi_pvalue
 
 app = Flask(__name__)
@@ -626,6 +630,7 @@ def get_user_invitations():
             'uuid': 1,
             'name': 1,
             'creator_id': 1,
+            'creator_dataset_id': 1,
             'invited_users': 1,
             'experiments': 1,
             'qc_scheme': 1
@@ -671,7 +676,19 @@ def get_user_invitations():
             sender_email = sender_user.get("email", "Unknown")
             sender_name = sender_user.get("name", "Unknown")
             is_initiator = (str(creator_id) == user_id)
-            experiments = collaboration.get('experiments', [])
+            raw_experiments = collaboration.get('experiments', [])
+            # Normalize experiments to flat list of type strings for Quick View display
+            experiments_display = []
+            for exp in (raw_experiments or []):
+                if isinstance(exp, str) and exp:
+                    experiments_display.append(exp)
+                elif isinstance(exp, dict):
+                    for t in exp.get('experiment_types', []):
+                        if isinstance(t, str) and t and t not in experiments_display:
+                            experiments_display.append(t)
+            if not experiments_display:
+                experiments_display = ['GWAS']
+            experiments = experiments_display
             qcSchemes = collaboration.get('qc_scheme', [])
 
             # Build all participants list once (avoid duplication)
@@ -692,6 +709,30 @@ def get_user_invitations():
                 if status != 'accepted': 
                     all_accepted = False
                 
+            # Build my_dataset_info: phenotype and number_of_samples for the current user's dataset
+            my_dataset_info = None
+            if is_initiator:
+                creator_dataset_id = collaboration.get('creator_dataset_id')
+                if creator_dataset_id:
+                    ds = db.datasets.find_one({"_id": ObjectId(str(creator_dataset_id))}, {"phenotype": 1, "number_of_samples": 1})
+                    if ds:
+                        my_dataset_info = {
+                            "phenotype": str(ds.get("phenotype", "N/A")),
+                            "number_of_samples": str(ds.get("number_of_samples", "0"))
+                        }
+            else:
+                for iu in collaboration.get('invited_users', []):
+                    if str(iu.get("user_id")) == user_id:
+                        user_dataset_id = iu.get("user_dataset_id")
+                        if user_dataset_id:
+                            ds = db.datasets.find_one({"_id": ObjectId(str(user_dataset_id))}, {"phenotype": 1, "number_of_samples": 1})
+                            if ds:
+                                my_dataset_info = {
+                                    "phenotype": str(ds.get("phenotype", "N/A")),
+                                    "number_of_samples": str(ds.get("number_of_samples", "0"))
+                                }
+                        break
+
             if is_initiator:
                 overall_status = "setup"
                 if collaboration.get('invited_users'):
@@ -711,6 +752,7 @@ def get_user_invitations():
                     "overall_status_for_initiator_tab": overall_status,
                     'experiments': experiments,
                     'collabQcScheme': qcSchemes,
+                    'my_dataset_info': my_dataset_info,
                 })
                 processed_collab_uuids.add(collaboration_uuid)
 
@@ -731,6 +773,7 @@ def get_user_invitations():
                             "receiver_name": invitee_user.get("name", "You"),
                             'experiments': experiments,
                             'collabQcScheme': qcSchemes,
+                            'my_dataset_info': my_dataset_info,
                         })
                         processed_collab_uuids.add(collaboration_uuid)
                         break
@@ -1214,14 +1257,20 @@ def get_experiment_list():
                     {"$set": {"quality_control_scheme": existing_schemes}}
                 )
             
+            # Surface GWAS; drop legacy types (Chi-Square etc.)
+            raw_types = experiment.get('experiment_types', [])
+            experiment_types = [t for t in raw_types if t in ALLOWED_EXPERIMENT_TYPES]
+            for default_type in ALLOWED_EXPERIMENT_TYPES:
+                if default_type not in experiment_types:
+                    experiment_types.append(default_type)
             return jsonify({
-                "experiment_types": experiment.get('experiment_types', []),
+                "experiment_types": experiment_types,
                 "quality_control_scheme": existing_schemes
             }), 200
         else:
             # Create default experiments entry if none exists
             default_data = {
-                "experiment_types": ["Chi-Square", "Odd Ratio"],
+                "experiment_types": list(ALLOWED_EXPERIMENT_TYPES),
                 "quality_control_scheme": default_qc_schemes
             }
             experiment_list_collection.insert_one(default_data)
@@ -1313,8 +1362,13 @@ def get_start_collaboration():
         user_id = str(current_user.id)  
         user_id_obj = ObjectId(current_user.id)  # Also get ObjectId format for type-safe querying
 
-        experiments = db.experiments.find()
-        experiments_list = [{'experiment_types': experiment['experiment_types']} for experiment in experiments]
+        experiments = list(db.experiments.find())
+        raw_types = experiments[0].get('experiment_types', []) if experiments else []
+        filtered_types = [t for t in raw_types if t in ALLOWED_EXPERIMENT_TYPES]
+        for default_type in ALLOWED_EXPERIMENT_TYPES:
+            if default_type not in filtered_types:
+                filtered_types.append(default_type)
+        experiments_list = [{'experiment_types': filtered_types}]
         
         # Get QC schemes with same logic as get_experiment_list to ensure all default schemes are present
         experiment = experiment_list_collection.find_one({})
@@ -1347,7 +1401,7 @@ def get_start_collaboration():
         else:
             # Create default experiments entry if none exists
             default_data = {
-                "experiment_types": ["Chi-Square", "Odd Ratio"],
+                "experiment_types": ["GWAS"],
                 "quality_control_scheme": default_qc_schemes
             }
             experiment_list_collection.insert_one(default_data)
@@ -1363,11 +1417,14 @@ def get_start_collaboration():
                     {'user_id': user_id_obj}
                 ],
                 'is_qc_data': {'$ne': True},
+                # Per-collaboration empty placeholders — not valid "own" raw data for new collabs
+                'collaboration_specific': {'$ne': True},
                 'user_id': {'$exists': True}  # Explicitly require user_id field to exist
             },
             {'phenotype': 1, 'number_of_samples': 1, '_id': 1, 'user_id': 1}
         )
         datasets = []
+        raw_entries = []
         for dataset in raw_datasets_cursor:
             # Double-check user_id matches (handle both string and ObjectId formats)
             dataset_user_id = dataset.get('user_id')
@@ -1389,10 +1446,24 @@ def get_start_collaboration():
             phenotype = str(phenotype) if not isinstance(phenotype, str) else phenotype
             number_of_samples = str(number_of_samples) if not isinstance(number_of_samples, str) else number_of_samples
 
-            datasets.append({
+            raw_entries.append({
                 'phenotype': phenotype,
                 'number_of_samples': number_of_samples,
                 'dataset_id': dataset_id,
+                '_id': dataset.get('_id'),
+            })
+        # Deduplicate: same phenotype + sample count from repeated metadata submits — keep newest _id
+        raw_entries.sort(key=lambda x: x['_id'], reverse=True)
+        seen_raw = set()
+        for e in raw_entries:
+            key = (e['phenotype'], e['number_of_samples'])
+            if key in seen_raw:
+                continue
+            seen_raw.add(key)
+            datasets.append({
+                'phenotype': e['phenotype'],
+                'number_of_samples': e['number_of_samples'],
+                'dataset_id': e['dataset_id'],
                 'is_qc_data': False
             })
         
@@ -1411,6 +1482,7 @@ def get_start_collaboration():
             {'phenotype': 1, 'number_of_samples': 1, '_id': 1, 'qc_method': 1, 'qc_output_name': 1, 'user_id': 1}
         )
         qc_datasets = []
+        qc_rows = []
         for dataset in qc_datasets_cursor:
             # Double-check user_id matches (handle both string and ObjectId formats)
             dataset_user_id = dataset.get('user_id')
@@ -1437,22 +1509,36 @@ def get_start_collaboration():
             qc_method = dataset.get('qc_method', 'unknown')
             output_name = dataset.get('qc_output_name', f"{phenotype}_{qc_method}")
 
-            qc_datasets.append({
+            qc_rows.append({
+                '_id': dataset.get('_id'),
                 'phenotype': phenotype,
                 'number_of_samples': number_of_samples,
                 'dataset_id': dataset_id,
                 'qc_method': qc_method,
                 'output_name': output_name,
+            })
+        # Deduplicate QC rows: same phenotype + method — keep newest
+        qc_rows.sort(key=lambda x: x['_id'], reverse=True)
+        seen_qc = set()
+        for row in qc_rows:
+            key = (row['phenotype'], row['qc_method'])
+            if key in seen_qc:
+                continue
+            seen_qc.add(key)
+            qc_datasets.append({
+                'phenotype': row['phenotype'],
+                'number_of_samples': row['number_of_samples'],
+                'dataset_id': row['dataset_id'],
+                'qc_method': row['qc_method'],
+                'output_name': row['output_name'],
                 'is_qc_data': True
             })
-            
-            # Also add QC datasets to main datasets list for backward compatibility
             datasets.append({
-                'phenotype': f"{phenotype} ({qc_method})",
-                'number_of_samples': number_of_samples,
-                'dataset_id': dataset_id,
+                'phenotype': f"{row['phenotype']} ({row['qc_method']})",
+                'number_of_samples': row['number_of_samples'],
+                'dataset_id': row['dataset_id'],
                 'is_qc_data': True,
-                'qc_method': qc_method
+                'qc_method': row['qc_method']
             })
         
         return jsonify({
@@ -1546,7 +1632,6 @@ def post_start_collaboration():
 
         result = db.collaborations.insert_one(collaboration)
         logging.info(f"Inserted collaboration with id: {result.inserted_id}")
-
 
         return jsonify({
             'message': 'Collaboration created successfully',
@@ -3516,7 +3601,7 @@ def get_filtered_qc_results(collab_uuid):
         if existing_threshold is not None:
             collaboration_collection.update_one(
                 {"uuid": collab_uuid},
-                {"$unset": {"stats": "", "chi_square_results": ""}}
+                {"$unset": {"stats": "", "chi_square_results": "", "ai_summary": ""}}
             )
 
         threshold_update_result = collaboration_collection.update_one(
@@ -3745,6 +3830,84 @@ def get_chi_square_results(collab_uuid):
         print(f"Unexpected error: {str(e)}")
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
+
+def _serialize_ai_summary(record):
+    """Convert datetime fields so the AI summary record is JSON-safe."""
+    if not record:
+        return None
+    out = dict(record)
+    gen_at = out.get("generated_at")
+    if isinstance(gen_at, datetime):
+        out["generated_at"] = gen_at.isoformat() + "Z"
+    return out
+
+
+@app.route('/api/collaboration/<uuid>/gwas-summary', methods=['POST'])
+def generate_gwas_summary(uuid):
+    """
+    Generate (or regenerate) a one-page privacy-preserving summary of the
+    collaboration's GWAS chi-square results. Only the initiator can call this.
+    Only aggregated statistics are sent to the LLM; no raw genotypes or sample IDs.
+    """
+    try:
+        from gwas_summary_llm import build_digest, generate_summary
+    except ImportError as e:
+        logging.error(f"gwas_summary_llm import failed: {e}")
+        return jsonify({"error": "AI summary module unavailable on the server"}), 500
+
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+
+    collaboration = db['collaborations'].find_one({"uuid": uuid})
+    if not collaboration:
+        return jsonify({"error": "Collaboration not found"}), 404
+    if str(collaboration.get("creator_id")) != str(current_user.id):
+        return jsonify({"error": "Only the collaboration initiator can generate the summary"}), 403
+    if not collaboration.get("chi_square_results"):
+        return jsonify({"error": "GWAS results are not available yet"}), 409
+
+    try:
+        digest = build_digest(collaboration)
+    except Exception as e:
+        logging.error(f"build_digest failed: {e}")
+        return jsonify({"error": f"Could not assemble GWAS digest: {str(e)}"}), 500
+
+    try:
+        summary = generate_summary(digest)
+    except Exception as e:
+        logging.error(f"generate_summary failed: {e}")
+        return jsonify({"error": f"AI summary generation failed: {str(e)}"}), 502
+
+    record = {
+        "generated_at": datetime.utcnow(),
+        "model": summary["model"],
+        "schema_version": summary["schema_version"],
+        "content": summary["content"],
+        "site_label_map": summary["site_label_map"],
+        "digest_meta": summary["digest_meta"],
+    }
+    db['collaborations'].update_one({"uuid": uuid}, {"$set": {"ai_summary": record}})
+    return jsonify({"ai_summary": _serialize_ai_summary(record)}), 200
+
+
+@app.route('/api/collaboration/<uuid>/gwas-summary', methods=['GET'])
+def get_gwas_summary(uuid):
+    """Return the cached one-page summary for this collaboration (initiator only)."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+
+    collaboration = db['collaborations'].find_one({"uuid": uuid})
+    if not collaboration:
+        return jsonify({"error": "Collaboration not found"}), 404
+    if str(collaboration.get("creator_id")) != str(current_user.id):
+        return jsonify({"error": "Only the collaboration initiator can view the summary"}), 403
+
+    summary = collaboration.get("ai_summary")
+    return jsonify({"ai_summary": _serialize_ai_summary(summary)}), 200
+
+
 def calculate_pairwise_distances_pca(df, creator_df=None):
     """
     Calculate pairwise distances for population stratification using PCA data.
@@ -3787,6 +3950,7 @@ def calculate_pairwise_distances_pca(df, creator_df=None):
                 'distance': float(norm_distances[i, j])
             })
     return results
+
 
 if __name__ == '__main__':
     app.run(debug=True)
