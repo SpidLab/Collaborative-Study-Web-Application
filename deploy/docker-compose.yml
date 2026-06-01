@@ -1,0 +1,34 @@
+# Runs on the single EC2 host. The API image is pulled from ECR; Caddy serves the
+# React build from ./site and reverse-proxies /api to the Flask container with
+# automatic Let's Encrypt HTTPS.
+services:
+  api:
+    image: ${API_IMAGE}
+    restart: always
+    environment:
+      - MONGO_URI=${MONGO_URI}
+      - SECRET_KEY=${SECRET_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PORT=5000
+    expose:
+      - "5000"
+
+  caddy:
+    image: caddy:2
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./site:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}

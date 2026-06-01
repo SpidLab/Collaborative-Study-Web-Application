@@ -177,9 +177,9 @@ const CollaborationDetails = () => {
         { uuid },
         { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
       );
-      if (response.status === 200) {
-        setSnackbar({ open: true, message: 'QC dataset created successfully. Data filtered and ready.', severity: 'success' });
-        setTimeout(() => window.location.reload(), 1500);
+      if (response.status >= 200 && response.status < 300) {
+        setSnackbar({ open: true, message: 'QC job queued. Your local agent will run it shortly — refresh in a few seconds.', severity: 'success' });
+        setTimeout(() => window.location.reload(), 4000);
       }
     } catch (error) {
       const msg = error.response?.data?.error || error.message || 'Failed to create QC dataset';
@@ -212,9 +212,9 @@ const CollaborationDetails = () => {
         { uuid, sample_ids: sampleIds },
         { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
       );
-      if (response.status === 200) {
-        setSnackbar({ open: true, message: 'GWAS dataset created successfully.', severity: 'success' });
-        setTimeout(() => window.location.reload(), 1000);
+      if (response.status >= 200 && response.status < 300) {
+        setSnackbar({ open: true, message: 'GWAS computation queued. Your local agent will compute the per-SNP counts shortly — refresh in a few seconds.', severity: 'success' });
+        setTimeout(() => window.location.reload(), 4000);
       }
     } catch (error) {
       const msg = error.response?.data?.error || error.message || 'Failed to create GWAS dataset';
@@ -1383,8 +1383,15 @@ const CollaborationDetails = () => {
       setProgressActiveStep(0);
       return;
     }
-    // if QC Results not available, it stays here
-    if (allAcceptedUsersUploaded && !thresholdDefined) {
+    // Filter-only QC (MAF/HWE/Missing) has NO pairwise QC-calculation step on the
+    // collaborative dataset — skip straight to Stat Data once everyone's QC is in.
+    if (filterOnlyQcComplete && !collaboration?.stat_uploaded) {
+      setProgressActiveStep(2);
+      return;
+    }
+    // Pairwise QC (Sample Relatedness / Population Stratification): wait here until
+    // results + threshold are set.
+    if (allAcceptedUsersUploaded && !thresholdDefined && !isFilterOnlyQc) {
       setProgressActiveStep(1);
       return;
     }
@@ -2283,6 +2290,16 @@ const CollaborationDetails = () => {
                         )}
                       </>
                     )}
+                  </List>
+                </Box>
+              )}
+
+              {/* Stat Data / GWAS dataset creation. Rendered for BOTH the filter-only
+                  path (no pairwise QC step) and the pairwise+threshold path, so the
+                  GWAS buttons appear regardless of QC type. */}
+              {((thresholdDefined || filterOnlyQcComplete) && !collaboration?.stat_uploaded) && (
+                <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                  <List sx={{ py: 0 }}>
                     <>
                       <ListItem disableGutters>
                         {((thresholdDefined || filterOnlyQcComplete) && !collaboration?.stat_uploaded) && (

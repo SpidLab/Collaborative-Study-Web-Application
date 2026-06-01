@@ -1,0 +1,14 @@
+# Central collaboration server (Flask API) image.
+# Build context = web_application/Backend/FlaskApp (see deploy/build_push.sh).
+FROM python:3.10-slim
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+COPY . .
+
+EXPOSE 5000
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "-w", "2", "-t", "180", "app:app"]

@@ -8,6 +8,15 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Python virtualenvs (never commit — recreate from requirements.txt)
+.venv/
+venv/
+**/.venv/
+*.egg-info/
+
+# Site Agent local token store
+.agentconfig*
+
 # Environment backups (keep .env.example tracked)
 .env.bak
 .env.backup

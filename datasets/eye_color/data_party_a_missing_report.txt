@@ -1,0 +1,35 @@
+================================================================================
+Missing Data Quality Control Report
+================================================================================
+Generated: 2025-11-23 15:18:12
+Missing threshold: 10.0% (genotyping rate ≥ 90.0%)
+Filter individuals: True
+Filter SNPs: True
+
+Summary Statistics
+--------------------------------------------------------------------------------
+Original individuals: 471
+Filtered individuals: 471
+Removed individuals: 0
+Individual removal rate: 0.00%
+
+Original SNPs: 3000
+Filtered SNPs: 3000
+Removed SNPs: 0
+SNP removal rate: 0.00%
+
+Individual Missing Data Statistics
+--------------------------------------------------------------------------------
+Mean missing rate: 0.00%
+Median missing rate: 0.00%
+Min missing rate: 0.00%
+Max missing rate: 0.00%
+Std missing rate: 0.00%
+
+SNP Missing Data Statistics
+--------------------------------------------------------------------------------
+Mean missing rate: 0.00%
+Median missing rate: 0.00%
+Min missing rate: 0.00%
+Max missing rate: 0.00%
+Std missing rate: 0.00%

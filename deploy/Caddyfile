@@ -1,0 +1,15 @@
+# Automatic HTTPS via Let's Encrypt for the constant domain. Serves the React
+# build and proxies the API. No ALB required.
+{$DOMAIN} {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy api:5000
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
