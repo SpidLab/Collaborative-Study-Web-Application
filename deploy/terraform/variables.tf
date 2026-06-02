@@ -1,6 +1,6 @@
 variable "region" {
   type    = string
-  default = "us-east-1"
+  default = "us-east-2"
 }
 
 variable "project" {
@@ -17,16 +17,6 @@ variable "instance_type" {
   type        = string
   default     = "t4g.small" # ARM, cost-effective; matches arm64 image build
   description = "EC2 instance type for the single-host central server."
-}
-
-variable "domain_name" {
-  type        = string
-  description = "Constant hostname for the collaboration server, e.g. collab.example.org"
-}
-
-variable "route53_zone_id" {
-  type        = string
-  description = "Existing Route 53 hosted zone ID that owns domain_name."
 }
 
 variable "ssh_cidr" {

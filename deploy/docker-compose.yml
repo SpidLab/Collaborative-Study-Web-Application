@@ -1,6 +1,7 @@
-# Runs on the single EC2 host. The API image is pulled from ECR; Caddy serves the
-# React build from ./site and reverse-proxies /api to the Flask container with
-# automatic Let's Encrypt HTTPS.
+# Runs on the single EC2 host. Both images are pulled from ECR:
+#   api  = Flask backend (gunicorn)
+#   web  = Caddy + baked-in React build; serves the site and proxies /api to api,
+#          with automatic Let's Encrypt HTTPS. No files to upload to the host.
 services:
   api:
     image: ${API_IMAGE}
@@ -13,8 +14,8 @@ services:
     expose:
       - "5000"
 
-  caddy:
-    image: caddy:2
+  web:
+    image: ${WEB_IMAGE}
     restart: always
     depends_on:
       - api
@@ -24,8 +25,6 @@ services:
     environment:
       - DOMAIN=${DOMAIN}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./site:/srv:ro
       - caddy_data:/data
       - caddy_config:/config
 

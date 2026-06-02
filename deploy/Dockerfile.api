@@ -11,4 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 COPY . .
 
 EXPOSE 5000
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "-w", "2", "-t", "180", "app:app"]
+# Threaded workers: the agent /jobs/next endpoint long-polls (holds a request open
+# for up to ~50s), so we need many concurrent slots or the website would block.
+# 2 workers x 8 threads = 16 concurrent requests. Timeout 180s > max long-poll.
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "-w", "2", "--threads", "8", "-t", "180", "app:app"]

@@ -11,7 +11,7 @@ curl -SL "https://github.com/docker/compose/releases/download/v2.29.7/docker-com
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
 APP_DIR=/opt/collabstudy
-mkdir -p "$APP_DIR/site"
+mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
 # Fetch secrets from SSM
@@ -23,24 +23,18 @@ OPENAI_API_KEY=$(aws ssm get-parameter --region "$REGION" --name "${openai_param
 
 cat > "$APP_DIR/.env" <<EOF
 API_IMAGE=${api_image}
+WEB_IMAGE=${web_image}
 DOMAIN=${domain}
 MONGO_URI=$MONGO_URI
 SECRET_KEY=$SECRET_KEY
 OPENAI_API_KEY=$OPENAI_API_KEY
 EOF
 
-cat > "$APP_DIR/Caddyfile" <<'EOF'
-${caddyfile}
-EOF
-
 cat > "$APP_DIR/docker-compose.yml" <<'EOF'
 ${compose}
 EOF
 
-# Placeholder page until the React build is uploaded to ./site
-[ -f "$APP_DIR/site/index.html" ] || echo "<h1>Collaborative Study — provisioning</h1>" > "$APP_DIR/site/index.html"
-
-# Log in to ECR and start
+# Log in to ECR and start (images are pulled from ECR; nothing else to upload)
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "${registry}"
 docker compose --env-file "$APP_DIR/.env" -f "$APP_DIR/docker-compose.yml" pull || true
 docker compose --env-file "$APP_DIR/.env" -f "$APP_DIR/docker-compose.yml" up -d

@@ -52,18 +52,27 @@ Log into the website, create an agent enrollment code, and either:
 
 ## 3. Run
 
+**Easiest (collaborators):** double-click **`Start Agent.command`** (Mac) or
+**`Start Agent.bat`** (Windows) and answer the 3 prompts — see
+[COLLABORATOR_GUIDE.md](./COLLABORATOR_GUIDE.md). The wizard (`collab-agent.sh` /
+`collab-agent.ps1`) checks Docker, writes `.env`, builds, and starts via
+`docker compose`.
+
+**Manual / advanced:**
 ```bash
 docker build -t collabstudy-agent web_application/SiteAgent
 
 docker run -d --name collab-agent \
   -e SERVER_URL=https://collab.example.org \
-  -e AGENT_TOKEN=<your-token> \
+  -e ENROLL_CODE=<one-time-code> \
   -v /path/to/data:/data:ro \
+  -v collab_agent_config:/config \
   collabstudy-agent
 ```
 
 The data volume is mounted **read-only** (`:ro`) — the agent can read your CSVs
-but can never modify or delete them. Check logs with `docker logs -f collab-agent`.
+but can never modify or delete them. The `/config` volume persists the token after
+first enrollment. Check logs with `docker logs -f collab-agent`.
 
 ## Configuration
 

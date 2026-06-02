@@ -15,17 +15,22 @@ data "aws_ami" "al2023_arm" {
 
 locals {
   api_image = "${aws_ecr_repository.api.repository_url}:latest"
+  web_image = "${aws_ecr_repository.web.repository_url}:latest"
+
+  # Constant public hostname derived from the (constant) Elastic IP via sslip.io —
+  # gives a stable HTTPS-capable name with no domain purchase / no Route 53.
+  server_host = "${aws_eip.server.public_ip}.sslip.io"
 
   user_data = templatefile("${path.module}/user_data.sh.tftpl", {
-    region          = var.region
-    registry        = split("/", aws_ecr_repository.api.repository_url)[0]
-    api_image       = local.api_image
-    domain          = var.domain_name
-    mongo_uri_param = aws_ssm_parameter.mongo_uri.name
+    region           = var.region
+    registry         = split("/", aws_ecr_repository.api.repository_url)[0]
+    api_image        = local.api_image
+    web_image        = local.web_image
+    domain           = local.server_host
+    mongo_uri_param  = aws_ssm_parameter.mongo_uri.name
     secret_key_param = aws_ssm_parameter.secret_key.name
-    openai_param    = aws_ssm_parameter.openai_api_key.name
-    caddyfile       = file("${path.module}/../Caddyfile")
-    compose         = file("${path.module}/../docker-compose.yml")
+    openai_param     = aws_ssm_parameter.openai_api_key.name
+    compose          = file("${path.module}/../docker-compose.yml")
   })
 }
 
@@ -49,8 +54,14 @@ resource "aws_instance" "server" {
   tags = merge(local.tags, { Name = local.name })
 }
 
+# Standalone EIP (allocated independently of the instance to avoid a dependency
+# cycle, since user_data references the EIP's address via sslip.io).
 resource "aws_eip" "server" {
-  domain   = "vpc"
-  instance = aws_instance.server.id
-  tags     = merge(local.tags, { Name = local.name })
+  domain = "vpc"
+  tags   = merge(local.tags, { Name = local.name })
+}
+
+resource "aws_eip_association" "server" {
+  instance_id   = aws_instance.server.id
+  allocation_id = aws_eip.server.id
 }

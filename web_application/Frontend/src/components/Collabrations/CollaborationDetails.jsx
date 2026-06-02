@@ -86,9 +86,11 @@ const CollaborationDetails = () => {
   const steps = ['QC Calculation', 'Stat Data Upload'];
 
 
-  useEffect(() => {
-    const fetchCollaborationDetails = async () => {
-      // Reset all QC and GWAS related state when UUID changes (new collaboration loaded)
+  // Fetch (and re-fetch) the collaboration. Pass silent=true for background
+  // refreshes so we don't reset/flash the UI — used by polling and after actions.
+  const fetchCollaborationDetails = async (silent = false) => {
+    if (!silent) {
+      // Fresh load (new collaboration): clear previous state.
       setQcResultsAvailable(false);
       setQcResults(null);
       setGwasResultsAvailable(false);
@@ -99,48 +101,62 @@ const CollaborationDetails = () => {
       setdisplayQcResults(false);
       setActiveStep(0);
       setIsQcInitiateLoading(false);
-      
-      try {
-        const response = await axios.get(`${URL}/api/collaboration/${uuid}`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
-          },
-        });
-        console.log("Data from Backend: ", response.data);
-        setCollaboration(response.data);
-        setCollabName(response.data.name);
-        setExperimentList(response.data.experiments || []);
-        const rawQcScheme = response.data.collabQcScheme || [];
-        const normalizedQc = rawQcScheme.map(item =>
-          typeof item === 'string' ? { method: item, params: {} } : item
-        );
-        setQcScheme(normalizedQc);
-        console.log("QC Scheme: ", normalizedQc);
-        setPhenotype(response.data.creator_datasets.phenotype || []);
-        setCreator(response.data.creator_datasets || []);
-        setCollaborationUuid(response.data.uuid);
-        setSenderInfo({ is_sender: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
-        setInvitedUsers(response.data.invited_users || []);
-        determineUserRole(response.data);
-        
-        // After fetching collaboration details, check QC status
-        if (response.data.collabQcScheme && response.data.collabQcScheme.length > 0) {
-          await checkQcStatus(response.data.collabQcScheme);
-        }
-        
-        // Also check GWAS status when component mounts
-        await checkGwasStatus();
-      } catch (error) {
-        console.error('Error fetching collaboration details:', error);
+    }
+
+    try {
+      const response = await axios.get(`${URL}/api/collaboration/${uuid}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      setCollaboration(response.data);
+      setCollabName(response.data.name);
+      setExperimentList(response.data.experiments || []);
+      const rawQcScheme = response.data.collabQcScheme || [];
+      const normalizedQc = rawQcScheme.map(item =>
+        typeof item === 'string' ? { method: item, params: {} } : item
+      );
+      setQcScheme(normalizedQc);
+      setPhenotype(response.data.creator_datasets.phenotype || []);
+      setCreator(response.data.creator_datasets || []);
+      setCollaborationUuid(response.data.uuid);
+      setSenderInfo({ is_sender: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
+      setInvitedUsers(response.data.invited_users || []);
+      determineUserRole(response.data);
+
+      // Refresh QC + GWAS status too, so the stage advances on its own.
+      if (response.data.collabQcScheme && response.data.collabQcScheme.length > 0) {
+        await checkQcStatus(response.data.collabQcScheme);
+      }
+      await checkGwasStatus();
+    } catch (error) {
+      console.error('Error fetching collaboration details:', error);
+      if (!silent) {
         setSnackbar({
           open: true,
           message: 'Failed to fetch collaboration details. Please try again.',
           severity: 'error',
         });
       }
-    };
+    }
+  };
+
+  useEffect(() => {
     fetchCollaborationDetails();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uuid]);
+
+  // Auto-refresh in the background so the collaboration stage updates on its own
+  // (invitations accepted, QC finished by agents, stat data uploaded, GWAS results)
+  // without anyone needing to reload the page. Stops once final results are in.
+  useEffect(() => {
+    if (gwasResultsAvailable) return; // everything's done — no need to keep polling
+    const intervalId = setInterval(() => {
+      fetchCollaborationDetails(true);
+    }, 6000);
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uuid, gwasResultsAvailable]);
 
 
   // setting the current user id
@@ -179,7 +195,7 @@ const CollaborationDetails = () => {
       );
       if (response.status >= 200 && response.status < 300) {
         setSnackbar({ open: true, message: 'QC job queued. Your local agent will run it shortly — refresh in a few seconds.', severity: 'success' });
-        setTimeout(() => window.location.reload(), 4000);
+        setTimeout(() => fetchCollaborationDetails(true), 4000);
       }
     } catch (error) {
       const msg = error.response?.data?.error || error.message || 'Failed to create QC dataset';
@@ -214,7 +230,7 @@ const CollaborationDetails = () => {
       );
       if (response.status >= 200 && response.status < 300) {
         setSnackbar({ open: true, message: 'GWAS computation queued. Your local agent will compute the per-SNP counts shortly — refresh in a few seconds.', severity: 'success' });
-        setTimeout(() => window.location.reload(), 4000);
+        setTimeout(() => fetchCollaborationDetails(true), 4000);
       }
     } catch (error) {
       const msg = error.response?.data?.error || error.message || 'Failed to create GWAS dataset';
@@ -244,7 +260,7 @@ const CollaborationDetails = () => {
       });
       if (response.status === 200) {
         setTimeout(() => {
-          window.location.reload();
+          fetchCollaborationDetails(true);
         }, 1000);
       }
 
@@ -349,7 +365,7 @@ const CollaborationDetails = () => {
       });
 
       setTimeout(() => {
-        window.location.reload(); // reloads the page after 2 seconds
+        fetchCollaborationDetails(true); // reloads the page after 2 seconds
       }, 1000);
 
       checkQcStatus();
@@ -437,7 +453,7 @@ const CollaborationDetails = () => {
         );
         setSnackbar({ open: true, message: 'Invitation accepted successfully!', severity: 'success' });
         setTimeout(() => {
-          window.location.reload();
+          fetchCollaborationDetails(true);
         }, 100);
 
       }
@@ -515,7 +531,7 @@ const CollaborationDetails = () => {
         setThresholdDefined(true);
         setThreshold(newThreshold);
         setTimeout(() => {
-          window.location.reload(); // reloads the page after 2 seconds
+          fetchCollaborationDetails(true); // reloads the page after 2 seconds
         }, 1000);
         setSnackbar({
           open: true,
@@ -807,16 +823,30 @@ const CollaborationDetails = () => {
         });
         // Auto refresh after 2 seconds
         setTimeout(() => {
-          window.location.reload();
+          fetchCollaborationDetails(true);
         }, 2000);
       }
     } catch (error) {
       console.error('Error initiating QC calculations:', error);
-      setSnackbar({
-        open: true,
-        message: 'Failed to initiate QC calculations. Please try again.',
-        severity: 'error',
-      });
+      const status = error?.response?.status;
+      const serverMsg = error?.response?.data?.error;
+      let message;
+      if (status === 409) {
+        // Pairwise QC can't run yet: the per-site outputs it needs (PCA coordinates
+        // for Population Stratification, or the transformed matrix for Sample
+        // Relatedness) haven't been uploaded.
+        message = serverMsg ||
+          'Pairwise QC results aren\'t available yet. For Population Stratification, each ' +
+          'site must upload PCA coordinates — which only works on datasets that share the ' +
+          'reference SNP panel (e.g. the eye_color panel), not small/unrelated SNP sets.';
+        setSnackbar({ open: true, message, severity: 'warning' });
+      } else {
+        setSnackbar({
+          open: true,
+          message: serverMsg || 'Failed to initiate QC calculations. Please try again.',
+          severity: 'error',
+        });
+      }
       setIsQcInitiateLoading(false);
     }
   };

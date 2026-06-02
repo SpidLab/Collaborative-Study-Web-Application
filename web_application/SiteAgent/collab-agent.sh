@@ -63,9 +63,11 @@ setup_wizard() {
 
   # 2) Data folder
   say ""
-  say "2) Where are your data files? They should be named like  eye_color.csv"
+  say "2) Pick your top data folder. Inside it you keep ONE sub-folder per dataset,"
+  say "   named like the phenotype you registered, each holding a 'rawdata.csv'."
+  say "   Example:  <this folder>/eye_color/rawdata.csv"
   local default_dir="$HOME/collab-data"
-  read -r -p "   Folder path [${default_dir}]: " HOST_DATA_DIR
+  read -r -p "   Top data folder [${default_dir}]: " HOST_DATA_DIR
   HOST_DATA_DIR="${HOST_DATA_DIR:-$default_dir}"
   HOST_DATA_DIR="${HOST_DATA_DIR/#\~/$HOME}"
   if [ ! -d "$HOST_DATA_DIR" ]; then
@@ -73,8 +75,12 @@ setup_wizard() {
     read -r -p "   Create it now? [Y/n]: " mk
     case "${mk:-Y}" in [Yy]*) mkdir -p "$HOST_DATA_DIR"; ok "Created $HOST_DATA_DIR";; *) err "Please create the folder and re-run."; exit 1;; esac
   fi
-  local n_csv; n_csv=$(find "$HOST_DATA_DIR" -maxdepth 1 -name '*.csv' 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$n_csv" = "0" ]; then warn "No .csv files in that folder yet — you can add them later."; else ok "Found $n_csv CSV file(s)."; fi
+  local n_ds; n_ds=$(find "$HOST_DATA_DIR" -maxdepth 2 -iname 'rawdata.csv' 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$n_ds" = "0" ]; then
+    warn "No dataset folders with a rawdata.csv found yet — you can add them later."
+  else
+    ok "Found $n_ds dataset folder(s) with rawdata.csv."
+  fi
 
   # 3) Enrollment code
   say ""

@@ -1,231 +1,374 @@
 # Collaborator Guide — Connecting Your Computer to the Study
 
-Welcome! This guide walks you through everything, step by step. **No coding or
-command-line experience is needed.** If you can install an app and copy-paste a
-code, you can do this.
+Welcome! This guide takes you from zero to done. **No coding and no typing of
+commands is required** — you'll install one free app, put your data in a folder,
+copy a code from the website, and **double-click one file**. That's it.
+
+Total time: about **10–15 minutes**, once.
 
 ---
 
-## What is this, in plain words?
+## What this is (in plain words)
 
-Your study uses a shared website to coordinate research. The heavy analysis on
-your dataset needs to run **on your own computer** so that your **raw data never
-leaves your machine**. To make that happen, you install one small background
-helper — the **Site Agent** — once. After that it quietly waits for tasks from
-the study, runs them on your computer, and sends back **only summary results**
-(never your raw rows).
+The study uses a shared website to coordinate research. The heavy analysis on your
+data must run **on your own computer**, so your **raw data never leaves your
+machine**. To do that, you run one small background helper — the **Site Agent**.
+It quietly waits for tasks from the study, runs them locally, and sends back **only
+summary results** (never your raw data).
 
-### The privacy promise
-- ✅ Your raw data files stay on your computer. They are opened **read-only** — the
-  helper cannot change or delete them.
-- ✅ Only safe summaries (filtered marker lists, counts, anonymized coordinates)
-  are sent to the study server.
-- ✅ The helper only makes outgoing connections. Nothing can connect *into* your
-  computer; you don't need to change any firewall settings.
+**The privacy promise**
+- ✅ Your raw data stays on your computer. The helper opens it **read-only** — it
+  can't change or delete your files.
+- ✅ Only safe summaries (filtered marker lists, counts, population coordinates) go
+  to the study server.
+- ✅ The helper only makes **outgoing** connections. Nothing connects *into* your
+  computer — no firewall changes needed.
 
-### What you'll do (10–15 minutes, once)
-1. Install **Docker Desktop** (a free app).
-2. Put your data file(s) in a folder.
-3. Get a one-time **code** from the website.
-4. Run the **setup helper** and answer 3 questions.
+**The whole journey at a glance**
+1. Install **Docker Desktop** (free app) — once.
+2. Put your data in a folder (a simple layout, shown below).
+3. On the **website**: log in → register your dataset's details (phenotype name +
+   number of samples) → copy your one-time **connection code**.
+4. On **your computer**: **double-click "Start Agent"** and answer 3 short questions.
+   It connects **once** and then stays ready in the background.
+5. **Join or start collaborations anytime** — the already-running helper picks up
+   your tasks automatically (even ones created while your computer was off).
 
-That's it. After that it runs by itself.
+You set up steps 1–4 **once**. After that you only ever do step 5, and the helper
+handles the rest by itself.
+
+> The single most important link to get right: the **phenotype name you type on the
+> website must exactly match the data sub-folder name on your computer**
+> (e.g. website phenotype `eye_color` ↔ folder `eye_color/rawdata.csv`). That's how
+> the helper knows which file a task is about.
 
 ---
 
-## Before you start — a checklist
+## Before you start — checklist
 
 - [ ] A Windows or Mac computer you can leave on sometimes.
-- [ ] Your data file(s), saved as **CSV**.
-- [ ] The **website address** of the study (your coordinator gives you this).
-- [ ] About 15 minutes.
+- [ ] Your genotype data saved as a **CSV** file.
+- [ ] The **study website address** (your coordinator gives you this).
+- [ ] The **SiteAgent folder** (your coordinator gives you this — it contains the
+      "Start Agent" file you'll double-click).
 
 ---
 
-## Step 1 — Install Docker Desktop (free)
+## Step 1 — Install Docker Desktop (free, one time)
 
-Docker Desktop is the engine that runs the helper. You install it once.
+Docker Desktop is the engine that runs the helper safely in the background.
 
 **Mac**
-1. Go to <https://www.docker.com/products/docker-desktop/> and download for Mac.
-   (If unsure whether your Mac is "Apple chip" or "Intel chip": click the Apple
-   logo  → *About This Mac*. "Apple M1/M2/M3" = Apple chip.)
+1. Go to <https://www.docker.com/products/docker-desktop/> → download for Mac.
+   (Not sure which chip? Apple menu  → *About This Mac*. "Apple M1/M2/M3" = Apple
+   chip; otherwise Intel.)
 2. Open the downloaded file and drag **Docker** into **Applications**.
-3. Open **Docker** from Applications. The first time, it may ask for your password.
-4. Wait until the little whale icon in the top menu bar stops animating and Docker
-   says **"running"**.
+3. Open **Docker** from Applications (it may ask for your password the first time).
+4. Wait until the whale icon in the top menu bar is steady and says **"running"**.
 
 **Windows**
-1. Go to <https://www.docker.com/products/docker-desktop/> and download for Windows.
-2. Run the installer and click **Next → Next → Finish** (accept the defaults).
-3. Restart your computer if it asks you to.
-4. Open **Docker Desktop** from the Start menu. Wait until it says **"running"**
-   (bottom-left corner turns green).
+1. Go to <https://www.docker.com/products/docker-desktop/> → download for Windows.
+2. Run the installer → **Next → Next → Finish** (accept defaults). Restart if asked.
+3. Open **Docker Desktop** from the Start menu. Wait until the bottom-left corner is
+   **green / "running"**.
 
-> You only ever need to do Step 1 once. Leave Docker Desktop set to start with your
-> computer (it does by default).
+> Do Step 1 only once. Leave Docker Desktop set to start with your computer (it does
+> by default), so the helper can run whenever your machine is on.
 
 ---
 
 ## Step 2 — Put your data in a folder
 
-1. Make a top folder somewhere easy, for example:
-   - Mac: `/Users/yourname/collab-data`
-   - Windows: `C:\Users\yourname\collab-data`
-2. **Inside it, create one folder per dataset, named exactly like the phenotype you
-   register on the website.** Put that dataset's raw file inside as `rawdata.csv`.
+Make one **top folder** (anywhere easy), and inside it create **one sub-folder per
+dataset**, named exactly like the **phenotype you register on the website**. Each
+sub-folder holds a file called **`rawdata.csv`**.
 
 ```
-collab-data/
-├── eye_color/                 ← folder name = the phenotype you register
+collab-data/                     ← your top folder (any name/location)
+├── eye_color/                   ← sub-folder name = the phenotype you register
 │   └── rawdata.csv
 └── blood_pressure/
     └── rawdata.csv
 ```
 
-**How to tell us who is a case vs a control** — pick whichever is easier; both work:
-
-- **Option A — a column in the file:** `rawdata.csv` has a column named
-  `phenotype` (or `status` / `group`) with **1 = case**, **0 = control**.
-- **Option B — two small text files** next to `rawdata.csv` in the same folder:
-  `case_ids.txt` and `control_ids.txt`, each listing one sample ID per line.
+**Telling the system who is a case vs a control** — pick whichever is easier:
+- **Option A:** include a column named `phenotype` in `rawdata.csv` (**1 = case,
+  0 = control**), or
+- **Option B:** add two text files next to `rawdata.csv` — `case_ids.txt` and
+  `control_ids.txt` — each listing one sample ID per line.
 
 ```
-blood_pressure/                 eye_color/
-└── rawdata.csv  (has a          ├── rawdata.csv  (no phenotype column)
-    phenotype column)            ├── case_ids.txt
+blood_pressure/                  eye_color/
+└── rawdata.csv (phenotype col)  ├── rawdata.csv (no phenotype column)
+                                 ├── case_ids.txt
                                  └── control_ids.txt
 ```
 
-In `rawdata.csv` the **first column** is the sample/individual ID and the other
-columns are the genetic markers (SNPs). Each dataset keeps its own case/control
-files, so different datasets can have completely different case/control lists. If
-you're unsure, your coordinator can confirm the format.
+### The data standard (please follow this exactly)
+
+So everyone's results line up. **If your file came from your lab's standard genotype
+export, this is usually already true** — when unsure, ask whoever prepared it.
+
+| Rule | What it means |
+|------|----------------|
+| **CSV file named `rawdata.csv`** | Plain comma-separated file. |
+| **First column = Sample ID** | One row per person; IDs **unique**; same IDs used in the case/control files if you use those. |
+| **Other columns = markers (SNPs)** | One column per marker. |
+| **Column names = marker IDs (e.g. `rs12345`)** | Use the **same naming the study agreed on**; the same marker has the same name at every site. |
+| **Values = 0, 1, or 2** | Copies of the marker's alternate allele. **Leave blank for missing** (don't use 0 for missing — 0 is a real value). |
+| **Same export style across the study** | So a `0/1/2` means the *same thing* everywhere (same genome build / pipeline, e.g. GRCh38). Your bioinformatician can confirm in one line. |
+| **Case/control** | A `phenotype` column (1/0) **or** `case_ids.txt` + `control_ids.txt`. Needed for GWAS. |
+
+Tiny example of `rawdata.csv`:
+
+```
+sample_id,phenotype,rs12345,rs67890,rs11223
+NA2000,1,0,1,2
+NA2001,0,1,1,0
+NA2002,1,,2,1        ← blank = missing genotype
+```
+
+### How your data is handled (so there are no surprises)
+
+You **don't** need the same markers as other sites — the system reconciles
+differences automatically:
+- **Markers not in the study's shared reference are skipped for the
+  population-similarity step only** (Population Stratification) — they're still used
+  in your QC checks and in GWAS, so nothing is wasted.
+- **Missing some reference markers is fine** — they're filled in neutrally. **Extra**
+  markers are fine too — just skipped for that one step.
+- **Sharing almost none of the reference markers** → the population step is skipped
+  for your dataset (expected, not an error); everything else still runs.
+- **Two sites with different markers still work** — each is lined up against the
+  shared reference independently, so results stay comparable.
+- **Your file is fingerprinted** when registered — if you edit it later, re-register
+  it on the website.
 
 ---
 
-## Step 3 — Get your one-time code from the website
+## Step 3 — On the website
 
-1. Log into the study website in your browser.
-2. Open your account menu and choose **"Connect my computer"** (your coordinator
-   can point you to it).
-3. Click to generate a **code** and copy it. (It's long and looks like random
-   letters — that's normal.)
+Everything in this step is done in your **web browser** on the study website. (The
+website is just for coordinating — your actual genetic data never goes here.)
 
-Keep that code handy for the next step. You'll paste it once.
+### 3a. Create an account / log in
+1. Open the study website address your coordinator gave you.
+2. **Register** (name, email, password) or **Log in** if you already have an account.
+
+### 3b. Register your dataset's details (metadata only)
+This tells the study *that* you have a dataset and *how big* it is — **not the data
+itself.** The data stays on your computer.
+
+1. Go to the **Upload / "Enter Metadata Details"** page.
+2. Fill in two fields:
+   - **Phenotype(s):** the dataset name. **Type it exactly the same as your local
+     sub-folder** (e.g. `eye_color`). This is the link between the website and your
+     computer.
+   - **# of Samples:** how many individuals are in that dataset (e.g. `20`).
+3. Click **Submit.** You'll see "Metadata uploaded successfully."
+
+> No file is uploaded here — only the name and the sample count. Repeat 3b for each
+> dataset you have (one per phenotype/folder).
+
+### 3c. Get your connection code
+This links *your computer* to *your account* — like a one-time login for the helper.
+**Do this before joining any collaboration**, so your helper is ready and waiting.
+
+1. Click your **account / Profile** (top of the page).
+2. In the **"Connect my computer"** box, click **"Generate connection code."**
+3. A long code appears — click **"Copy code."** (It looks random — that's normal.)
+   Keep it on your clipboard for the next step.
+
+> You only ever need a code **once.** The code itself expires in **24 hours**, but
+> after the helper uses it, it saves a long-lived login — so you **never need a new
+> code** for new collaborations or after restarting your computer. (You'd only need
+> a fresh one if you fully reset the helper.)
 
 ---
 
-## Step 4 — Run the setup helper (the easy part)
+## Step 4 — Start the agent (double-click, no typing)
 
-You were given the **SiteAgent folder** (the folder this guide is in). Open it.
+Open the **SiteAgent folder** your coordinator gave you.
 
-### On Mac
-1. Open the **Terminal** app (press ⌘+Space, type "Terminal", press Enter).
-2. Type `cd ` (with a space), then **drag the SiteAgent folder onto the Terminal
-   window** and press Enter. This moves you into the folder.
-3. Type this and press Enter:
-   ```
-   ./collab-agent.sh
-   ```
-4. Answer the three questions (server address, your data folder, your code).
-   The helper checks Docker, builds the agent, and starts it.
+**Mac** — double-click **`Start Agent.command`**.
+- First time only, macOS may warn it's from an unidentified developer. If so:
+  **right-click** the file → **Open** → **Open**. (You only do this once.)
 
-### On Windows
-1. Open the **SiteAgent** folder in File Explorer.
-2. Right-click **`collab-agent.ps1`** → **Run with PowerShell**.
-   - If it says scripts are disabled, open PowerShell from the Start menu, paste
-     `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, press Enter, type `Y`,
-     then try again.
-3. Answer the three questions (server address, your data folder, your code).
+**Windows** — double-click **`Start Agent.bat`**.
+- If Windows SmartScreen warns, click **More info → Run anyway** (one time).
 
-When you see **"Agent started"**, you're done. 🎉 It now runs in the background
-and starts automatically whenever you turn your computer on.
+A window opens and asks **three short questions**:
+1. **Study server address** — paste the website address from your coordinator.
+2. **Your top data folder** — the folder from Step 2 (e.g. `collab-data`).
+3. **Your connection code** — paste the code you copied in Step 3.
+
+The helper then checks Docker, sets everything up, and starts. When you see
+**"Agent started"**, you're done with setup. 🎉 You can close the window — it keeps
+running in the background and restarts automatically when you turn your computer on.
+
+Your helper is now **enrolled once and ready for everything** — you won't touch any
+of Steps 1–4 again.
+
+---
+
+## Step 5 — Join or start collaborations (anytime)
+
+With the helper already running and ready, this is all you do from now on. It can
+happen **before or after** the helper started — order doesn't matter, because tasks
+wait until your helper is online.
+
+- **If you were invited to a study:** on the website open **Invitations** (or the
+  Collaborations page), find the study, and click **Accept** (pick your matching
+  dataset/phenotype if asked).
+- **If *you* are starting a study (initiator):** open **Start Collaboration**, give
+  it a name, pick the **GWAS** experiment, choose the **QC scheme** (your coordinator
+  says which — e.g. MAF / HWE / Missing; add Population Stratification only if your
+  data matches the study's reference panel), select **your dataset**, and **invite**
+  collaborators by email.
+
+Once everyone invited has accepted, the study automatically queues the analysis
+tasks for each person's computer. Your already-running helper **picks up your task
+on its own** — nothing else for you to do. Watch progress on the website (or with
+the optional `logs` command below).
+
+> No new connection code is needed for each collaboration — your helper is already
+> logged in. Just accept/create studies and it handles them.
+
+---
+
+## Step 6 — Run the analysis and view results
+
+This all happens **on the website**, and is mostly done by the **study initiator**
+(the person who started the collaboration). Invited collaborators usually just keep
+their helper running and watch the results appear. **The page updates by itself —
+you do not need to refresh your browser** after clicking these buttons; the next
+stage appears automatically once everyone's helper has finished its part.
+
+Open the collaboration's **Details** page. The **Collaboration Status** panel on the
+right shows which stage you're in. The buttons appear as each stage becomes ready:
+
+1. **QC runs automatically.** When collaborators accept, each one's helper runs the
+   QC locally and uploads its results. You'll see the status move past "Onboarding."
+   - For filter-only schemes (MAF / HWE / Missing), it goes straight to the GWAS
+     stage — there's no extra QC button to press.
+   - For schemes with **Population Stratification** or **Sample Relatedness**, the
+     initiator clicks **"Initiate QC Calculation,"** then **"Get QC Results,"** and
+     sets a cutoff with **"Confirm Threshold."**
+2. **Create the GWAS dataset.** Click **"Create GWAS Dataset."** Each helper computes
+   its per-marker case/control counts locally and uploads them. (Keep helpers
+   running.) The status advances on its own when they're done.
+3. **Run the analysis.** Click **"Initiate GWAS Calculation."** The server combines
+   everyone's counts and runs the statistics.
+4. **See the results.** Click **"Get GWAS Results"** to view the results table.
+   Optionally click **"Generate Summary"** for a plain-language one-page summary.
+
+> If a button says results aren't ready yet, just wait a few seconds — the page
+> refreshes itself as each collaborator's helper reports in. You don't need to
+> reload.
 
 ---
 
 ## Day-to-day — what to expect
 
-- **You don't have to do anything.** The agent waits for tasks and handles them.
-- **You don't need the website open**, and you don't need to stay logged in. The
-  agent has its own saved login.
-- **Tasks can arrive any time.** If your computer is off or asleep when a task is
-  created, that's fine — the task waits, and the agent picks it up the next time
-  your computer is on and connected to the internet.
-- **Results appear on the website** for the study team once your agent finishes.
+- **You don't have to do anything.** The helper waits for tasks and handles them.
+- **You don't need the website open** or to stay logged in — the helper has its own
+  saved login.
+- **Tasks can arrive anytime.** If your computer was off or asleep when a task was
+  created, no problem — it's picked up the next time you're on and online.
+- **Results appear on the website** for the study team once your helper finishes.
 
-### Handy commands (optional)
+### If you ever need to check or control it (optional)
 
-Run these from inside the SiteAgent folder (Terminal on Mac, PowerShell on Windows).
-Replace `./collab-agent.sh` with `.\collab-agent.ps1` on Windows.
+Easiest: just **double-click "Start Agent" again** — it will make sure the helper is
+running. For more control, open the SiteAgent folder in Terminal (Mac) / PowerShell
+(Windows) and use:
 
-| What you want | Command |
-|---|---|
-| See if it's running | `./collab-agent.sh status` |
-| Watch what it's doing | `./collab-agent.sh logs`  (press Ctrl+C to stop watching) |
-| Stop it | `./collab-agent.sh stop` |
-| Start it again | `./collab-agent.sh start` |
-| Update to the newest version | `./collab-agent.sh update` |
-| Start over from scratch | `./collab-agent.sh reset` |
+| What you want | Mac | Windows |
+|---|---|---|
+| Is it running? | `./collab-agent.sh status` | `.\collab-agent.ps1 status` |
+| Watch it work | `./collab-agent.sh logs` | `.\collab-agent.ps1 logs` |
+| Stop it | `./collab-agent.sh stop` | `.\collab-agent.ps1 stop` |
+| Update it | `./collab-agent.sh update` | `.\collab-agent.ps1 update` |
+| Start over | `./collab-agent.sh reset` | `.\collab-agent.ps1 reset` |
 
-A healthy agent's logs say something like:
-`Agent running. Polling for jobs ...` and, when work arrives,
+A healthy helper logs `Agent running. Polling for jobs ...` and, when work arrives,
 `Job ... complete; uploaded keys=[...]`.
 
 ---
 
 ## Troubleshooting
 
-**"Docker is not installed" / "Docker is not running"**
-Open the **Docker Desktop** app and wait until it says *running* (whale icon
-steady / green). Then run the helper again.
+**"Docker is not installed / not running"**
+Open **Docker Desktop** and wait until it says *running* (steady whale / green), then
+double-click "Start Agent" again.
 
-**"running scripts is disabled" (Windows)**
-In PowerShell run once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`,
-press `Y`, then try again.
+**Mac: "Start Agent" won't open (unidentified developer)**
+Right-click the file → **Open** → **Open**. You only need to do this the first time.
+
+**Windows: SmartScreen blocked it**
+Click **More info → Run anyway** (one time).
 
 **"No dataset for phenotype 'xxx'"**
-The agent was asked to work on a dataset it can't find. Check that your data folder
-has a sub-folder named exactly `xxx` (matching the phenotype on the website) with a
-`rawdata.csv` inside it.
+The task needs a dataset you don't have locally. Check your top data folder has a
+sub-folder named exactly `xxx` with a `rawdata.csv` inside.
 
-**"does not match the registered hash"**
-Your local file changed after you registered it. Re-register the dataset's metadata
-on the website (or restore the original file), then it will run.
+**"...does not match the registered hash"**
+Your `rawdata.csv` changed after you registered it. Re-register the dataset on the
+website (or restore the original file), then it runs.
 
-**"Invalid or expired enrollment code"**
-Codes expire after a day. Generate a fresh code on the website and run
-`./collab-agent.sh reset` then `./collab-agent.sh` again.
+**"Invalid or expired connection code"**
+Codes expire after 24 hours. Generate a fresh one (Step 3), then double-click "Start
+Agent" again and paste the new code.
 
 **It can't reach the server**
-Check your internet connection and that the server address is correct. The agent
-keeps retrying automatically, so once you're back online it resumes on its own.
-
-**I want to move my data folder**
-Run `./collab-agent.sh reset`, then `./collab-agent.sh` and enter the new folder.
+Check your internet and that the server address is right. The helper keeps retrying,
+so it resumes on its own once you're back online.
 
 ---
 
 ## Frequently asked questions
 
 **Does my raw genetic data ever get uploaded?**
-No. Raw files are read on your computer only, mounted read-only. Only summarized,
+No. Raw files are read on your computer only (read-only). Only summarized,
 privacy-safe outputs are sent.
 
+**Do I need a new connection code for each collaboration, or each time I restart?**
+No — just **once, ever.** The helper turns your one-time code into a saved login that
+covers **all** your collaborations and survives restarts and computer reboots. You'd
+only need a fresh code if you fully **reset** the helper.
+
+**Should I set up the helper before or after joining a study?**
+Either works, but **setting it up first is best** — then it's ready and waiting. If a
+task is created while your helper is off, it simply waits and runs when you're next
+online.
+
 **Do I have to keep a window open?**
-No. It runs in the background. You can close Terminal/PowerShell after it starts.
+No. It runs in the background — you can close the window after it starts.
 
 **What if I turn off or restart my computer?**
-The agent restarts automatically with your computer (as long as Docker Desktop is
-running). Any task that arrived while you were off will be picked up afterward.
+It restarts automatically with your computer (as long as Docker Desktop is running).
+Tasks that arrived while you were off are picked up afterward.
+
+**Do I need the same markers (SNPs) as other sites?**
+No. You can have more or fewer — the system lines each site up against a shared
+reference automatically. Just follow the data standard above.
+
+**Why does it say some of my markers weren't used?**
+For the population-similarity step, only markers in the study's shared reference can
+be used (everyone is compared on the same "ruler"). Extras are skipped *for that step
+only* — still used in your QC and GWAS, so nothing is wasted.
+
+**My dataset has fewer markers than the reference — is that OK?**
+Yes, as long as you share a good chunk of them (missing ones are filled in
+neutrally). If you share almost none, that one step is skipped for you — expected.
 
 **Will this slow down my computer?**
-Only briefly while it's actively crunching a task, and tasks are occasional.
+Only briefly while it's actively working on a task, and tasks are occasional.
 
 **How do I remove it completely?**
-Run `./collab-agent.sh reset` (or `.\collab-agent.ps1 reset`). You can also quit
-Docker Desktop and uninstall it if you no longer need it.
+In the SiteAgent folder run `./collab-agent.sh reset` (Mac) or `.\collab-agent.ps1
+reset` (Windows). You can then quit/uninstall Docker Desktop if you like.
 
 **Who do I contact for help?**
-Your study coordinator. Sending them the output of `./collab-agent.sh logs` helps
-them help you faster.
+Your study coordinator. Sending them the output of the **logs** command (above) helps
+them help you fast.

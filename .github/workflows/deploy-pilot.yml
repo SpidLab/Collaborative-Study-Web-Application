@@ -1,0 +1,90 @@
+name: Deploy pilot (collaboration server)
+
+# Deploys ONLY the central collaboration server (API + web). The local Site Agent
+# is NOT deployed here — it runs on collaborators' own machines.
+on:
+  push:
+    branches: [pilot_deployment]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-pilot
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_API: ${{ vars.ECR_API_REPOSITORY_URL }}   # e.g. <acct>.dkr.ecr.<region>.amazonaws.com/collabstudy-api
+  ECR_WEB: ${{ vars.ECR_WEB_REPOSITORY_URL }}   # e.g. <acct>.dkr.ecr.<region>.amazonaws.com/collabstudy-web
+  VITE_API_URL: ${{ vars.VITE_API_URL }}        # public site URL, e.g. https://collab.example.org
+  INSTANCE_ID: ${{ vars.DEPLOY_INSTANCE_ID }}   # terraform output instance_id
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        run: |
+          REGISTRY="${ECR_API%%/*}"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+      - name: Set up QEMU + Buildx (arm64 cross-build for t4g)
+        uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: web_application/Backend/FlaskApp
+          file: deploy/Dockerfile.api
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.ECR_API }}:latest
+            ${{ env.ECR_API }}:${{ github.sha }}
+
+      - name: Build & push web (frontend + Caddy) image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.web
+          platforms: linux/arm64
+          push: true
+          build-args: |
+            VITE_API_URL=${{ env.VITE_API_URL }}
+          tags: |
+            ${{ env.ECR_WEB }}:latest
+            ${{ env.ECR_WEB }}:${{ github.sha }}
+
+      - name: Deploy on instance via SSM (pull + restart)
+        run: |
+          set -euo pipefail
+          REGISTRY="${ECR_API%%/*}"
+          DEPLOY_CMD="set -e; cd /opt/collabstudy; aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $REGISTRY; docker compose --env-file .env -f docker-compose.yml pull; docker compose --env-file .env -f docker-compose.yml up -d; docker image prune -f"
+          # jq builds valid JSON params (no shell-escaping pitfalls)
+          PARAMS=$(jq -n --arg c "$DEPLOY_CMD" '{commands: [$c]}')
+          CMD_ID=$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "deploy ${GITHUB_SHA:0:7}" \
+            --parameters "$PARAMS" \
+            --query "Command.CommandId" --output text)
+          echo "SSM command: $CMD_ID"
+          aws ssm wait command-executed --region "$AWS_REGION" --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" || true
+          STATUS=$(aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query Status --output text)
+          echo "Deploy status: $STATUS"
+          echo "----- stdout -----"
+          aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query StandardOutputContent --output text || true
+          echo "----- stderr -----"
+          aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query StandardErrorContent --output text || true
+          [ "$STATUS" = "Success" ] || { echo "Deploy failed"; exit 1; }

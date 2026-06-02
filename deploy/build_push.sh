@@ -1,24 +1,39 @@
 #!/usr/bin/env bash
-# Build and push the central API image to ECR.
-# Usage: AWS_REGION=us-east-1 ECR_REPO_URL=<acct>.dkr.ecr.us-east-1.amazonaws.com/collabstudy-api ./build_push.sh [tag]
+# Manually build & push BOTH images to ECR (the GitHub Actions pipeline does this
+# automatically on push to the `pilot` branch — use this only for local/manual deploys).
+#
+# Usage:
+#   AWS_REGION=us-east-2 \
+#   ECR_API=<acct>.dkr.ecr.us-east-2.amazonaws.com/collabstudy-api \
+#   ECR_WEB=<acct>.dkr.ecr.us-east-2.amazonaws.com/collabstudy-web \
+#   VITE_API_URL=https://collab.example.org \
+#   ./build_push.sh [tag]
 set -euo pipefail
 
 TAG="${1:-latest}"
 : "${AWS_REGION:?set AWS_REGION}"
-: "${ECR_REPO_URL:?set ECR_REPO_URL (terraform output ecr_repository_url)}"
+: "${ECR_API:?set ECR_API (terraform output ecr_api_repository_url)}"
+: "${ECR_WEB:?set ECR_WEB (terraform output ecr_web_repository_url)}"
+: "${VITE_API_URL:?set VITE_API_URL (the public site URL)}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-API_CTX="$REPO_ROOT/web_application/Backend/FlaskApp"
-REGISTRY="${ECR_REPO_URL%%/*}"
+REGISTRY="${ECR_API%%/*}"
 
 echo "Logging in to ECR ($REGISTRY)..."
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
 
-echo "Building API image for linux/arm64 (matches t4g instance)..."
+echo "Building API image (linux/arm64)..."
 docker buildx build --platform linux/arm64 \
   -f "$REPO_ROOT/deploy/Dockerfile.api" \
-  -t "$ECR_REPO_URL:$TAG" \
-  "$API_CTX" --push
+  -t "$ECR_API:$TAG" \
+  "$REPO_ROOT/web_application/Backend/FlaskApp" --push
 
-echo "Pushed $ECR_REPO_URL:$TAG"
-echo "On the host (or via 'terraform apply' user_data) run: docker compose pull && docker compose up -d"
+echo "Building web image (frontend + Caddy, linux/arm64)..."
+docker buildx build --platform linux/arm64 \
+  -f "$REPO_ROOT/deploy/Dockerfile.web" \
+  --build-arg "VITE_API_URL=$VITE_API_URL" \
+  -t "$ECR_WEB:$TAG" \
+  "$REPO_ROOT" --push
+
+echo "Pushed $ECR_API:$TAG and $ECR_WEB:$TAG"
+echo "On the host: cd /opt/collabstudy && docker compose pull && docker compose up -d"

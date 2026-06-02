@@ -1,0 +1,20 @@
+# Web image: builds the React frontend and serves it with Caddy (auto-HTTPS),
+# proxying /api to the Flask container. Frontend is baked in, so CI/CD just pushes
+# this image — no separate file upload to the host.
+# Build context = repo root (so it can see web_application/Frontend).
+
+# --- Stage 1: build the React app ---
+FROM node:20-slim AS build
+WORKDIR /app
+# VITE_API_URL is baked into the build (the study's constant public URL).
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
+COPY web_application/Frontend/package*.json ./
+RUN npm ci || npm install
+COPY web_application/Frontend/ ./
+RUN npm run build
+
+# --- Stage 2: Caddy serving the build ---
+FROM caddy:2
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
