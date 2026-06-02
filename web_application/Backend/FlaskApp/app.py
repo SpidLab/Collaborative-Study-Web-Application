@@ -1840,6 +1840,8 @@ def get_collaboration_details(uuid):
                     logging.info(f"Retrieved phenotype '{phenotype}' from user's other dataset for collaboration {uuid}")
             
             number_of_samples = invited_user_dataset.get('number_of_samples') if invited_user_dataset else None
+            n_snps = invited_user_dataset.get('n_snps') if invited_user_dataset else None
+            snp_ids = invited_user_dataset.get('snp_ids') if invited_user_dataset else None
 
             invited_users_details.append({
                 'user_id': str(invited_user["user_id"]),
@@ -1848,7 +1850,9 @@ def get_collaboration_details(uuid):
                 'user_dataset_id': user_dataset_id,
                 'is_dataset_uploaded': invited_user_dataset_uploaded,
                 'phenotype': phenotype,
-                'number_of_samples': number_of_samples
+                'number_of_samples': number_of_samples,
+                'n_snps': n_snps,
+                'snp_ids': snp_ids,
             })
 
 
@@ -1866,17 +1870,19 @@ def get_collaboration_details(uuid):
         # To fetch the data of creator/initator
         dataset = db.datasets.find_one(
             {'_id': ObjectId(collaboration["creator_dataset_id"])},
-            {'phenotype': 1, 'number_of_samples': 1}
+            {'phenotype': 1, 'number_of_samples': 1, 'n_snps': 1, 'snp_ids': 1}
         )
-        
 
-        
+
+
         # Making multiple queries can be optimised but using for time being
         creator_phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
         creator_number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
         creator_dataset = {
             'phenotype': creator_phenotype,
-            'samples': creator_number_of_samples
+            'samples': creator_number_of_samples,
+            'n_snps': dataset.get('n_snps') if dataset else None,
+            'snp_ids': dataset.get('snp_ids') if dataset else None,
         }
 
     

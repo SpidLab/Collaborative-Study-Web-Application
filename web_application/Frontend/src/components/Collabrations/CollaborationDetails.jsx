@@ -1585,9 +1585,9 @@ const CollaborationDetails = () => {
                       secondary={
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                           {/* Add the creator's phenotype and samples */}
-                          <Tooltip title={`Initiator: ${senderInfo.name}`} arrow>
+                          <Tooltip title={`Initiator: ${senderInfo.name}${creator?.n_snps ? ` · ${creator.n_snps} markers` : ''}`} arrow>
                             <Chip
-                              label={`${creator.phenotype} - ${creator.samples}`}
+                              label={`${creator.phenotype} - ${creator.samples} samples${creator?.n_snps ? ` · ${creator.n_snps} markers` : ''}`}
                               color="primary"
                               variant="contained"
                             />
@@ -1595,12 +1595,12 @@ const CollaborationDetails = () => {
 
                           {/* Add the invited users' phenotypes and samples */}
                           {invitedUsers.map((user, index) => (
-                            <Tooltip key={index} title={`Collaborator: ${user.name}`} arrow>
+                            <Tooltip key={index} title={`Collaborator: ${user.name}${user?.n_snps ? ` · ${user.n_snps} markers` : ''}`} arrow>
                               <Chip
-                                label={`${user.phenotype} - ${user.number_of_samples}`}
+                                label={`${user.phenotype} - ${user.number_of_samples} samples${user?.n_snps ? ` · ${user.n_snps} markers` : ''}`}
                                 color="secondary"
                                 variant="contained"
-                                
+
                               />
                             </Tooltip>
                           ))}

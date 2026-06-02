@@ -150,6 +150,18 @@ def register_agent_api(app, db, signing_key=None):
             return err
         return jsonify({"version": AGENT_VERSION, "server": "collaborative-study"}), 200
 
+    @app.route("/api/agent/datasets", methods=["GET"])
+    def agent_list_datasets():
+        """List this agent's datasets so it can proactively register metadata
+        (sample count, SNP marker names) for the ones it has locally."""
+        uid, err = current_agent_uid()
+        if err:
+            return err
+        out = []
+        for ds in datasets.find({"user_id": str(uid)}, {"phenotype": 1}):
+            out.append({"id": str(ds["_id"]), "phenotype": ds.get("phenotype")})
+        return jsonify({"datasets": out}), 200
+
     @app.route("/api/agent/datasets/<dataset_id>/metadata", methods=["POST"])
     def agent_dataset_metadata(dataset_id):
         uid, err = current_agent_uid()
@@ -165,12 +177,18 @@ def register_agent_api(app, db, signing_key=None):
             return jsonify({"error": "Dataset not found"}), 404
         if str(ds.get("user_id")) != str(uid):
             return jsonify({"error": "Dataset does not belong to this agent"}), 403
-        datasets.update_one({"_id": oid}, {"$set": {
+        update = {
             "phenotype": body.get("phenotype", ds.get("phenotype")),
             "number_of_samples": body.get("number_of_samples"),
             "file_sha256": body.get("file_sha256"),
             "metadata_updated_at": datetime.utcnow(),
-        }})
+        }
+        # SNP marker names (header only — not genotype data). Stored for display.
+        snp_ids = body.get("snp_ids")
+        if snp_ids is not None:
+            update["snp_ids"] = snp_ids
+            update["n_snps"] = len(snp_ids)
+        datasets.update_one({"_id": oid}, {"$set": update})
         return jsonify({"success": True}), 200
 
     @app.route("/api/agent/jobs/next", methods=["GET"])

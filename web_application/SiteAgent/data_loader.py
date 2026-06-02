@@ -11,6 +11,7 @@ dataset carries its OWN case/control files. A flat <DATA_DIR>/<phenotype>.csv is
 still accepted for backward compatibility. The raw data never leaves the machine —
 only QC-derived outputs are uploaded.
 """
+import csv
 import hashlib
 import os
 
@@ -18,6 +19,24 @@ import pandas as pd
 
 # Accepted names for the raw CSV inside a phenotype folder (first match wins).
 RAW_CSV_CANDIDATES = ["rawdata.csv", "rawdataset.csv", "raw_dataset.csv", "dataset.csv", "data.csv"]
+
+# Columns that hold the case/control label, not a marker (kept in sync with actions.py).
+LABEL_COLS = {"phenotype", "case_control", "status", "group", "sex", "label"}
+
+
+def read_snp_ids(csv_path):
+    """Return the SNP marker column names from the CSV header only (no genotype data
+    is read). Excludes the first/ID column and any case/control label column."""
+    with open(csv_path, newline="") as f:
+        header = next(csv.reader(f))
+    return [c for i, c in enumerate(header)
+            if i != 0 and str(c).strip().lower() not in LABEL_COLS]
+
+
+def count_samples(csv_path):
+    """Count data rows (individuals) cheaply, without parsing all columns."""
+    with open(csv_path, newline="") as f:
+        return max(sum(1 for _ in f) - 1, 0)  # minus the header row
 
 
 def resolve_dataset(data_dir, phenotype):

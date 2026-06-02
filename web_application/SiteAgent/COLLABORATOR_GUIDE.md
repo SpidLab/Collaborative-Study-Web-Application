@@ -48,9 +48,13 @@ handles the rest by itself.
 
 - [ ] A Windows or Mac computer you can leave on sometimes.
 - [ ] Your genotype data saved as a **CSV** file.
-- [ ] The **study website address** (your coordinator gives you this).
-- [ ] The **SiteAgent folder** (your coordinator gives you this — it contains the
-      "Start Agent" file you'll double-click).
+- [ ] The **study link** (your coordinator gives you this — e.g. `https://3-21-x-x.sslip.io`).
+      This one link is **both** the website you log into **and** the "server address"
+      you'll paste into the helper. (It may look like a string of numbers + `.sslip.io`
+      instead of a normal name — that's expected and fine.)
+- [ ] The **SiteAgent kit** from your coordinator — usually a **`.zip`**. Save it
+      somewhere easy and **unzip it**; inside is the "Start Agent" file you'll
+      double-click and this guide. You don't open or edit anything inside it.
 
 ---
 
@@ -171,18 +175,28 @@ itself.** The data stays on your computer.
 > dataset you have (one per phenotype/folder).
 
 ### 3c. Get your connection code
-This links *your computer* to *your account* — like a one-time login for the helper.
-**Do this before joining any collaboration**, so your helper is ready and waiting.
+This is a **one-time login for the helper** — it lives on your **Edit Profile**
+page. **Do this before joining any collaboration**, so your helper is ready and
+waiting. It's a little tucked away, so follow these clicks exactly:
 
-1. Click your **account / Profile** (top of the page).
-2. In the **"Connect my computer"** box, click **"Generate connection code."**
-3. A long code appears — click **"Copy code."** (It looks random — that's normal.)
-   Keep it on your clipboard for the next step.
+1. Look at the **top-right corner** of the website and click your **account icon**
+   (the round avatar / circle with your initials or a person symbol).
+2. A small menu drops down. Click **"Edit Profile."**
+3. The Edit Profile page opens. **Scroll down** — past the Name, Email, and Password
+   boxes — to a box titled **"Connect my computer."**
+4. In that box, click the **"Generate connection code"** button.
+5. A long code appears just below the button. Click **"Copy code"** (the button next
+   to it). It's a long string of random-looking letters and numbers — that's normal,
+   and you don't need to read or understand it.
 
-> You only ever need a code **once.** The code itself expires in **24 hours**, but
-> after the helper uses it, it saves a long-lived login — so you **never need a new
-> code** for new collaborations or after restarting your computer. (You'd only need
-> a fresh one if you fully reset the helper.)
+The code is now on your clipboard — go straight to Step 4 and paste it when asked.
+(If you wait too long, see the note below and just generate a fresh one.)
+
+> **You only ever need a code once.** The code itself expires in **24 hours**, but as
+> soon as the helper uses it, the helper saves a permanent login — so you **never need
+> a new code** for new collaborations or after restarting your computer. You'd only
+> generate another one if you completely reset the helper, or if the code expired
+> before you used it (just repeat 3c to get a fresh one).
 
 ---
 

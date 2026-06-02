@@ -38,13 +38,22 @@ class JobsClient:
         resp.raise_for_status()
         return resp.json()
 
-    def register_metadata(self, dataset_id, phenotype, sample_count, file_hash):
+    def list_datasets(self):
+        """List the datasets registered to this agent's user (id + phenotype)."""
+        url = f"{self.server_url}/api/agent/datasets"
+        resp = requests.get(url, headers=self._headers(), timeout=self.request_timeout)
+        resp.raise_for_status()
+        return resp.json().get("datasets", [])
+
+    def register_metadata(self, dataset_id, phenotype, sample_count, file_hash, snp_ids=None):
         url = f"{self.server_url}/api/agent/datasets/{dataset_id}/metadata"
         payload = {
             "phenotype": phenotype,
             "number_of_samples": sample_count,
             "file_sha256": file_hash,
         }
+        if snp_ids is not None:
+            payload["snp_ids"] = snp_ids
         resp = requests.post(url, json=payload, headers=self._headers(), timeout=self.request_timeout)
         resp.raise_for_status()
         return resp.json()

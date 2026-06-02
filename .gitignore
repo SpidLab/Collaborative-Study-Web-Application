@@ -38,3 +38,6 @@ crash.log
 
 # AWS credentials live in ~/.aws, never in the repo
 .aws/
+
+# Generated collaborator kit
+collabstudy-agent-kit.zip

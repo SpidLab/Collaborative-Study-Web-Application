@@ -41,6 +41,34 @@ def egress_guard(result):
     return result
 
 
+def sync_local_datasets(client):
+    """On startup, tell the server the metadata for each local dataset — sample
+    count, file hash, and SNP marker names (the CSV header only, never genotypes) —
+    so the study can display the markers without anyone typing them in."""
+    try:
+        datasets = client.list_datasets()
+    except Exception as e:
+        logger.warning("Could not list datasets for metadata sync: %s", e)
+        return
+    for ds in datasets:
+        phenotype = ds.get("phenotype")
+        if not phenotype:
+            continue
+        try:
+            csv_path, _ = data_loader.resolve_dataset(Config.DATA_DIR, phenotype)
+        except FileNotFoundError:
+            continue  # this dataset isn't on this machine
+        try:
+            snp_ids = data_loader.read_snp_ids(csv_path)
+            client.register_metadata(ds["id"], phenotype,
+                                     data_loader.count_samples(csv_path),
+                                     file_sha256(csv_path), snp_ids)
+            logger.info("Registered metadata for '%s': %d samples, %d markers.",
+                        phenotype, data_loader.count_samples(csv_path), len(snp_ids))
+        except Exception as e:
+            logger.warning("Metadata sync failed for '%s': %s", phenotype, e)
+
+
 def handle_job(job, client):
     action = job.get("action")
     params = job.get("params", {}) or {}
@@ -50,11 +78,13 @@ def handle_job(job, client):
     csv_path, dataset_dir = data_loader.resolve_dataset(Config.DATA_DIR, phenotype)
 
     # Register / verify the dataset fingerprint without uploading any rows.
+    # Metadata = sample count, file hash, and the SNP marker names (header only).
     file_hash = file_sha256(csv_path)
     if dataset_id:
         try:
-            df_for_count = load_dataframe(csv_path)
-            client.register_metadata(dataset_id, phenotype, len(df_for_count), file_hash)
+            client.register_metadata(dataset_id, phenotype,
+                                     data_loader.count_samples(csv_path), file_hash,
+                                     data_loader.read_snp_ids(csv_path))
         except requests.HTTPError as e:
             logger.warning("Metadata registration failed (continuing): %s", e)
     if job.get("expected_file_sha256") and not expected_hash_matches(csv_path, job["expected_file_sha256"]):
@@ -105,6 +135,9 @@ def main():
         logger.info("Connected to %s (server version: %s)", Config.SERVER_URL, client.version())
     except Exception as e:
         logger.warning("Version check failed (continuing): %s", e)
+
+    # Push SNP marker names + counts for local datasets so they show up on the site.
+    sync_local_datasets(client)
 
     logger.info("Agent running. Polling for jobs every ~%ss. Data dir: %s", Config.POLL_INTERVAL, Config.DATA_DIR)
     backoff = Config.POLL_INTERVAL
