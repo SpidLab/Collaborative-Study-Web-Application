@@ -1,16 +1,56 @@
-.env
-node_modules
-.idea
+# ===== OS / Editor =====
 .DS_Store
+.idea/
+.vscode/
 
-# Python bytecode
+# ===== Secrets & environment (keep *.example tracked) =====
+.env
+.env.*
+!.env.example
+
+# ===== Python =====
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+.venv/
+venv/
+env/
+ENV/
+*.egg
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
 
-# Environment backups (keep .env.example tracked)
-.env.bak
-.env.backup
+# ===== Node / Frontend build output =====
+node_modules/
+dist/
+dist-ssr/
+*.local
 
-# Temp files
+# ===== Build artifacts & archives =====
+build/
+*.zip
+*.tar.gz
+*.tgz
+
+# ===== Terraform (state & tfvars hold secrets in plaintext — never commit) =====
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# ===== Deployment lives ONLY on the pilot_deployment branch — never commit it on this branch =====
+deploy/
+
+# ===== Logs & temp =====
+*.log
 *.tmp
