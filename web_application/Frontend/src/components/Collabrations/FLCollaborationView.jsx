@@ -50,6 +50,7 @@ const FLCollaborationView = ({ collaboration }) => {
   const [isApplyingThreshold, setIsApplyingThreshold] = useState(false);
   const [isStartingTraining, setIsStartingTraining] = useState(false);
   const [isKickingOff, setIsKickingOff] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [numRounds, setNumRounds] = useState(null);
   const [localEpochs, setLocalEpochs] = useState(null);
   const pollTimer = useRef(null);
@@ -90,6 +91,18 @@ const FLCollaborationView = ({ collaboration }) => {
   const history = flState?.training_history || [];
   const finalMetrics = flState?.final_metrics || {};
   const siteAssignments = flState?.site_assignments || {};
+  const trainingProgress = flState?.training_progress || null;
+
+  // Stall detection: if stage is "training" but the heartbeat is missing
+  // (doc predates this code / process died before first round) or older than
+  // ~90s, the training process is gone (e.g. server restart / OOM).
+  const heartbeatStale = (() => {
+    if (stage !== 'training') return false;
+    const hb = flState?.training_heartbeat;
+    if (!hb) return true;
+    const age = Date.now() - new Date(hb).getTime();
+    return age > 90 * 1000;
+  })();
 
   const emdRange = useMemo(() => {
     if (!emd?.matrix) return { min: 0, max: 5 };
@@ -150,6 +163,20 @@ const FLCollaborationView = ({ collaboration }) => {
       setSnackbar({ open: true, message: `Kickoff failed: ${msg}`, severity: 'error' });
     } finally {
       setIsKickingOff(false);
+    }
+  };
+
+  const resetTraining = async () => {
+    setIsResetting(true);
+    try {
+      await axios.post(`${URL}/api/fl/reset_training`, { uuid }, { headers: authHeader() });
+      setSnackbar({ open: true, message: 'Training reset — you can start again.', severity: 'success' });
+      fetchState();
+    } catch (err) {
+      const msg = err?.response?.data?.error || err.message;
+      setSnackbar({ open: true, message: `Reset failed: ${msg}`, severity: 'error' });
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -407,8 +434,21 @@ const FLCollaborationView = ({ collaboration }) => {
           <CardContent>
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
               Federated training {stage === 'complete' ? '— complete' : 'in progress…'}
+              {stage === 'training' && trainingProgress &&
+                ` (round ${trainingProgress.current_round}/${trainingProgress.total_rounds})`}
             </Typography>
-            {stage === 'training' && <LinearProgress sx={{ mb: 2 }} />}
+            {stage === 'training' && !heartbeatStale && <LinearProgress sx={{ mb: 2 }} />}
+            {stage === 'training' && heartbeatStale && isInitiator && (
+              <Alert severity="warning" sx={{ mb: 2 }}
+                action={
+                  <Button color="inherit" size="small" onClick={resetTraining} disabled={isResetting}>
+                    {isResetting ? <CircularProgress size={16} /> : 'Reset & retry'}
+                  </Button>
+                }>
+                Training appears to have stalled (no progress for &gt;90s). The server may have
+                restarted or run out of memory. Reset to start again.
+              </Alert>
+            )}
             {history.length > 0 && (
               <TableContainer>
                 <Table size="small">

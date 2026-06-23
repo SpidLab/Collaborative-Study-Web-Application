@@ -16,6 +16,7 @@ on the `collaborations` doc under `fl_state` so the frontend can poll.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 import traceback
@@ -40,10 +41,16 @@ from .fl_config import (
     SITE_DATA_PATTERN,
     SUPER_POPULATIONS,
 )
+from .local_fedavg import LocalFedAvgConfig, run_local_fedavg
 from .pca_projector import ProjectionArtifacts, load_public_artifacts, project_with_dp
-from .simulation import FlowerRunConfig, run_simulation
 
 logger = logging.getLogger(__name__)
+
+
+def _flower_backend():
+    """Lazy import of the Flower simulation backend (pulls in Ray)."""
+    from .simulation import FlowerRunConfig, run_simulation
+    return FlowerRunConfig, run_simulation
 
 STAGE_IDLE = "idle"
 STAGE_PROJECTING = "projecting"
@@ -157,7 +164,13 @@ def run_projection_and_emd(
 
         state = _load_collaboration(collaborations, uuid)["fl_state"]
         cfg = state["config"]
-        assignments: dict[str, int] = state["site_assignments"]
+        # Recompute site assignments from the *current* doc: when the
+        # collaboration is first created no invitee has accepted yet, so the
+        # bootstrap-time snapshot only contains the creator. Acceptances arrive
+        # later, so we re-derive the mapping here (and persist it) rather than
+        # trusting the stale snapshot.
+        assignments: dict[str, int] = assign_sites(doc)
+        _set_nested(collaborations, uuid, "site_assignments", assignments)
         if len(assignments) < 2:
             raise ValueError(
                 "FL pipeline requires ≥ 2 participants (initiator + 1 accepted invitee)."
@@ -252,6 +265,25 @@ def apply_threshold(
     return rows
 
 
+def reset_training(collaborations: Collection, uuid: str) -> dict:
+    """Recover a collaboration whose training stage is stuck (e.g. the server
+    was killed mid-run). Rewinds to 'ready_to_train' if survivors exist, else
+    back to 'awaiting_threshold'. Keeps the EMD matrix and survivor set.
+    """
+    doc = _load_collaboration(collaborations, uuid)
+    state = doc.get("fl_state") or {}
+    survivors = state.get("survivors") or []
+    next_stage = STAGE_READY_TO_TRAIN if len(survivors) >= 2 else STAGE_AWAITING_THRESHOLD
+    _set_fl_state(collaborations, uuid, {
+        "fl_state.stage": next_stage,
+        "fl_state.training_history": [],
+        "fl_state.final_metrics": {},
+        "fl_state.training_progress": None,
+        "fl_state.error": None,
+    })
+    return {"stage": next_stage, "survivors": survivors}
+
+
 def run_training(
     collaborations: Collection,
     uuid: str,
@@ -278,20 +310,62 @@ def run_training(
         first_site = load_site(site_ids[0])
         num_snps = num_snps_override or first_site.X_train.shape[1]
 
-        _set_nested(collaborations, uuid, "stage", STAGE_TRAINING)
-        _set_nested(collaborations, uuid, "training_started_at", _utcnow_iso())
+        _set_fl_state(collaborations, uuid, {
+            "fl_state.stage": STAGE_TRAINING,
+            "fl_state.training_started_at": _utcnow_iso(),
+            "fl_state.training_heartbeat": _utcnow_iso(),
+            "fl_state.training_history": [],
+            "fl_state.final_metrics": {},
+        })
 
-        run_cfg = FlowerRunConfig(
-            site_ids=site_ids,
-            num_snps=num_snps,
-            num_classes=int(cfg.get("num_classes", len(SUPER_POPULATIONS))),
-            num_rounds=int(cfg.get("num_rounds", DEFAULT_FL_ROUNDS)),
-            local_epochs=int(cfg.get("local_epochs", DEFAULT_LOCAL_EPOCHS)),
-            batch_size=int(cfg.get("batch_size", DEFAULT_BATCH_SIZE)),
-            learning_rate=float(cfg.get("learning_rate", DEFAULT_LEARNING_RATE)),
-            device="cpu",
-        )
-        summary = run_simulation(run_cfg)
+        num_classes = int(cfg.get("num_classes", len(SUPER_POPULATIONS)))
+        num_rounds = int(cfg.get("num_rounds", DEFAULT_FL_ROUNDS))
+        local_epochs = int(cfg.get("local_epochs", DEFAULT_LOCAL_EPOCHS))
+        batch_size = int(cfg.get("batch_size", DEFAULT_BATCH_SIZE))
+        learning_rate = float(cfg.get("learning_rate", DEFAULT_LEARNING_RATE))
+
+        # Default: lightweight single-process FedAvg (low memory, per-round
+        # progress). Set FL_USE_FLOWER=true to use the Ray/Flower simulation
+        # backend instead (heavier — intended for multi-core machines / the
+        # future distributed-pods phase).
+        use_flower = os.getenv("FL_USE_FLOWER", "false").lower() == "true"
+
+        if use_flower:
+            FlowerRunConfig, run_simulation = _flower_backend()
+            run_cfg = FlowerRunConfig(
+                site_ids=site_ids,
+                num_snps=num_snps,
+                num_classes=num_classes,
+                num_rounds=num_rounds,
+                local_epochs=local_epochs,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                device="cpu",
+            )
+            summary = run_simulation(run_cfg)
+        else:
+            def _on_round(rnd: int, payload: dict) -> None:
+                _set_fl_state(collaborations, uuid, {
+                    "fl_state.training_history": payload["round_history"],
+                    "fl_state.final_metrics": payload["final_metrics"],
+                    "fl_state.training_progress": {
+                        "current_round": payload["current_round"],
+                        "total_rounds": payload["total_rounds"],
+                    },
+                    "fl_state.training_heartbeat": _utcnow_iso(),
+                })
+
+            local_cfg = LocalFedAvgConfig(
+                site_ids=site_ids,
+                num_snps=num_snps,
+                num_classes=num_classes,
+                num_rounds=num_rounds,
+                local_epochs=local_epochs,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                device="cpu",
+            )
+            summary = run_local_fedavg(local_cfg, on_round=_on_round)
 
         _set_fl_state(collaborations, uuid, {
             "fl_state.stage": STAGE_COMPLETE,

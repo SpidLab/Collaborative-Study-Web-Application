@@ -4210,6 +4210,27 @@ def fl_start_training():
     return jsonify({"message": "FL training launched", "survivors": survivors}), 202
 
 
+@app.route('/api/fl/reset_training', methods=['POST'])
+def fl_reset_training():
+    """Recover a stuck/failed training stage (e.g. server killed mid-run)."""
+    if not FL_AVAILABLE:
+        return _fl_unavailable_response()
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    data = request.get_json() or {}
+    collab_uuid = data.get('uuid')
+    if not collab_uuid:
+        return jsonify({"error": "uuid is required"}), 400
+    collab = db['collaborations'].find_one({"uuid": collab_uuid})
+    if not collab:
+        return jsonify({"error": "Collaboration not found"}), 404
+    if str(collab.get('creator_id')) != str(current_user.id):
+        return jsonify({"error": "Only the initiator can reset FL training"}), 403
+    result = fl_pipeline.reset_training(db['collaborations'], collab_uuid)
+    return jsonify({"message": "Training reset", **result}), 200
+
+
 @app.route('/api/fl/config', methods=['GET'])
 def fl_get_defaults():
     """Expose FL defaults so the frontend can render sensible sliders."""

@@ -34,10 +34,14 @@ class GenoPhenoCNN(nn.Module):
         self.cfg = cfg
         out_dim = 1 if cfg.num_classes == 2 else cfg.num_classes
 
+        # Early MaxPool downsamples the (potentially ~10k-long) SNP axis before
+        # the second conv, keeping activation memory low enough to train on a
+        # laptop without blowing up RAM.
         self.conv = nn.Sequential(
             nn.Conv1d(1, cfg.channels, kernel_size=cfg.kernel_size, padding=cfg.kernel_size // 2),
             nn.BatchNorm1d(cfg.channels),
             nn.ReLU(inplace=True),
+            nn.MaxPool1d(kernel_size=4),
             nn.Conv1d(cfg.channels, cfg.channels * 2, kernel_size=cfg.kernel_size, padding=cfg.kernel_size // 2),
             nn.BatchNorm1d(cfg.channels * 2),
             nn.ReLU(inplace=True),
