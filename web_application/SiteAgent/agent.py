@@ -5,6 +5,7 @@ long-polls the central collaboration server for jobs, runs QC/GWAS locally
 against raw CSVs in DATA_DIR, and uploads only derived outputs. Raw genotype
 files never leave the machine. Outbound HTTPS only — no inbound ports.
 """
+import base64
 import json
 import logging
 import time
@@ -41,15 +42,32 @@ def egress_guard(result):
     return result
 
 
+def _jwt_uid(token):
+    """Best-effort read of the 'uid' claim from a JWT WITHOUT verifying the
+    signature (the server verifies it; we only need it to detect an account
+    switch). Returns None if the token can't be parsed."""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8")).get("uid")
+    except Exception:
+        return None
+
+
 def sync_local_datasets(client):
     """On startup, tell the server the metadata for each local dataset — sample
     count, file hash, and SNP marker names (the CSV header only, never genotypes) —
-    so the study can display the markers without anyone typing them in."""
+    so the study can display the markers without anyone typing them in.
+
+    Returns a list of (phenotype, n_samples, n_markers) tuples for the datasets
+    that were found locally and registered, so the caller can print a friendly
+    'ready' summary."""
+    ready = []
     try:
         datasets = client.list_datasets()
     except Exception as e:
         logger.warning("Could not list datasets for metadata sync: %s", e)
-        return
+        return ready
     for ds in datasets:
         phenotype = ds.get("phenotype")
         if not phenotype:
@@ -60,13 +78,15 @@ def sync_local_datasets(client):
             continue  # this dataset isn't on this machine
         try:
             snp_ids = data_loader.read_snp_ids(csv_path)
-            client.register_metadata(ds["id"], phenotype,
-                                     data_loader.count_samples(csv_path),
+            n_samples = data_loader.count_samples(csv_path)
+            client.register_metadata(ds["id"], phenotype, n_samples,
                                      file_sha256(csv_path), snp_ids)
             logger.info("Registered metadata for '%s': %d samples, %d markers.",
-                        phenotype, data_loader.count_samples(csv_path), len(snp_ids))
+                        phenotype, n_samples, len(snp_ids))
+            ready.append((phenotype, n_samples, len(snp_ids)))
         except Exception as e:
             logger.warning("Metadata sync failed for '%s': %s", phenotype, e)
+    return ready
 
 
 def handle_job(job, client):
@@ -120,26 +140,64 @@ def handle_job(job, client):
 
 def main():
     Config.validate()
-    # Prefer an explicit token, then a previously saved one, then enroll with a code.
-    token = Config.AGENT_TOKEN or Config.read_saved_token()
+    # Credential resolution: an explicit AGENT_TOKEN wins; otherwise use the saved
+    # token from the /config volume. If an ENROLL_CODE is also present, it is used to
+    # enroll on first run AND to RE-ENROLL when it belongs to a different account than
+    # the saved token — otherwise a stale saved token would silently keep the agent
+    # acting as the wrong account (a pilot footgun we hit in testing).
+    explicit = Config.AGENT_TOKEN
+    saved = Config.read_saved_token()
+    code = Config.ENROLL_CODE
+    token = explicit or saved
+
+    if not explicit and code:
+        code_uid = _jwt_uid(code)
+        saved_uid = _jwt_uid(saved) if saved else None
+        if not saved:
+            logger.info("First run: exchanging enrollment code for a token...")
+            token = JobsClient.enroll(Config.SERVER_URL, code, Config.REQUEST_TIMEOUT)
+            Config.save_token(token)
+            logger.info("Enrolled successfully. Token saved — you won't need the code again.")
+        elif code_uid and code_uid != saved_uid:
+            logger.info("This enrollment code is for a different account than the saved login — "
+                        "re-enrolling with the new code.")
+            token = JobsClient.enroll(Config.SERVER_URL, code, Config.REQUEST_TIMEOUT)
+            Config.save_token(token)
+            logger.info("Re-enrolled successfully. Now connected as the new account.")
+
     if not token:
-        if not Config.ENROLL_CODE:
-            raise SystemExit("No saved token and no ENROLL_CODE provided. Paste your enrollment code and restart.")
-        logger.info("First run: exchanging enrollment code for a token...")
-        token = JobsClient.enroll(Config.SERVER_URL, Config.ENROLL_CODE, Config.REQUEST_TIMEOUT)
-        Config.save_token(token)
-        logger.info("Enrolled successfully. Token saved — you won't need the code again.")
+        raise SystemExit("No saved token and no ENROLL_CODE provided. Paste your enrollment code and restart.")
 
     client = JobsClient(Config.SERVER_URL, token, Config.REQUEST_TIMEOUT)
     try:
-        logger.info("Connected to %s (server version: %s)", Config.SERVER_URL, client.version())
+        version = client.version()
+        logger.info("Connected to %s (server version: %s)", Config.SERVER_URL,
+                    version.get("version", version) if isinstance(version, dict) else version)
     except Exception as e:
         logger.warning("Version check failed (continuing): %s", e)
 
-    # Push SNP marker names + counts for local datasets so they show up on the site.
-    sync_local_datasets(client)
+    # Announce WHICH account this agent is acting as. If it's the wrong one, the
+    # collaborator sees it immediately instead of silently polling an empty queue.
+    try:
+        who = client.me()
+        identity = who.get("email") or who.get("name") or who.get("uid")
+        logger.info("✅ Connected as %s", identity)
+    except Exception as e:
+        logger.warning("Could not confirm which account this agent is for (continuing): %s", e)
 
-    logger.info("Agent running. Polling for jobs every ~%ss. Data dir: %s", Config.POLL_INTERVAL, Config.DATA_DIR)
+    # Push SNP marker names + counts for local datasets so they show up on the site,
+    # and print a friendly summary of what's ready on this machine.
+    ready = sync_local_datasets(client)
+    if ready:
+        logger.info("Datasets ready on this machine: %s",
+                    ", ".join(f"{p} ({s} samples, {m} markers)" for p, s, m in ready))
+    else:
+        logger.warning("No local datasets matched your registered phenotypes yet. Make sure each "
+                       "dataset folder under %s is named exactly like the phenotype you registered "
+                       "on the website (e.g. <folder>/eye_color/rawdata.csv).", Config.DATA_DIR)
+
+    logger.info("Setup looks good — waiting for jobs. Polling every ~%ss. Data dir: %s",
+                Config.POLL_INTERVAL, Config.DATA_DIR)
     backoff = Config.POLL_INTERVAL
     while True:
         try:

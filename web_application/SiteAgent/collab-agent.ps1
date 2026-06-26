@@ -68,12 +68,16 @@ function Start-Setup {
   Say "   named like the phenotype you registered, each holding a 'rawdata.csv'."
   Say "   Example:  <this folder>\eye_color\rawdata.csv"
   $defaultDir = Join-Path $env:USERPROFILE "collab-data"
-  $dataDir = Read-Host "   Top data folder [$defaultDir]"
-  if ([string]::IsNullOrWhiteSpace($dataDir)) { $dataDir = $defaultDir }
-  if (-not (Test-Path $dataDir)) {
-    $mk = Read-Host "   That folder doesn't exist. Create it now? [Y/n]"
-    if ($mk -eq "" -or $mk -match "^[Yy]") { New-Item -ItemType Directory -Path $dataDir | Out-Null; OK "Created $dataDir" }
-    else { Err "Please create the folder and re-run."; exit 1 }
+  while ($true) {
+    $dataDir = Read-Host "   Top data folder [$defaultDir]"
+    if ([string]::IsNullOrWhiteSpace($dataDir)) { $dataDir = $defaultDir }
+    if (Test-Path $dataDir) { break }
+    Warn "That folder doesn't exist yet: $dataDir"
+    $mk = Read-Host "   Create it now? [Y/n]"
+    if ($mk -eq "" -or $mk -match "^[Yy]") {
+      try { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null; OK "Created $dataDir"; break }
+      catch { Err "Couldn't create that path - let's try another path." }
+    } else { Say "   Okay - let's pick a different folder." }
   }
   $ds = @(Get-ChildItem -Path $dataDir -Recurse -Depth 1 -Filter rawdata.csv -ErrorAction SilentlyContinue)
   if ($ds.Count -eq 0) { Warn "No dataset folders with a rawdata.csv found yet - you can add them later." } else { OK "Found $($ds.Count) dataset folder(s) with rawdata.csv." }

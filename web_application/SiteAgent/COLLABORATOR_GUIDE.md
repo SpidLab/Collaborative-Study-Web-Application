@@ -76,6 +76,16 @@ Docker Desktop is the engine that runs the helper safely in the background.
 3. Open **Docker Desktop** from the Start menu. Wait until the bottom-left corner is
    **green / "running"**.
 
+> **Windows — two first-time prompts you may see (both are normal):**
+> - **"WSL update required"** / a window mentioning `wsl.exe --update`. Docker needs
+>   the Windows Subsystem for Linux. Open **PowerShell** and run `wsl --update`, then
+>   reopen Docker Desktop. (More info: <https://aka.ms/wslinstall>.)
+> - **A Docker subscription / service-agreement "Accept" screen.** Docker Desktop is
+>   **free for personal and small-business use** — click **Accept** to continue;
+>   Docker won't finish starting until you do.
+> New to Docker? This short official guide walks through it:
+> <https://docs.docker.com/desktop/install/windows-install/>.
+
 > Do Step 1 only once. Leave Docker Desktop set to start with your computer (it does
 > by default), so the helper can run whenever your machine is on.
 
@@ -223,6 +233,28 @@ running in the background and restarts automatically when you turn your computer
 Your helper is now **enrolled once and ready for everything** — you won't touch any
 of Steps 1–4 again.
 
+### How to tell it's connected and ready ✅
+
+To confirm everything worked, watch the helper for a few seconds — **Mac:** run
+`./collab-agent.sh logs`; **Windows:** run `.\collab-agent.ps1 logs` (press Ctrl+C to
+stop watching). A correctly set-up helper prints lines like these:
+
+> `Connected to https://your-study-server (server version: 1.0.0)`
+> `✅ Connected as you@example.com`
+> `Registered metadata for 'eye_color': 35 samples, 3000 markers.`
+> `Datasets ready on this machine: eye_color (35 samples, 3000 markers)`
+> `Setup looks good — waiting for jobs. Polling every ~10s.`
+
+What to check:
+- **`✅ Connected as <your email>`** must be the **same account you log into the
+  website with**. A different email means the helper is signed in as the wrong account
+  (see Troubleshooting → "Connected as the wrong account").
+- **`Datasets ready … (N samples, M markers)`** means your dataset was found — on the
+  website that dataset will now show its sample and marker counts.
+- If you instead see **"No local datasets matched your registered phenotypes yet,"**
+  your data folder name doesn't match the phenotype you registered. Rename the folder
+  to match it exactly (Step 2) and start the helper again.
+
 ---
 
 ## Step 5 — Join or start collaborations (anytime)
@@ -329,6 +361,14 @@ sub-folder named exactly `xxx` with a `rawdata.csv` inside.
 **"...does not match the registered hash"**
 Your `rawdata.csv` changed after you registered it. Re-register the dataset on the
 website (or restore the original file), then it runs.
+
+**Connected as the wrong account**
+If the log's **`✅ Connected as …`** line shows a different email than the one you use
+on the website, the helper kept an old saved login. Reset and re-enroll: **Mac:**
+`./collab-agent.sh reset`; **Windows:** `.\collab-agent.ps1 reset` — then double-click
+"Start Agent" and paste **the connection code from the correct account** (Step 3).
+(The helper now also re-enrolls automatically when you paste a code for a different
+account, but a reset is the sure fix.)
 
 **"Invalid or expired connection code"**
 Codes expire after 24 hours. Generate a fresh one (Step 3), then double-click "Start

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Checkbox, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails,
+  Box, Typography, alpha, Divider, Button, Slider, TextField, MenuItem, Chip, Grid, Checkbox, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails,
 } from '@mui/material';
 import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, DownloadRounded, RadioButtonUncheckedRounded, Summarize as SummarizeIcon, Refresh as RefreshIcon, ShieldOutlined as ShieldIcon } from '@mui/icons-material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -32,6 +32,8 @@ const CollaborationDetails = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [senderInfo, setSenderInfo] = useState({ id: null, name: '' });
   const [invitedUsers, setInvitedUsers] = useState([]);
+  const [collaboratorFilter, setCollaboratorFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [collaborationUuid, setCollaborationUuid] = useState('');
   const [threshold, setThreshold] = useState(null);
   const [thresholdDefined, setThresholdDefined] = useState();
@@ -1660,6 +1662,37 @@ const CollaborationDetails = () => {
                 </List>
               </Box>
 
+              {/* QC failure surface + retry — so a failed QC offers a retry instead of
+                  the collaboration silently stalling toward "Initiate QC Calculation". */}
+              {(() => {
+                const mine = collaboration?.qc_job_status?.[current_user_id];
+                const failedOthers = Object.entries(collaboration?.qc_job_status || {})
+                  .filter(([uid, s]) => s?.status === 'failed' && uid !== current_user_id);
+                if (mine?.status !== 'failed' && failedOthers.length === 0) return null;
+                return (
+                  <Box sx={{ mt: 2 }}>
+                    {mine?.status === 'failed' && (
+                      <Alert severity="error" sx={{ borderRadius: 2 }}
+                        action={
+                          <Button color="inherit" size="small" disabled={isCreatingQcDataset}
+                            onClick={handleChainedQcCreate}>
+                            {isCreatingQcDataset ? 'Retrying…' : 'Retry QC'}
+                          </Button>
+                        }>
+                        Your quality-control step failed{mine.error ? `: ${mine.error}` : '.'}{' '}
+                        Fix the issue, then retry.
+                      </Alert>
+                    )}
+                    {role === 'sender' && failedOthers.length > 0 && (
+                      <Alert severity="warning" sx={{ borderRadius: 2, mt: 1 }}>
+                        Quality control failed for {failedOthers.length} collaborator(s); they need to
+                        retry from their own account before the analysis can continue.
+                      </Alert>
+                    )}
+                  </Box>
+                );
+              })()}
+
               {/*Quality Control Data Creation (AUTO) - chained QC runs automatically once collaboration starts */}
               {hasFilterQc && allUsersResponded && (() => {
                 const userHasSurvivingData = collaboration?.surviving_samples?.[current_user_id]?.length > 0;
@@ -2952,6 +2985,26 @@ const CollaborationDetails = () => {
                   </Typography>
                   <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                 </Box>
+                {invitedUsers.length > 3 && (
+                  <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                    <TextField
+                      size="small" fullWidth label="Filter by name"
+                      value={collaboratorFilter}
+                      onChange={(e) => setCollaboratorFilter(e.target.value)}
+                    />
+                    <TextField
+                      size="small" select label="Status" value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      sx={{ minWidth: 130 }}
+                    >
+                      <MenuItem value="all">All</MenuItem>
+                      <MenuItem value="pending">Pending</MenuItem>
+                      <MenuItem value="accepted">Accepted</MenuItem>
+                      <MenuItem value="rejected">Rejected</MenuItem>
+                      <MenuItem value="withdrawn">Withdrawn</MenuItem>
+                    </TextField>
+                  </Box>
+                )}
                 <List>
                   <ListItem disableGutters>
                     <ListItemText
@@ -2960,7 +3013,12 @@ const CollaborationDetails = () => {
                   </ListItem>
                   <Divider sx={{ borderColor: 'primary.main' }} />
 
-                  {invitedUsers.map((user, index) => (
+                  {(invitedUsers.length > 3
+                    ? invitedUsers
+                        .filter((u) => (u.name || '').toLowerCase().includes(collaboratorFilter.toLowerCase()))
+                        .filter((u) => statusFilter === 'all' || u.status === statusFilter)
+                    : invitedUsers
+                  ).map((user, index) => (
                     <ListItem key={index} disableGutters sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <ListItemText
                         primary={`${user.name} (Collaborator)`}
@@ -3022,6 +3080,12 @@ const CollaborationDetails = () => {
                   <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                 </Box>
                 {/*Will have the progress bar here*/}
+                {collaboration?.needs_min_participants && (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    This collaboration needs at least 2 participants to run. Invite (and have accept)
+                    at least one more collaborator before quality control can start.
+                  </Alert>
+                )}
                 <Stepper activeStep={progressActiveStep} orientation="vertical">
                   {progressSteps.map((step, index) => (
                     <Step key={index}>

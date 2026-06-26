@@ -16,6 +16,9 @@ venv/
 
 # Site Agent local token store
 .agentconfig*
+# Dev-only per-agent config dirs that held test tokens (never commit tokens)
+**/.cfg_creator/
+**/.cfg_invited/
 
 # Environment backups (keep .env.example tracked)
 .env.bak

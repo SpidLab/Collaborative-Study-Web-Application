@@ -20,3 +20,17 @@ resource "aws_ssm_parameter" "openai_api_key" {
   value = var.openai_api_key == "" ? "unset" : var.openai_api_key
   tags  = local.tags
 }
+
+resource "aws_ssm_parameter" "smtp_user" {
+  name  = "/${local.name}/SMTP_USER"
+  type  = "SecureString"
+  value = var.smtp_user == "" ? "unset" : var.smtp_user
+  tags  = local.tags
+}
+
+resource "aws_ssm_parameter" "smtp_pass" {
+  name  = "/${local.name}/SMTP_PASS"
+  type  = "SecureString"
+  value = var.smtp_pass == "" ? "unset" : var.smtp_pass
+  tags  = local.tags
+}

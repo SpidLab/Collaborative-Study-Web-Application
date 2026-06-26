@@ -22,6 +22,8 @@ data "aws_iam_policy_document" "instance" {
       aws_ssm_parameter.mongo_uri.arn,
       aws_ssm_parameter.secret_key.arn,
       aws_ssm_parameter.openai_api_key.arn,
+      aws_ssm_parameter.smtp_user.arn,
+      aws_ssm_parameter.smtp_pass.arn,
     ]
   }
 

@@ -160,6 +160,11 @@ const StartCollaboration = () => {
       return;
     }
 
+    if (selectedQcSchemes.length === 0) {
+      setSnackbar({ open: true, message: "Please select at least one QC scheme.", severity: 'error' });
+      return;
+    }
+
 
     setIsLoading(true);
     const collabQcSchemePayload = selectedQcSchemes.map(method => ({
@@ -228,8 +233,18 @@ const StartCollaboration = () => {
       setFileName('');
       setSelectedUsers([]);
       setSelectedDataset('');
-      setExperimentOptions([]);
-      setSelectedQcSchemes([]);
+      // Re-seed the default QC scheme (the mount effect won't re-run) so the form
+      // is immediately valid again for starting another collaboration. (Note: we do
+      // NOT clear experimentOptions — those are fetched once on mount and clearing
+      // them would permanently empty the Experiment Type dropdown.)
+      if (qcScheme.length > 0) {
+        setSelectedQcSchemes([qcScheme[0]]);
+        const defaults = QC_METHOD_DEFAULTS[qcScheme[0]];
+        setQcMethodParams(defaults ? { [qcScheme[0]]: { threshold: defaults.threshold } } : {});
+      } else {
+        setSelectedQcSchemes([]);
+        setQcMethodParams({});
+      }
       setResetSearch(prev => !prev);
 
     } catch (error) {
@@ -618,11 +633,16 @@ const StartCollaboration = () => {
           fullWidth
           size="large"
           onClick={handleCreateCollaboration}
-          disabled={isLoading}
+          disabled={isLoading || selectedQcSchemes.length === 0}
           sx={{ py: 2, fontSize: '1.1rem', borderRadius: 100 }}
         >
           {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Create Collaboration'}
         </Button>
+        {selectedQcSchemes.length === 0 && (
+          <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1, textAlign: 'center' }}>
+            Select at least one QC scheme to create a collaboration.
+          </Typography>
+        )}
       </Box>
 
       <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={handleCloseSnackbar}>

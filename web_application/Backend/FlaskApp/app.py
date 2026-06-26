@@ -36,6 +36,9 @@ import io
 
 # Local Site Agent job queue + agent API (replaces the Node/Kubernetes orchestrator)
 from agent_api import register_agent_api
+# Best-effort transactional email (Gmail SMTP). Failures never break a request.
+import email_utils
+import notifications
 
 # Experiment type constants
 EXPERIMENT_GWAS = "GWAS"
@@ -131,18 +134,18 @@ def get_current_user():
     auth_header = request.headers.get('Authorization')
     if not auth_header:
         logging.error("Authorization header missing")
-        return None, jsonify({"error": "Authorization header missing"}), 401
+        return None, (jsonify({"error": "Authorization header missing"}), 401)
 
     try:
         token = auth_header.split()[1]
     except IndexError:
         logging.error("Invalid Authorization header format")
-        return None, jsonify({"error": "Invalid Authorization header format"}), 401
+        return None, (jsonify({"error": "Invalid Authorization header format"}), 401)
 
     current_user = User.verify_auth_token(token)
     if not current_user:
         logging.error("Invalid or expired token")
-        return None, jsonify({"error": "Invalid or expired token"}), 401
+        return None, (jsonify({"error": "Invalid or expired token"}), 401)
 
     return current_user, None
 
@@ -378,6 +381,41 @@ def create_research_project():
 #         logging.error(f"Error: {str(e)}")
 #         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/my-datasets', methods=['GET'])
+def get_my_datasets():
+    """List the current user's own raw (non-QC, non-collaboration) datasets with the
+    metadata their Site Agent has synced (markers, sample count, file hash, last sync)."""
+    try:
+        current_user, error_response = get_current_user()
+        if error_response:
+            return error_response
+        uid = str(current_user.id)
+        query = {
+            '$or': [{'user_id': uid}, {'user_id': ObjectId(uid)}],
+            'is_qc_data': {'$ne': True},
+            'collaboration_specific': {'$ne': True},
+        }
+        projection = {
+            'phenotype': 1, 'number_of_samples': 1, 'n_snps': 1,
+            'file_sha256': 1, 'metadata_updated_at': 1,
+        }
+        out = []
+        for ds in db.datasets.find(query, projection):
+            updated = ds.get('metadata_updated_at')
+            out.append({
+                'id': str(ds['_id']),
+                'phenotype': ds.get('phenotype'),
+                'number_of_samples': ds.get('number_of_samples'),
+                'n_snps': ds.get('n_snps'),
+                'file_sha256': ds.get('file_sha256'),
+                'metadata_updated_at': updated.isoformat() if hasattr(updated, 'isoformat') else updated,
+            })
+        return jsonify(out), 200
+    except Exception as e:
+        logging.error(f"Error listing my datasets: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
 @app.route('/api/invite/users', methods=['GET'])
 def get_users_for_invitation():
     try:
@@ -389,6 +427,7 @@ def get_users_for_invitation():
         # Get query parameters
         query = request.args.get('phenotype', '').strip()
         min_samples = request.args.get('minSamples', '').strip()
+        name_query = request.args.get('name', '').strip()
 
         # Build the search filter based on min_samples
         # IMPORTANT: Only search RAW datasets, NOT QC datasets or collaboration-specific datasets
@@ -465,6 +504,10 @@ def get_users_for_invitation():
             user = user_map.get(user_id_str)
             if not user:
                 continue  # Skip if user not found
+
+            # Optional case-insensitive filter by collaborator name
+            if name_query and name_query.lower() not in (user.get("name", "") or "").lower():
+                continue
             
             phenotype = doc.get('phenotype', "No Phenotype")
             
@@ -952,6 +995,17 @@ def accept_invitation():
         if result.modified_count == 0:
             return jsonify({'message': 'No matching user found in invited_users'}), 404
 
+        # Notify the initiator that this collaborator accepted (best-effort; never blocks).
+        try:
+            accepter = db.users.find_one({"_id": ObjectId(user_id)}, {"name": 1})
+            creator = db.users.find_one({"_id": ObjectId(str(collaboration.get('creator_id')))}, {"email": 1})
+            if creator and creator.get("email"):
+                email_utils.notify_invitation_accepted(
+                    creator["email"], (accepter or {}).get("name"),
+                    collaboration.get("name", "your collaboration"), uuid)
+        except Exception as e:
+            logging.warning(f"Acceptance email skipped for {uuid}: {e}")
+
         # If this was the last pending response, automatically trigger chained QC creation
         # for initiator + accepted collaborators (fire-and-forget via orchestrator).
         try:
@@ -1136,6 +1190,34 @@ def _maybe_trigger_auto_chained_qc(collaboration_uuid: str):
     if not participants:
         db['collaborations'].update_one({"uuid": str(collaboration_uuid)}, {"$set": {"auto_qc_triggered": True}})
         return
+
+    # Guard: a collaboration needs at least two participating sites to be meaningful,
+    # and pairwise schemes (Sample Relatedness / Population Stratification) are
+    # mathematically impossible with a single site. Don't start a QC run that would
+    # just get stuck — flag the collaboration so the UI can ask for more participants.
+    # A collaboration needs at least two participating sites (one user == one site).
+    distinct_sites = len({p["user_id"] for p in participants})
+    if distinct_sites < 2:
+        db['collaborations'].update_one(
+            {"uuid": str(collaboration_uuid)},
+            {"$set": {"needs_min_participants": True,
+                      "qc_blocked_reason": "needs_two_participants"}}
+        )
+        logging.info("Collaboration %s not started: needs >=2 participants (have %d).",
+                     collaboration_uuid, distinct_sites)
+        return
+
+    # Enough participants — clear any prior 'needs more participants' flag.
+    db['collaborations'].update_one(
+        {"uuid": str(collaboration_uuid)},
+        {"$set": {"needs_min_participants": False}, "$unset": {"qc_blocked_reason": ""}}
+    )
+
+    # Everyone has responded and QC is starting — tell all participants (once, best-effort).
+    try:
+        notifications.notify_started(db, str(collaboration_uuid))
+    except Exception as e:
+        logging.warning("Start notification skipped for %s: %s", collaboration_uuid, e)
 
     # Mark triggered first to prevent double submit in race conditions
     db['collaborations'].update_one(
@@ -1589,6 +1671,10 @@ def post_start_collaboration():
         if not collab_name:
             logging.error("Collaboration name missing in the request")
             return jsonify({"error": "Collaboration name is required"}), 400
+
+        if not collabQcScheme:
+            logging.error("No QC scheme provided when creating collaboration")
+            return jsonify({"error": "At least one QC scheme is required."}), 400
             
         # Create NEW empty datasets for each invited user for THIS specific collaboration
         # This ensures each collaboration has its own independent dataset
@@ -1644,6 +1730,20 @@ def post_start_collaboration():
 
         result = db.collaborations.insert_one(collaboration)
         logging.info(f"Inserted collaboration with id: {result.inserted_id}")
+
+        # Email each invited collaborator that they've been invited (best-effort; never blocks).
+        try:
+            try:
+                inviter_name = current_user.user_json.get('name')
+            except Exception:
+                inviter_name = None
+            for iu in invited_users_with_new_datasets:
+                invitee = db.users.find_one({"_id": iu['user_id']}, {"email": 1})
+                if invitee and invitee.get("email"):
+                    email_utils.notify_invitation(
+                        invitee["email"], inviter_name, collab_name, collaboration['uuid'])
+        except Exception as e:
+            logging.warning(f"Invitation email(s) skipped for {collaboration['uuid']}: {e}")
 
         return jsonify({
             'message': 'Collaboration created successfully',
@@ -1896,6 +1996,22 @@ def get_collaboration_details(uuid):
             elif isinstance(item, dict) and "method" in item:
                 normalized_qc.append(item)
 
+        # A collaboration needs >=2 participating sites to run (initiator + at least
+        # one accepted collaborator); pairwise schemes are impossible with one site.
+        # Surface this so the UI can clearly ask for more participants instead of
+        # appearing to hang at the QC step.
+        buildable_participants = len(obligated_user_ids)  # initiator + accepted invitees
+        needs_min_participants = buildable_participants < 2
+
+        # Per-user chained_qc job status so the UI can show a clear "Retry QC" on
+        # failure instead of appearing to hang. Latest job per user wins.
+        qc_job_status = {}
+        for j in db.jobs.find({"collaboration_uuid": uuid, "action": "chained_qc"}).sort("created_at", 1):
+            qc_job_status[str(j.get("user_id"))] = {
+                "status": j.get("status"),
+                "error": (j.get("error") or "")[:300],
+            }
+
         collaboration_details = {
             'uuid': collaboration['uuid'],
             'name': collaboration['name'],
@@ -1911,6 +2027,9 @@ def get_collaboration_details(uuid):
             'current_logged_in_user_id': user_id,
             'surviving_snps': collaboration.get('surviving_snps', {}),
             'surviving_samples': collaboration.get('surviving_samples', {}),
+            'participant_count': buildable_participants,
+            'needs_min_participants': needs_min_participants,
+            'qc_job_status': qc_job_status,
         }
 
         return jsonify(collaboration_details), 200
@@ -2616,6 +2735,7 @@ def upload_csv_stats():
                 logging.error("Collaboration entry not found or not updated")
                 return jsonify({'message': 'Collaboration entry not found or not updated'}), 404
 
+            notifications.notify_progress(db, collaboration_uuid)
             return jsonify({'message': 'CSV file processed and stats updated successfully'}), 200
 
         except Exception as e:
@@ -3342,6 +3462,23 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
             {"$set": {"chi_square_results": chi_square_results}},
             upsert=False
         )
+
+        # Notify all participants that results are ready (best-effort; never blocks).
+        try:
+            recipient_emails = []
+            for pid in obligated_user_ids:
+                try:
+                    u = db.users.find_one({"_id": ObjectId(pid)}, {"email": 1})
+                except Exception:
+                    u = None
+                if u and u.get("email"):
+                    recipient_emails.append(u["email"])
+            if recipient_emails:
+                email_utils.notify_results_ready(
+                    recipient_emails, collaboration.get("name", "your collaboration"),
+                    collaboration_uuid)
+        except Exception as e:
+            logging.warning(f"Results-ready email skipped for {collaboration_uuid}: {e}")
 
         return {"message": "Chi-square results calculated and stored successfully"}, 200
 

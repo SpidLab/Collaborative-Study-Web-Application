@@ -14,12 +14,19 @@ APP_DIR=/opt/collabstudy
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
-# Fetch secrets from SSM
+# Fetch secrets from SSM (disable command tracing so decrypted values are never
+# echoed to /var/log/cloud-init-output.log)
 REGION="${region}"
+set +x
 MONGO_URI=$(aws ssm get-parameter --region "$REGION" --name "${mongo_uri_param}" --with-decryption --query Parameter.Value --output text)
 SECRET_KEY=$(aws ssm get-parameter --region "$REGION" --name "${secret_key_param}" --with-decryption --query Parameter.Value --output text)
 OPENAI_API_KEY=$(aws ssm get-parameter --region "$REGION" --name "${openai_param}" --with-decryption --query Parameter.Value --output text)
 [ "$OPENAI_API_KEY" = "unset" ] && OPENAI_API_KEY=""
+SMTP_USER=$(aws ssm get-parameter --region "$REGION" --name "${smtp_user_param}" --with-decryption --query Parameter.Value --output text)
+[ "$SMTP_USER" = "unset" ] && SMTP_USER=""
+SMTP_PASS=$(aws ssm get-parameter --region "$REGION" --name "${smtp_pass_param}" --with-decryption --query Parameter.Value --output text)
+[ "$SMTP_PASS" = "unset" ] && SMTP_PASS=""
+set -x
 
 cat > "$APP_DIR/.env" <<EOF
 API_IMAGE=${api_image}
@@ -28,6 +35,8 @@ DOMAIN=${domain}
 MONGO_URI=$MONGO_URI
 SECRET_KEY=$SECRET_KEY
 OPENAI_API_KEY=$OPENAI_API_KEY
+SMTP_USER=$SMTP_USER
+SMTP_PASS=$SMTP_PASS
 EOF
 
 cat > "$APP_DIR/docker-compose.yml" <<'EOF'

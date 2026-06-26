@@ -250,16 +250,19 @@ def run_chained_qc(df, methods, models_dir):
             (m.get("params", {}) for m in methods if NAME_TO_ID.get(m.get("method", ""), "") == "pca"), {}
         )
         # PCA (for Population Stratification) needs the pretrained model's exact SNP
-        # set. If this dataset doesn't match it, skip coords but still return the
-        # filter-chain results rather than failing the whole job.
+        # set. It is a REQUIRED step for this scheme, so if it can't run, FAIL the job
+        # loudly rather than completing with no coordinates — otherwise the
+        # collaboration would silently stall at "Initiate QC Calculation". A failed
+        # job surfaces a clear "Retry QC" in the UI.
         try:
             pca_df = _run_pca(base, pca_params, models_dir)
-            out["pca_coords"] = _matrix_dict(pca_df)
         except Exception as e:
-            logger.warning(
-                "Skipping PCA / Population Stratification coordinates for this dataset "
-                "(it doesn't match the pretrained PCA model): %s", e
+            raise ValueError(
+                "Population Stratification (PCA) could not run for this dataset: "
+                f"{e}. Use data with the full marker panel, or remove Population "
+                "Stratification from the QC scheme, then retry."
             )
+        out["pca_coords"] = _matrix_dict(pca_df)
     return out
 
 

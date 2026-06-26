@@ -151,6 +151,7 @@ import URL from '../../config';
 function SearchPage({ onUserSelect, resetTrigger }) {
   const [phenotype, setPhenotype] = useState('');
   const [minSamples, setMinSamples] = useState('');
+  const [name, setName] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedDatasets, setSelectedDatasets] = useState({}); // Renamed to reflect dataset selection
 
@@ -172,6 +173,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
         params: {
           phenotype: phenotype,
           minSamples: minSamples,
+          name: name,
         },
       };
 
@@ -198,6 +200,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
     setSelectedDatasets({});
     setPhenotype(''); // Optionally reset search input fields
     setMinSamples('');
+    setName('');
   }, [resetTrigger]);
 
 
@@ -227,7 +230,20 @@ function SearchPage({ onUserSelect, resetTrigger }) {
             Search Collaborators
           </Typography> */}
         </Grid>
-        <Grid item xs={12} sm={4}>
+        <Grid item xs={12} sm={3}>
+          <TextField
+            fullWidth
+            label="Name"
+            variant="outlined"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            sx={{ mb: 2 }}
+            InputProps={{
+              sx: {borderRadius: 2, borderColor: 'divider'}
+            }}
+          />
+        </Grid>
+        <Grid item xs={12} sm={3}>
           <TextField
             fullWidth
             label="Phenotype(s)"
@@ -240,7 +256,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
             }}
           />
         </Grid>
-        <Grid item xs={12} sm={4}>
+        <Grid item xs={12} sm={3}>
           <TextField
             fullWidth
             label="Minimum # of Samples"
@@ -254,7 +270,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
             }}
           />
         </Grid>
-        <Grid item xs={12} sm={4} md={4}>
+        <Grid item xs={12} sm={3} md={3}>
           <Button
             variant="outlined"
             color="primary"

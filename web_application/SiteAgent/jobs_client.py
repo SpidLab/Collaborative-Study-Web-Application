@@ -38,6 +38,13 @@ class JobsClient:
         resp.raise_for_status()
         return resp.json()
 
+    def me(self):
+        """Return the account this agent's token is scoped to: {uid, email, name}."""
+        url = f"{self.server_url}/api/agent/me"
+        resp = requests.get(url, headers=self._headers(), timeout=self.request_timeout)
+        resp.raise_for_status()
+        return resp.json()
+
     def list_datasets(self):
         """List the datasets registered to this agent's user (id + phenotype)."""
         url = f"{self.server_url}/api/agent/datasets"

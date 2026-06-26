@@ -15,6 +15,12 @@ secret_key = "REPLACE_WITH_openssl_rand_hex_32"
 # Optional: enables the GWAS AI summary
 openai_api_key = ""
 
+# Optional: email notifications (invitations / acceptance / results ready) via Gmail SMTP.
+# Leave both empty to disable email entirely (the app still works without it).
+# Create an App Password: Google Account -> Security -> 2-Step Verification -> App passwords.
+smtp_user = "collabstudy.noreply@gmail.com"   # e.g. "collaborativestudy.noreply@gmail.com"
+smtp_pass = "pgqydhipprwafeqz"   # the 16-character Gmail App Password (NOT your account password)
+
 # Restrict SSH to your IP (or leave "" to disable SSH; SSM Session Manager still works)
 ssh_cidr = ""
 # key_name = "my-ec2-keypair"   # only if you set ssh_cidr and want SSH

@@ -21,6 +21,8 @@ import jwt
 from bson.objectid import ObjectId
 from flask import request, jsonify
 
+import notifications
+
 logger = logging.getLogger("agent_api")
 
 # Outputs the agent is allowed to send back, and where each lands on the
@@ -150,6 +152,25 @@ def register_agent_api(app, db, signing_key=None):
             return err
         return jsonify({"version": AGENT_VERSION, "server": "collaborative-study"}), 200
 
+    @app.route("/api/agent/me", methods=["GET"])
+    def agent_me():
+        """Return the account this agent token is scoped to, so the agent can show
+        the collaborator which account it is acting as (catches wrong-account setups
+        immediately instead of silently polling an empty queue)."""
+        uid, err = current_agent_uid()
+        if err:
+            return err
+        user = None
+        try:
+            user = db["users"].find_one({"_id": ObjectId(uid)}, {"email": 1, "name": 1})
+        except Exception:
+            user = None
+        return jsonify({
+            "uid": str(uid),
+            "email": (user or {}).get("email"),
+            "name": (user or {}).get("name"),
+        }), 200
+
     @app.route("/api/agent/datasets", methods=["GET"])
     def agent_list_datasets():
         """List this agent's datasets so it can proactively register metadata
@@ -268,6 +289,10 @@ def register_agent_api(app, db, signing_key=None):
 
         jobs.update_one({"job_id": job_id}, {"$set": {
             "status": "complete", "completed_at": datetime.utcnow()}})
+
+        # A QC/stat result just landed — nudge the next blocker / notify on stage completion.
+        if collab_uuid:
+            notifications.notify_progress(db, collab_uuid)
         return jsonify({"success": True, "status": "complete"}), 200
 
     # Expose token minting for use by an authenticated website route in app.py.

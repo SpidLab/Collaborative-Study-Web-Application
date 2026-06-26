@@ -67,14 +67,18 @@ setup_wizard() {
   say "   named like the phenotype you registered, each holding a 'rawdata.csv'."
   say "   Example:  <this folder>/eye_color/rawdata.csv"
   local default_dir="$HOME/collab-data"
-  read -r -p "   Top data folder [${default_dir}]: " HOST_DATA_DIR
-  HOST_DATA_DIR="${HOST_DATA_DIR:-$default_dir}"
-  HOST_DATA_DIR="${HOST_DATA_DIR/#\~/$HOME}"
-  if [ ! -d "$HOST_DATA_DIR" ]; then
-    warn "That folder doesn't exist yet."
+  while true; do
+    read -r -p "   Top data folder [${default_dir}]: " HOST_DATA_DIR
+    HOST_DATA_DIR="${HOST_DATA_DIR:-$default_dir}"
+    HOST_DATA_DIR="${HOST_DATA_DIR/#\~/$HOME}"
+    [ -d "$HOST_DATA_DIR" ] && break
+    warn "That folder doesn't exist yet: $HOST_DATA_DIR"
     read -r -p "   Create it now? [Y/n]: " mk
-    case "${mk:-Y}" in [Yy]*) mkdir -p "$HOST_DATA_DIR"; ok "Created $HOST_DATA_DIR";; *) err "Please create the folder and re-run."; exit 1;; esac
-  fi
+    case "${mk:-Y}" in
+      [Yy]*) if mkdir -p "$HOST_DATA_DIR" 2>/dev/null; then ok "Created $HOST_DATA_DIR"; break; else err "Couldn't create that path — let's try another path."; fi ;;
+      *) say "   Okay — let's pick a different folder.";;
+    esac
+  done
   local n_ds; n_ds=$(find "$HOST_DATA_DIR" -maxdepth 2 -iname 'rawdata.csv' 2>/dev/null | wc -l | tr -d ' ')
   if [ "$n_ds" = "0" ]; then
     warn "No dataset folders with a rawdata.csv found yet — you can add them later."

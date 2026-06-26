@@ -50,3 +50,17 @@ variable "openai_api_key" {
   default     = ""
   description = "Optional: enables the GWAS AI summary."
 }
+
+variable "smtp_user" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Gmail account used to send notification emails (SMTP login). Empty = email disabled."
+}
+
+variable "smtp_pass" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Gmail App Password for smtp_user (NOT the account password). Empty = email disabled."
+}

@@ -30,6 +30,8 @@ locals {
     mongo_uri_param  = aws_ssm_parameter.mongo_uri.name
     secret_key_param = aws_ssm_parameter.secret_key.name
     openai_param     = aws_ssm_parameter.openai_api_key.name
+    smtp_user_param  = aws_ssm_parameter.smtp_user.name
+    smtp_pass_param  = aws_ssm_parameter.smtp_pass.name
     compose          = file("${path.module}/../docker-compose.yml")
   })
 }
