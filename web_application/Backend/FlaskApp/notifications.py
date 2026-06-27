@@ -88,12 +88,22 @@ def notify_progress(db, uuid):
                     em = _email_for(db, u)
                     if em:
                         email_utils.notify_action_needed(em, name, uuid, "quality control")
-        elif qc_done == obligated:                    # complete: tell the initiator once
-            if _claim(db, uuid, "qc_done"):
-                em = _email_for(db, creator)
-                if em:
-                    email_utils.notify_stage_advanced(
-                        em, name, uuid, "quality control is complete", "Create the GWAS dataset")
+        elif qc_done == obligated:                    # QC results all in
+            scheme = {(m.get("method") if isinstance(m, dict) else str(m))
+                      for m in (collab.get("qc_scheme") or [])}
+            is_pairwise = bool({"Sample Relatedness", "Population Stratification"} & scheme)
+            if is_pairwise:
+                # Initiator must run the pairwise calc + set a threshold before the
+                # stat-data stage opens; collaborators just wait for now.
+                if _claim(db, uuid, "qc_done"):
+                    em = _email_for(db, creator)
+                    if em:
+                        email_utils.notify_stage_advanced(
+                            em, name, uuid, "quality control is complete",
+                            "Initiate the QC calculation and set a threshold")
+            else:
+                # Filter-only: the stat-data stage opens immediately for EVERYONE.
+                notify_stat_stage(db, uuid)
 
         # --- GWAS-counts stage (only once stats have started arriving) ---
         stats = collab.get("stats", {}) or {}
@@ -116,3 +126,21 @@ def notify_progress(db, uuid):
                             em, name, uuid, "all GWAS counts are in", "Run the GWAS calculation")
     except Exception as e:
         logger.warning("progress email skipped for %s: %s", uuid, e)
+
+
+def notify_stat_stage(db, uuid):
+    """The stat-data stage is open (filter QC done, or the threshold was just set) —
+    tell EVERY participant it's their turn to generate stat data. Once per collaboration."""
+    try:
+        collab = db["collaborations"].find_one({"uuid": uuid})
+        if not collab:
+            return
+        if not _claim(db, uuid, "stat_stage_open"):
+            return
+        name = collab.get("name", "your study")
+        for u in _obligated(collab):
+            em = _email_for(db, u)
+            if em:
+                email_utils.notify_generate_stats(em, name, uuid)
+    except Exception as e:
+        logger.warning("stat-stage email skipped for %s: %s", uuid, e)

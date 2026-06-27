@@ -3295,6 +3295,10 @@ def get_filtered_qc_results(collab_uuid):
         if threshold_update_result.matched_count == 0:
             return jsonify({"error": "Failed to update threshold."}), 500
 
+        # Threshold is set -> the stat-data stage is open for everyone. Notify ALL
+        # participants (not just the initiator) that it's their turn to generate stats.
+        notifications.notify_stat_stage(db, collab_uuid)
+
         final_results = {}
 
         if qc_method == "Sample Relatedness":

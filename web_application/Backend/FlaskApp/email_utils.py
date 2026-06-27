@@ -201,3 +201,21 @@ def notify_stage_advanced(to_email, collab_name, collab_uuid, status_text, next_
         f"<a href=\"{link}\">collaboration page</a>.</p>"
     )
     return send_email(to_email, subject, text, html)
+
+
+def notify_generate_stats(to_email, collab_name, collab_uuid):
+    """Tell a participant it's their turn to generate stat data (after QC / threshold)."""
+    link = f"{app_base_url()}/collaboration/{collab_uuid}"
+    subject = f"Your turn: generate stat data for {collab_name}"
+    text = (
+        f"Quality control is complete for \"{collab_name}\" and the threshold is set.\n\n"
+        f"Open the collaboration and click \"Create GWAS dataset\" to generate your stat "
+        f"data — your Site Agent computes it locally and uploads only the counts.\n{link}\n"
+    )
+    html = (
+        f"<p>Quality control is complete for \"<b>{collab_name}</b>\" and the threshold is set.</p>"
+        f"<p>Open the collaboration and click <b>Create GWAS dataset</b> to generate your stat "
+        f"data — your Site Agent computes it locally and uploads only the counts.</p>"
+        f"<p><a href=\"{link}\">Open the collaboration</a></p>"
+    )
+    return send_email(to_email, subject, text, html)
