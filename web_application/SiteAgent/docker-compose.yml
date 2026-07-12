@@ -1,0 +1,22 @@
+# One-command operation for collaborators:
+#   docker compose up -d      # start (runs in background, restarts with your computer)
+#   docker compose logs -f    # watch what it's doing
+#   docker compose down       # stop
+#
+# Settings come from the .env file next to this one (the setup script creates it).
+services:
+  agent:
+    image: ${AGENT_IMAGE:-collabstudy-agent:local}
+    build:
+      context: .
+    container_name: collab-agent
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Your raw data folder, mounted READ-ONLY (the agent can never change it):
+      - "${HOST_DATA_DIR}:/data:ro"
+      # Persistent store for the saved login token:
+      - agent_config:/config
+
+volumes:
+  agent_config: {}

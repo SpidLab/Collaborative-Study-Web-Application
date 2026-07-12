@@ -7,6 +7,8 @@
 .env
 .env.*
 !.env.example
+.env.bak
+.env.backup
 
 # ===== Python =====
 __pycache__/
@@ -50,6 +52,17 @@ terraform.rc
 
 # ===== Deployment lives ONLY on the pilot_deployment branch — never commit it on this branch =====
 deploy/
+
+# ===== Site Agent (local FL/QC agent) =====
+# Local token store + dev-only per-agent config dirs that held test tokens (never commit tokens)
+.agentconfig*
+**/.cfg_creator/
+**/.cfg_invited/
+**/.agentconfig_*/
+# Generated collaborator kit
+collabstudy-agent-kit.zip
+# Agent local working data (per-site raw genotype CSVs — never leave the site)
+web_application/SiteAgent/raw-data/
 
 # ===== Logs & temp =====
 *.log

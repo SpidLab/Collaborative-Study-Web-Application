@@ -1,0 +1,16 @@
+# Keep the agent build context small. The Dockerfile copies only the agent code,
+# qc_modules/, and models/ — everything below is dev/test/docs, never shipped.
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.git
+.agentconfig*
+.env
+raw-data/
+smoke_test.py
+MANUAL_TEST_SINGLE_MACHINE.md
+COLLABORATOR_GUIDE.md
+README.md

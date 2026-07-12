@@ -52,7 +52,7 @@ const NewUser = () => {
 
       console.log('Response:', response.data); // Debugging
       setError('');
-      setSuccess('Registration complete! Verify your email to get started.'); // Set success message
+      setSuccess('Registration complete! You can now log in.'); // Set success message
       // Clear form fields
       setUsername('');
       setName(''); // Clear name field

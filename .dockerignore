@@ -1,0 +1,21 @@
+# Build context for the web image is the repo root (deploy/Dockerfile.web).
+# Keep it small: only web_application/Frontend (minus node_modules) + deploy/Caddyfile
+# are actually needed.
+.git
+.github
+**/.DS_Store
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/venv/
+**/node_modules/
+web_application/Frontend/dist/
+web_application/Backend/
+web_application/SiteAgent/
+datasets/
+Metadata-Generator/
+deploy/terraform/
+scripts/
+*.docx
+*.pdf
+*.md

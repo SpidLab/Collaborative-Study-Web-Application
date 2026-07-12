@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Box, Typography, alpha, Divider, Button, Slider, TextField, Chip, Grid, Checkbox, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails,
+  Box, Typography, alpha, Divider, Button, Slider, TextField, MenuItem, Chip, Grid, Checkbox, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails,
 } from '@mui/material';
 import { Add, Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon, DownloadRounded, RadioButtonUncheckedRounded, Summarize as SummarizeIcon, Refresh as RefreshIcon, ShieldOutlined as ShieldIcon } from '@mui/icons-material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -35,6 +35,8 @@ const CollaborationDetails = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [senderInfo, setSenderInfo] = useState({ id: null, name: '' });
   const [invitedUsers, setInvitedUsers] = useState([]);
+  const [collaboratorFilter, setCollaboratorFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [collaborationUuid, setCollaborationUuid] = useState('');
   const [threshold, setThreshold] = useState(null);
   const [thresholdDefined, setThresholdDefined] = useState();
@@ -89,9 +91,11 @@ const CollaborationDetails = () => {
   const steps = ['QC Calculation', 'Stat Data Upload'];
 
 
-  useEffect(() => {
-    const fetchCollaborationDetails = async () => {
-      // Reset all QC and GWAS related state when UUID changes (new collaboration loaded)
+  // Fetch (and re-fetch) the collaboration. Pass silent=true for background
+  // refreshes so we don't reset/flash the UI — used by polling and after actions.
+  const fetchCollaborationDetails = async (silent = false) => {
+    if (!silent) {
+      // Fresh load (new collaboration): clear previous state.
       setQcResultsAvailable(false);
       setQcResults(null);
       setGwasResultsAvailable(false);
@@ -102,48 +106,62 @@ const CollaborationDetails = () => {
       setdisplayQcResults(false);
       setActiveStep(0);
       setIsQcInitiateLoading(false);
-      
-      try {
-        const response = await axios.get(`${URL}/api/collaboration/${uuid}`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
-          },
-        });
-        console.log("Data from Backend: ", response.data);
-        setCollaboration(response.data);
-        setCollabName(response.data.name);
-        setExperimentList(response.data.experiments || []);
-        const rawQcScheme = response.data.collabQcScheme || [];
-        const normalizedQc = rawQcScheme.map(item =>
-          typeof item === 'string' ? { method: item, params: {} } : item
-        );
-        setQcScheme(normalizedQc);
-        console.log("QC Scheme: ", normalizedQc);
-        setPhenotype(response.data.creator_datasets.phenotype || []);
-        setCreator(response.data.creator_datasets || []);
-        setCollaborationUuid(response.data.uuid);
-        setSenderInfo({ is_sender: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
-        setInvitedUsers(response.data.invited_users || []);
-        determineUserRole(response.data);
-        
-        // After fetching collaboration details, check QC status
-        if (response.data.collabQcScheme && response.data.collabQcScheme.length > 0) {
-          await checkQcStatus(response.data.collabQcScheme);
-        }
-        
-        // Also check GWAS status when component mounts
-        await checkGwasStatus();
-      } catch (error) {
-        console.error('Error fetching collaboration details:', error);
+    }
+
+    try {
+      const response = await axios.get(`${URL}/api/collaboration/${uuid}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      setCollaboration(response.data);
+      setCollabName(response.data.name);
+      setExperimentList(response.data.experiments || []);
+      const rawQcScheme = response.data.collabQcScheme || [];
+      const normalizedQc = rawQcScheme.map(item =>
+        typeof item === 'string' ? { method: item, params: {} } : item
+      );
+      setQcScheme(normalizedQc);
+      setPhenotype(response.data.creator_datasets.phenotype || []);
+      setCreator(response.data.creator_datasets || []);
+      setCollaborationUuid(response.data.uuid);
+      setSenderInfo({ is_sender: response.data.is_sender, name: response.data.sender_name, id: response.data.sender_id });
+      setInvitedUsers(response.data.invited_users || []);
+      determineUserRole(response.data);
+
+      // Refresh QC + GWAS status too, so the stage advances on its own.
+      if (response.data.collabQcScheme && response.data.collabQcScheme.length > 0) {
+        await checkQcStatus(response.data.collabQcScheme);
+      }
+      await checkGwasStatus();
+    } catch (error) {
+      console.error('Error fetching collaboration details:', error);
+      if (!silent) {
         setSnackbar({
           open: true,
           message: 'Failed to fetch collaboration details. Please try again.',
           severity: 'error',
         });
       }
-    };
+    }
+  };
+
+  useEffect(() => {
     fetchCollaborationDetails();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uuid]);
+
+  // Auto-refresh in the background so the collaboration stage updates on its own
+  // (invitations accepted, QC finished by agents, stat data uploaded, GWAS results)
+  // without anyone needing to reload the page. Stops once final results are in.
+  useEffect(() => {
+    if (gwasResultsAvailable) return; // everything's done — no need to keep polling
+    const intervalId = setInterval(() => {
+      fetchCollaborationDetails(true);
+    }, 6000);
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uuid, gwasResultsAvailable]);
 
 
   // setting the current user id
@@ -180,9 +198,9 @@ const CollaborationDetails = () => {
         { uuid },
         { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
       );
-      if (response.status === 200) {
-        setSnackbar({ open: true, message: 'QC dataset created successfully. Data filtered and ready.', severity: 'success' });
-        setTimeout(() => window.location.reload(), 1500);
+      if (response.status >= 200 && response.status < 300) {
+        setSnackbar({ open: true, message: 'QC job queued. Your local agent will run it shortly — refresh in a few seconds.', severity: 'success' });
+        setTimeout(() => fetchCollaborationDetails(true), 4000);
       }
     } catch (error) {
       const msg = error.response?.data?.error || error.message || 'Failed to create QC dataset';
@@ -215,9 +233,9 @@ const CollaborationDetails = () => {
         { uuid, sample_ids: sampleIds },
         { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
       );
-      if (response.status === 200) {
-        setSnackbar({ open: true, message: 'GWAS dataset created successfully.', severity: 'success' });
-        setTimeout(() => window.location.reload(), 1000);
+      if (response.status >= 200 && response.status < 300) {
+        setSnackbar({ open: true, message: 'GWAS computation queued. Your local agent will compute the per-SNP counts shortly — refresh in a few seconds.', severity: 'success' });
+        setTimeout(() => fetchCollaborationDetails(true), 4000);
       }
     } catch (error) {
       const msg = error.response?.data?.error || error.message || 'Failed to create GWAS dataset';
@@ -247,7 +265,7 @@ const CollaborationDetails = () => {
       });
       if (response.status === 200) {
         setTimeout(() => {
-          window.location.reload();
+          fetchCollaborationDetails(true);
         }, 1000);
       }
 
@@ -352,7 +370,7 @@ const CollaborationDetails = () => {
       });
 
       setTimeout(() => {
-        window.location.reload(); // reloads the page after 2 seconds
+        fetchCollaborationDetails(true); // reloads the page after 2 seconds
       }, 1000);
 
       checkQcStatus();
@@ -440,7 +458,7 @@ const CollaborationDetails = () => {
         );
         setSnackbar({ open: true, message: 'Invitation accepted successfully!', severity: 'success' });
         setTimeout(() => {
-          window.location.reload();
+          fetchCollaborationDetails(true);
         }, 100);
 
       }
@@ -518,7 +536,7 @@ const CollaborationDetails = () => {
         setThresholdDefined(true);
         setThreshold(newThreshold);
         setTimeout(() => {
-          window.location.reload(); // reloads the page after 2 seconds
+          fetchCollaborationDetails(true); // reloads the page after 2 seconds
         }, 1000);
         setSnackbar({
           open: true,
@@ -810,16 +828,30 @@ const CollaborationDetails = () => {
         });
         // Auto refresh after 2 seconds
         setTimeout(() => {
-          window.location.reload();
+          fetchCollaborationDetails(true);
         }, 2000);
       }
     } catch (error) {
       console.error('Error initiating QC calculations:', error);
-      setSnackbar({
-        open: true,
-        message: 'Failed to initiate QC calculations. Please try again.',
-        severity: 'error',
-      });
+      const status = error?.response?.status;
+      const serverMsg = error?.response?.data?.error;
+      let message;
+      if (status === 409) {
+        // Pairwise QC can't run yet: the per-site outputs it needs (PCA coordinates
+        // for Population Stratification, or the transformed matrix for Sample
+        // Relatedness) haven't been uploaded.
+        message = serverMsg ||
+          'Pairwise QC results aren\'t available yet. For Population Stratification, each ' +
+          'site must upload PCA coordinates — which only works on datasets that share the ' +
+          'reference SNP panel (e.g. the eye_color panel), not small/unrelated SNP sets.';
+        setSnackbar({ open: true, message, severity: 'warning' });
+      } else {
+        setSnackbar({
+          open: true,
+          message: serverMsg || 'Failed to initiate QC calculations. Please try again.',
+          severity: 'error',
+        });
+      }
       setIsQcInitiateLoading(false);
     }
   };
@@ -1386,8 +1418,15 @@ const CollaborationDetails = () => {
       setProgressActiveStep(0);
       return;
     }
-    // if QC Results not available, it stays here
-    if (allAcceptedUsersUploaded && !thresholdDefined) {
+    // Filter-only QC (MAF/HWE/Missing) has NO pairwise QC-calculation step on the
+    // collaborative dataset — skip straight to Stat Data once everyone's QC is in.
+    if (filterOnlyQcComplete && !collaboration?.stat_uploaded) {
+      setProgressActiveStep(2);
+      return;
+    }
+    // Pairwise QC (Sample Relatedness / Population Stratification): wait here until
+    // results + threshold are set.
+    if (allAcceptedUsersUploaded && !thresholdDefined && !isFilterOnlyQc) {
       setProgressActiveStep(1);
       return;
     }
@@ -1577,9 +1616,9 @@ const CollaborationDetails = () => {
                       secondary={
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                           {/* Add the creator's phenotype and samples */}
-                          <Tooltip title={`Initiator: ${senderInfo.name}`} arrow>
+                          <Tooltip title={`Initiator: ${senderInfo.name}${creator?.n_snps ? ` · ${creator.n_snps} markers` : ''}`} arrow>
                             <Chip
-                              label={`${creator.phenotype} - ${creator.samples}`}
+                              label={`${creator.phenotype} - ${creator.samples} samples${creator?.n_snps ? ` · ${creator.n_snps} markers` : ''}`}
                               color="primary"
                               variant="contained"
                             />
@@ -1587,12 +1626,12 @@ const CollaborationDetails = () => {
 
                           {/* Add the invited users' phenotypes and samples */}
                           {invitedUsers.map((user, index) => (
-                            <Tooltip key={index} title={`Collaborator: ${user.name}`} arrow>
+                            <Tooltip key={index} title={`Collaborator: ${user.name}${user?.n_snps ? ` · ${user.n_snps} markers` : ''}`} arrow>
                               <Chip
-                                label={`${user.phenotype} - ${user.number_of_samples}`}
+                                label={`${user.phenotype} - ${user.number_of_samples} samples${user?.n_snps ? ` · ${user.n_snps} markers` : ''}`}
                                 color="secondary"
                                 variant="contained"
-                                
+
                               />
                             </Tooltip>
                           ))}
@@ -1651,6 +1690,37 @@ const CollaborationDetails = () => {
                   </ListItem>
                 </List>
               </Box>
+
+              {/* QC failure surface + retry — so a failed QC offers a retry instead of
+                  the collaboration silently stalling toward "Initiate QC Calculation". */}
+              {(() => {
+                const mine = collaboration?.qc_job_status?.[current_user_id];
+                const failedOthers = Object.entries(collaboration?.qc_job_status || {})
+                  .filter(([uid, s]) => s?.status === 'failed' && uid !== current_user_id);
+                if (mine?.status !== 'failed' && failedOthers.length === 0) return null;
+                return (
+                  <Box sx={{ mt: 2 }}>
+                    {mine?.status === 'failed' && (
+                      <Alert severity="error" sx={{ borderRadius: 2 }}
+                        action={
+                          <Button color="inherit" size="small" disabled={isCreatingQcDataset}
+                            onClick={handleChainedQcCreate}>
+                            {isCreatingQcDataset ? 'Retrying…' : 'Retry QC'}
+                          </Button>
+                        }>
+                        Your quality-control step failed{mine.error ? `: ${mine.error}` : '.'}{' '}
+                        Fix the issue, then retry.
+                      </Alert>
+                    )}
+                    {role === 'sender' && failedOthers.length > 0 && (
+                      <Alert severity="warning" sx={{ borderRadius: 2, mt: 1 }}>
+                        Quality control failed for {failedOthers.length} collaborator(s); they need to
+                        retry from their own account before the analysis can continue.
+                      </Alert>
+                    )}
+                  </Box>
+                );
+              })()}
 
               {/*Quality Control Data Creation (AUTO) - chained QC runs automatically once collaboration starts */}
               {hasFilterQc && allUsersResponded && (() => {
@@ -2312,6 +2382,16 @@ const CollaborationDetails = () => {
                         )}
                       </>
                     )}
+                  </List>
+                </Box>
+              )}
+
+              {/* Stat Data / GWAS dataset creation. Rendered for BOTH the filter-only
+                  path (no pairwise QC step) and the pairwise+threshold path, so the
+                  GWAS buttons appear regardless of QC type. */}
+              {((thresholdDefined || filterOnlyQcComplete) && !collaboration?.stat_uploaded) && (
+                <Box sx={{ bgcolor: '#ffffff', mt: 2, p: 2, borderRadius: 3, border: 1, borderColor: '#85b1e6' }}>
+                  <List sx={{ py: 0 }}>
                     <>
                       <ListItem disableGutters>
                         {((thresholdDefined || filterOnlyQcComplete) && !collaboration?.stat_uploaded) && (
@@ -2934,6 +3014,26 @@ const CollaborationDetails = () => {
                   </Typography>
                   <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                 </Box>
+                {invitedUsers.length > 3 && (
+                  <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                    <TextField
+                      size="small" fullWidth label="Filter by name"
+                      value={collaboratorFilter}
+                      onChange={(e) => setCollaboratorFilter(e.target.value)}
+                    />
+                    <TextField
+                      size="small" select label="Status" value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      sx={{ minWidth: 130 }}
+                    >
+                      <MenuItem value="all">All</MenuItem>
+                      <MenuItem value="pending">Pending</MenuItem>
+                      <MenuItem value="accepted">Accepted</MenuItem>
+                      <MenuItem value="rejected">Rejected</MenuItem>
+                      <MenuItem value="withdrawn">Withdrawn</MenuItem>
+                    </TextField>
+                  </Box>
+                )}
                 <List>
                   <ListItem disableGutters>
                     <ListItemText
@@ -2942,7 +3042,12 @@ const CollaborationDetails = () => {
                   </ListItem>
                   <Divider sx={{ borderColor: 'primary.main' }} />
 
-                  {invitedUsers.map((user, index) => (
+                  {(invitedUsers.length > 3
+                    ? invitedUsers
+                        .filter((u) => (u.name || '').toLowerCase().includes(collaboratorFilter.toLowerCase()))
+                        .filter((u) => statusFilter === 'all' || u.status === statusFilter)
+                    : invitedUsers
+                  ).map((user, index) => (
                     <ListItem key={index} disableGutters sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <ListItemText
                         primary={`${user.name} (Collaborator)`}
@@ -3004,6 +3109,12 @@ const CollaborationDetails = () => {
                   <Divider sx={{ flexGrow: 30, borderColor: 'primary.main' }} />
                 </Box>
                 {/*Will have the progress bar here*/}
+                {collaboration?.needs_min_participants && (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    This collaboration needs at least 2 participants to run. Invite (and have accept)
+                    at least one more collaborator before quality control can start.
+                  </Alert>
+                )}
                 <Stepper activeStep={progressActiveStep} orientation="vertical">
                   {progressSteps.map((step, index) => (
                     <Step key={index}>

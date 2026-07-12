@@ -12,6 +12,7 @@ import CollaborationDetails from './components/Collabrations/CollaborationDetail
 import SessionsResults from "./components/Session/SessionsResults";
 import Profile from "./components/Profile/Profile";
 import StartCollaboration from "./components/Collabrations/StartCollaboration";
+import MyData from "./components/MyData/MyData";
 
 function App() {
 
@@ -97,6 +98,7 @@ function App() {
         <Route path="/register" element={<NewUser />} />
         <Route path="/login" element={<Login onLogin={handleLogin} />} />
         <Route path="/upload" element={isLoggedIn ? <Upload /> : <Navigate to="/login" />} />
+        <Route path="/my-data" element={isLoggedIn ? <MyData /> : <Navigate to="/login" />} />
         <Route path="/search" element={isLoggedIn ? <Search /> : <Navigate to="/login" />} />
         <Route path="/session" element={isLoggedIn ? <Session /> : <Navigate to="/login" />} />
         <Route path="/profile" element={isLoggedIn ? <Profile /> : <Navigate to="/login" />} />

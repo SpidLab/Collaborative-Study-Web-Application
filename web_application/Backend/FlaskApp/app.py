@@ -34,13 +34,11 @@ from sklearn.metrics import pairwise_distances
 import requests as http_requests  # For proxying to QC Controller
 import io
 
-# Import orchestrator client
-try:
-    from orchestrator_client import OrchestratorClient
-    ORCHESTRATOR_AVAILABLE = True
-except ImportError:
-    ORCHESTRATOR_AVAILABLE = False
-    print("⚠️  Orchestrator client not available - will use direct QC Controller")
+# Local Site Agent job queue + agent API (replaces the Node/Kubernetes orchestrator)
+from agent_api import register_agent_api
+# Best-effort transactional email (Gmail SMTP). Failures never break a request.
+import email_utils
+import notifications
 
 # Import FL pipeline (Federated Learning experiment type)
 try:
@@ -79,19 +77,6 @@ FL_QC_SCHEME_DEFAULT = [{
 
 app = Flask(__name__)
 
-# QC Controller and Orchestrator Configuration
-QC_CONTROLLER_URL = os.getenv('QC_CONTROLLER_URL', 'http://localhost:5001')
-ORCHESTRATOR_URL = os.getenv('ORCHESTRATOR_URL', 'http://localhost:3000')
-USE_ORCHESTRATOR = os.getenv('USE_ORCHESTRATOR', 'false').lower() == 'true'
-
-# Initialize orchestrator client if enabled
-if USE_ORCHESTRATOR and ORCHESTRATOR_AVAILABLE:
-    orchestrator = OrchestratorClient(ORCHESTRATOR_URL)
-    print(f"✅ Orchestrator enabled at {ORCHESTRATOR_URL}")
-else:
-    orchestrator = None
-    print(f"✅ Using direct QC Controller at {QC_CONTROLLER_URL}")
-
 load_dotenv(find_dotenv())
 auth = HTTPBasicAuth()
 
@@ -115,6 +100,20 @@ def get_database():
     return client['test']
 
 db = get_database()
+
+# Register the Site Agent API (enroll / metadata / jobs poll / result ingest)
+# and obtain the job-enqueue helper used to dispatch work to local agents.
+enqueue_job = register_agent_api(app, db)
+
+# The Node/Kubernetes orchestrator and per-user CollaboratorDB have been removed.
+# These inert constants keep legacy interactive-QC code paths importable; those
+# paths are deprecated in favor of the local Site Agent job model.
+USE_ORCHESTRATOR = False
+orchestrator = None
+QC_CONTROLLER_URL = os.getenv('QC_CONTROLLER_URL', '')
+
+# Cap inbound payloads; agent results arrive gzipped.
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_CONTENT_LENGTH_MB', '256')) * 1024 * 1024
 
 blacklisted_tokens = []
 
@@ -164,18 +163,18 @@ def get_current_user():
     auth_header = request.headers.get('Authorization')
     if not auth_header:
         logging.error("Authorization header missing")
-        return None, jsonify({"error": "Authorization header missing"}), 401
+        return None, (jsonify({"error": "Authorization header missing"}), 401)
 
     try:
         token = auth_header.split()[1]
     except IndexError:
         logging.error("Invalid Authorization header format")
-        return None, jsonify({"error": "Invalid Authorization header format"}), 401
+        return None, (jsonify({"error": "Invalid Authorization header format"}), 401)
 
     current_user = User.verify_auth_token(token)
     if not current_user:
         logging.error("Invalid or expired token")
-        return None, jsonify({"error": "Invalid or expired token"}), 401
+        return None, (jsonify({"error": "Invalid or expired token"}), 401)
 
     return current_user, None
 
@@ -411,6 +410,41 @@ def create_research_project():
 #         logging.error(f"Error: {str(e)}")
 #         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/my-datasets', methods=['GET'])
+def get_my_datasets():
+    """List the current user's own raw (non-QC, non-collaboration) datasets with the
+    metadata their Site Agent has synced (markers, sample count, file hash, last sync)."""
+    try:
+        current_user, error_response = get_current_user()
+        if error_response:
+            return error_response
+        uid = str(current_user.id)
+        query = {
+            '$or': [{'user_id': uid}, {'user_id': ObjectId(uid)}],
+            'is_qc_data': {'$ne': True},
+            'collaboration_specific': {'$ne': True},
+        }
+        projection = {
+            'phenotype': 1, 'number_of_samples': 1, 'n_snps': 1,
+            'file_sha256': 1, 'metadata_updated_at': 1,
+        }
+        out = []
+        for ds in db.datasets.find(query, projection):
+            updated = ds.get('metadata_updated_at')
+            out.append({
+                'id': str(ds['_id']),
+                'phenotype': ds.get('phenotype'),
+                'number_of_samples': ds.get('number_of_samples'),
+                'n_snps': ds.get('n_snps'),
+                'file_sha256': ds.get('file_sha256'),
+                'metadata_updated_at': updated.isoformat() if hasattr(updated, 'isoformat') else updated,
+            })
+        return jsonify(out), 200
+    except Exception as e:
+        logging.error(f"Error listing my datasets: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
 @app.route('/api/invite/users', methods=['GET'])
 def get_users_for_invitation():
     try:
@@ -422,6 +456,7 @@ def get_users_for_invitation():
         # Get query parameters
         query = request.args.get('phenotype', '').strip()
         min_samples = request.args.get('minSamples', '').strip()
+        name_query = request.args.get('name', '').strip()
 
         # Build the search filter based on min_samples
         # IMPORTANT: Only search RAW datasets, NOT QC datasets or collaboration-specific datasets
@@ -498,6 +533,10 @@ def get_users_for_invitation():
             user = user_map.get(user_id_str)
             if not user:
                 continue  # Skip if user not found
+
+            # Optional case-insensitive filter by collaborator name
+            if name_query and name_query.lower() not in (user.get("name", "") or "").lower():
+                continue
             
             phenotype = doc.get('phenotype', "No Phenotype")
             
@@ -985,6 +1024,17 @@ def accept_invitation():
         if result.modified_count == 0:
             return jsonify({'message': 'No matching user found in invited_users'}), 404
 
+        # Notify the initiator that this collaborator accepted (best-effort; never blocks).
+        try:
+            accepter = db.users.find_one({"_id": ObjectId(user_id)}, {"name": 1})
+            creator = db.users.find_one({"_id": ObjectId(str(collaboration.get('creator_id')))}, {"email": 1})
+            if creator and creator.get("email"):
+                email_utils.notify_invitation_accepted(
+                    creator["email"], (accepter or {}).get("name"),
+                    collaboration.get("name", "your collaboration"), uuid)
+        except Exception as e:
+            logging.warning(f"Acceptance email skipped for {uuid}: {e}")
+
         # If this was the last pending response, automatically kick off the
         # relevant per-experiment workflow for initiator + accepted collaborators.
         # GWAS → chained filter QC via orchestrator.
@@ -1187,18 +1237,27 @@ def _maybe_trigger_auto_chained_qc(collaboration_uuid: str):
     if any_pending:
         return
 
-    if not USE_ORCHESTRATOR or not orchestrator:
-        raise Exception("Orchestrator not enabled (USE_ORCHESTRATOR=true required) for auto QC creation.")
-
     # Filter to only per-user filtering methods (not pairwise ones)
     qc_scheme = collaboration.get('qc_scheme', []) or []
     FILTER_METHOD_NAMES = {
         'Missing Data QC', 'Minor Allele Frequency (MAF)', 'Hardy-Weinberg Equilibrium (HWE)',
         'MAF', 'HWE', 'missing', 'maf', 'hwe'
     }
+    scheme_names = {
+        (m.get('method', '') if isinstance(m, dict) else str(m)) for m in qc_scheme
+    }
     filter_methods = [m for m in qc_scheme if isinstance(m, dict) and m.get('method', '') in FILTER_METHOD_NAMES]
-    if not filter_methods:
-        # No filter methods => nothing to auto-create as a per-user QC dataset
+    include_pca = 'Population Stratification' in scheme_names  # needs PCA coords from each site
+    include_relatedness = 'Sample Relatedness' in scheme_names  # needs privacy-transformed matrix
+
+    # The per-agent methods for the chained_qc job: the filter chain, plus a PCA
+    # step when Population Stratification is requested (so each site uploads coords).
+    chained_methods = list(filter_methods)
+    if include_pca:
+        chained_methods.append({"method": "pca", "params": {}})
+
+    if not chained_methods and not include_relatedness:
+        # Nothing for local agents to do
         db['collaborations'].update_one({"uuid": str(collaboration_uuid)}, {"$set": {"auto_qc_triggered": True}})
         return
 
@@ -1226,13 +1285,41 @@ def _maybe_trigger_auto_chained_qc(collaboration_uuid: str):
         db['collaborations'].update_one({"uuid": str(collaboration_uuid)}, {"$set": {"auto_qc_triggered": True}})
         return
 
+    # Guard: a collaboration needs at least two participating sites to be meaningful,
+    # and pairwise schemes (Sample Relatedness / Population Stratification) are
+    # mathematically impossible with a single site. Don't start a QC run that would
+    # just get stuck — flag the collaboration so the UI can ask for more participants.
+    # A collaboration needs at least two participating sites (one user == one site).
+    distinct_sites = len({p["user_id"] for p in participants})
+    if distinct_sites < 2:
+        db['collaborations'].update_one(
+            {"uuid": str(collaboration_uuid)},
+            {"$set": {"needs_min_participants": True,
+                      "qc_blocked_reason": "needs_two_participants"}}
+        )
+        logging.info("Collaboration %s not started: needs >=2 participants (have %d).",
+                     collaboration_uuid, distinct_sites)
+        return
+
+    # Enough participants — clear any prior 'needs more participants' flag.
+    db['collaborations'].update_one(
+        {"uuid": str(collaboration_uuid)},
+        {"$set": {"needs_min_participants": False}, "$unset": {"qc_blocked_reason": ""}}
+    )
+
+    # Everyone has responded and QC is starting — tell all participants (once, best-effort).
+    try:
+        notifications.notify_started(db, str(collaboration_uuid))
+    except Exception as e:
+        logging.warning("Start notification skipped for %s: %s", collaboration_uuid, e)
+
     # Mark triggered first to prevent double submit in race conditions
     db['collaborations'].update_one(
         {"uuid": str(collaboration_uuid)},
         {"$set": {"auto_qc_triggered": True, "collaboration_started_at": datetime.utcnow()}}
     )
 
-    auto_req_ids = {}
+    auto_job_ids = {}
     auto_req_status = {}
 
     for p in participants:
@@ -1240,28 +1327,35 @@ def _maybe_trigger_auto_chained_qc(collaboration_uuid: str):
         pheno = p["phenotype"]
         dsid = p.get("dataset_id")
 
-        user_doc = db['users'].find_one({"_id": ObjectId(uid)}, {"name": 1, "email": 1}) or {}
-        username = user_doc.get('name') or (user_doc.get('email') or '').split('@')[0] or f"user_{uid}"
-        username = str(username).strip() or f"user_{uid}"
+        # Enqueue a chained_qc job (filter chain + optional PCA coords) for this
+        # participant's local Site Agent to run.
+        if chained_methods:
+            job_id = enqueue_job(
+                collaboration_uuid=str(collaboration_uuid),
+                user_id=uid,
+                action="chained_qc",
+                params={
+                    "phenotype": pheno,
+                    "dataset_id": dsid,
+                    "methods": chained_methods,
+                },
+            )
+            auto_job_ids[uid] = job_id
+            auto_req_status[uid] = 'queued'
 
-        result = orchestrator.submit_chained_qc_request(
-            username=username,
-            user_id=uid,
-            phenotype=pheno,
-            collaboration_uuid=str(collaboration_uuid),
-            methods=filter_methods,
-            dataset_id=dsid
-        )
-        if result.get('success') and result.get('request_id'):
-            auto_req_ids[uid] = result.get('request_id')
-            auto_req_status[uid] = 'processing'
-        else:
-            auto_req_status[uid] = 'failed'
+        # Sample Relatedness needs a privacy-transformed matrix from each site.
+        if include_relatedness:
+            enqueue_job(
+                collaboration_uuid=str(collaboration_uuid),
+                user_id=uid,
+                action="privacy_transform",
+                params={"phenotype": pheno, "dataset_id": dsid},
+            )
 
-    if auto_req_ids or auto_req_status:
+    if auto_job_ids or auto_req_status:
         db['collaborations'].update_one(
             {"uuid": str(collaboration_uuid)},
-            {"$set": {"auto_qc_request_ids": auto_req_ids, "auto_qc_status": auto_req_status}}
+            {"$set": {"auto_qc_job_ids": auto_job_ids, "auto_qc_status": auto_req_status}}
         )
 
 
@@ -1689,6 +1783,10 @@ def post_start_collaboration():
         if not collab_name:
             logging.error("Collaboration name missing in the request")
             return jsonify({"error": "Collaboration name is required"}), 400
+
+        if not collabQcScheme:
+            logging.error("No QC scheme provided when creating collaboration")
+            return jsonify({"error": "At least one QC scheme is required."}), 400
             
         # Create NEW empty datasets for each invited user for THIS specific collaboration
         # This ensures each collaboration has its own independent dataset
@@ -1753,6 +1851,20 @@ def post_start_collaboration():
                 fl_pipeline.bootstrap_fl_state(db['collaborations'], collaboration['uuid'])
             except Exception as fl_exc:
                 logging.warning(f"FL state bootstrap failed for {collaboration['uuid']}: {fl_exc}")
+
+        # Email each invited collaborator that they've been invited (best-effort; never blocks).
+        try:
+            try:
+                inviter_name = current_user.user_json.get('name')
+            except Exception:
+                inviter_name = None
+            for iu in invited_users_with_new_datasets:
+                invitee = db.users.find_one({"_id": iu['user_id']}, {"email": 1})
+                if invitee and invitee.get("email"):
+                    email_utils.notify_invitation(
+                        invitee["email"], inviter_name, collab_name, collaboration['uuid'])
+        except Exception as e:
+            logging.warning(f"Invitation email(s) skipped for {collaboration['uuid']}: {e}")
 
         return jsonify({
             'message': 'Collaboration created successfully',
@@ -1914,8 +2026,13 @@ def get_collaboration_details(uuid):
             user_dataset_id= str(invited_user["user_dataset_id"])
 
             invited_user_dataset = db.datasets.find_one({'_id': ObjectId(user_dataset_id)})
-            #need to remove this if user has to upload their dataset for every collaboration
-            invited_user_dataset_uploaded = True if invited_user_dataset and len(invited_user_dataset.get('data', [])) > 0 else False
+            # "QC uploaded" now means the user's local Site Agent has posted QC
+            # outputs for this collaboration (raw data is never stored centrally).
+            _uid = str(invited_user["user_id"])
+            invited_user_dataset_uploaded = any(
+                _uid in (collaboration.get(field) or {})
+                for field in ('surviving_samples', 'surviving_snps', 'pca_coords', 'stats', 'transformed_data')
+            )
 
             # Get phenotype with priority:
             # 1. From collaboration invited_users array (most authoritative source)
@@ -1944,6 +2061,8 @@ def get_collaboration_details(uuid):
                     logging.info(f"Retrieved phenotype '{phenotype}' from user's other dataset for collaboration {uuid}")
             
             number_of_samples = invited_user_dataset.get('number_of_samples') if invited_user_dataset else None
+            n_snps = invited_user_dataset.get('n_snps') if invited_user_dataset else None
+            snp_ids = invited_user_dataset.get('snp_ids') if invited_user_dataset else None
 
             invited_users_details.append({
                 'user_id': str(invited_user["user_id"]),
@@ -1952,7 +2071,9 @@ def get_collaboration_details(uuid):
                 'user_dataset_id': user_dataset_id,
                 'is_dataset_uploaded': invited_user_dataset_uploaded,
                 'phenotype': phenotype,
-                'number_of_samples': number_of_samples
+                'number_of_samples': number_of_samples,
+                'n_snps': n_snps,
+                'snp_ids': snp_ids,
             })
 
 
@@ -1970,17 +2091,19 @@ def get_collaboration_details(uuid):
         # To fetch the data of creator/initator
         dataset = db.datasets.find_one(
             {'_id': ObjectId(collaboration["creator_dataset_id"])},
-            {'phenotype': 1, 'number_of_samples': 1}
+            {'phenotype': 1, 'number_of_samples': 1, 'n_snps': 1, 'snp_ids': 1}
         )
-        
 
-        
+
+
         # Making multiple queries can be optimised but using for time being
         creator_phenotype = dataset.get('phenotype', 'N/A') if dataset else 'N/A'
         creator_number_of_samples = dataset.get('number_of_samples', '0') if dataset else '0'
         creator_dataset = {
             'phenotype': creator_phenotype,
-            'samples': creator_number_of_samples
+            'samples': creator_number_of_samples,
+            'n_snps': dataset.get('n_snps') if dataset else None,
+            'snp_ids': dataset.get('snp_ids') if dataset else None,
         }
 
     
@@ -1993,6 +2116,22 @@ def get_collaboration_details(uuid):
                 normalized_qc.append({"method": item, "params": {}})
             elif isinstance(item, dict) and "method" in item:
                 normalized_qc.append(item)
+
+        # A collaboration needs >=2 participating sites to run (initiator + at least
+        # one accepted collaborator); pairwise schemes are impossible with one site.
+        # Surface this so the UI can clearly ask for more participants instead of
+        # appearing to hang at the QC step.
+        buildable_participants = len(obligated_user_ids)  # initiator + accepted invitees
+        needs_min_participants = buildable_participants < 2
+
+        # Per-user chained_qc job status so the UI can show a clear "Retry QC" on
+        # failure instead of appearing to hang. Latest job per user wins.
+        qc_job_status = {}
+        for j in db.jobs.find({"collaboration_uuid": uuid, "action": "chained_qc"}).sort("created_at", 1):
+            qc_job_status[str(j.get("user_id"))] = {
+                "status": j.get("status"),
+                "error": (j.get("error") or "")[:300],
+            }
 
         collaboration_details = {
             'uuid': collaboration['uuid'],
@@ -2009,6 +2148,9 @@ def get_collaboration_details(uuid):
             'current_logged_in_user_id': user_id,
             'surviving_snps': collaboration.get('surviving_snps', {}),
             'surviving_samples': collaboration.get('surviving_samples', {}),
+            'participant_count': buildable_participants,
+            'needs_min_participants': needs_min_participants,
+            'qc_job_status': qc_job_status,
         }
 
         return jsonify(collaboration_details), 200
@@ -2177,56 +2319,17 @@ def upload_csv_qc():
         if not phenotype or not number_of_samples:
             return jsonify({"error": "Missing required fields"}), 400
 
-        # Create a new dataset record in the database (without data at this stage)
+        # Create a metadata-only dataset record. Raw genotypes are never stored
+        # centrally — they live on the collaborator's machine and are processed
+        # there by the local Site Agent.
         dataset = {
             "user_id": str(user_id),
             "phenotype": phenotype,
             "number_of_samples": number_of_samples,
-            "data": {}  # No data at the moment, will be updated later with CSV
         }
 
-        # Insert into the database
         result = db['datasets'].insert_one(dataset)
         dataset_id = str(result.inserted_id)
-
-        print('Data from frontend:', request.form)
-
-        # Initialize QC Controller database for this user
-        try:
-            user_name = current_user.user_json.get('name', str(user_id))
-            
-            # Choose between Orchestrator or Direct QC Controller
-            if USE_ORCHESTRATOR and orchestrator:
-                # Use Kubernetes Orchestrator
-                logging.info(f"🚀 Initializing via Orchestrator: {user_name}, {phenotype}")
-                qc_init_result = orchestrator.submit_qc_request(
-                    username=user_name,
-                    user_id=user_id,
-                    phenotype=phenotype,
-                    action='initialize'
-                )
-                if qc_init_result.get('success'):
-                    logging.info(f"✅ QC initialized via Orchestrator for {user_name}")
-                else:
-                    logging.warning(f"⚠️  QC initialization via Orchestrator failed: {qc_init_result.get('error')}")
-            else:
-                # Use Direct QC Controller
-                logging.info(f"📡 Initializing via Direct QC Controller: {user_name}, {phenotype}")
-                qc_init_response = http_requests.post(
-                    f"{QC_CONTROLLER_URL}/api/qc",
-                    json={
-                        "username": user_name,
-                        "phenotype": phenotype,
-                        "action": "initialize"
-                    },
-                    timeout=30
-                )
-                if qc_init_response.status_code == 200:
-                    logging.info(f"✅ QC Controller initialized for user {user_name}")
-                else:
-                    logging.warning(f"⚠️  QC Controller initialization failed: {qc_init_response.text}")
-        except Exception as qc_error:
-            logging.warning(f"⚠️  Could not initialize QC: {str(qc_error)}")
 
         return jsonify({"message": "Metadata uploaded successfully", "dataset_id": dataset_id}), 200
 
@@ -2239,397 +2342,14 @@ def upload_csv_qc():
 
 @app.route('/api/qc/listing', methods=['POST'])
 def qc_listing():
-    """Get list of QC datasets for a user"""
-    try:
-        current_user, error_response = get_current_user()
-        if error_response:
-            return error_response
-
-        data = request.get_json() or {}
-        phenotype = data.get('phenotype')
-        
-        if not phenotype:
-            return jsonify({"error": "Phenotype is required"}), 400
-
-        user_name = current_user.user_json.get('name', str(current_user.id))
-        user_id = str(current_user.id)
-        
-        # Use orchestrator if enabled, otherwise direct QC Controller
-        if USE_ORCHESTRATOR and orchestrator:
-            logging.info(f"🚀 Using Orchestrator for listing: {user_name}, {phenotype}")
-            request_data = {
-                "username": user_name,
-                "user_id": user_id,
-                "phenotype": phenotype,
-                "action": "listing",
-                "params": {}
-            }
-            qc_result = orchestrator.submit_qc_request(
-                user_id=user_id,
-                username=user_name,
-                request_data=request_data
-            )
-            
-            if qc_result.get('success'):
-                # For listing, we need to wait for result (it's quick)
-                request_id = qc_result.get('request_id')
-                if request_id:
-                    # Poll for result (listing is fast, should complete quickly)
-                    import time
-                    max_wait = 10  # 10 seconds max
-                    waited = 0
-                    while waited < max_wait:
-                        status_result = orchestrator.get_qc_status(request_id)
-                        if status_result.get('status') == 'completed':
-                            results = status_result.get('results', {})
-                            return jsonify(results), 200
-                        elif status_result.get('status') == 'failed':
-                            return jsonify({"error": status_result.get('error', 'Listing failed')}), 500
-                        time.sleep(0.5)
-                        waited += 0.5
-                    return jsonify({"error": "Listing request timed out"}), 500
-                else:
-                    return jsonify({"error": "No request ID returned"}), 500
-            else:
-                return jsonify({"error": qc_result.get('error', 'Orchestrator error')}), 500
-        else:
-            # Use Direct QC Controller
-            logging.info(f"📡 Using Direct QC Controller for listing: {user_name}, {phenotype}")
-            response = http_requests.post(
-                f"{QC_CONTROLLER_URL}/api/qc",
-                json={
-                    "username": user_name,
-                    "phenotype": phenotype,
-                    "action": "listing"
-                },
-                timeout=30
-            )
-            return jsonify(response.json()), response.status_code
-
-    except Exception as e:
-        logging.error(f"Error in qc_listing: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+    # Deprecated: per-user QC now runs on the local Site Agent, not a central controller.
+    return jsonify({"error": "Endpoint removed. QC now runs locally via the Site Agent."}), 410
 
 
 @app.route('/api/qc/create', methods=['POST'])
 def qc_create():
-    """Create a new QC dataset using specified method"""
-    try:
-        current_user, error_response = get_current_user()
-        if error_response:
-            return error_response
-
-        data = request.get_json() or {}
-        phenotype = data.get('phenotype')
-        method = data.get('method')
-        
-        logging.info(f"🔍 QC Create Request - User: {current_user.user_json.get('name')}, Phenotype: '{phenotype}', Method: {method}")
-        
-        if not method:
-            return jsonify({"error": "QC method is required"}), 400
-
-        user_name = current_user.user_json.get('name', str(current_user.id))
-        user_id = str(current_user.id)
-        
-        # Validate and fix phenotype if missing or invalid
-        if not phenotype or phenotype == 'N/A' or (isinstance(phenotype, str) and phenotype.strip() == ''):
-            logging.warning(f"⚠️  Phenotype is missing or invalid: '{phenotype}'. Attempting to retrieve from user's datasets...")
-            
-            # Try to get phenotype from user's datasets in main database
-            user_datasets = list(db['datasets'].find(
-                {'user_id': {'$in': [user_id, ObjectId(user_id)]}, 'is_qc_data': {'$ne': True}},
-                {'phenotype': 1}
-            ).limit(1))
-            
-            if user_datasets and user_datasets[0].get('phenotype'):
-                phenotype = str(user_datasets[0]['phenotype']).strip()
-                logging.info(f"Retrieved phenotype '{phenotype}' from user's datasets for QC creation")
-            else:
-                # Try to get from orchestrator/QC worker's rawdata collection
-                try:
-                    if USE_ORCHESTRATOR and orchestrator:
-                        # Use orchestrator for listing
-                        request_data = {
-                            "username": user_name,
-                            "user_id": user_id,
-                            "action": "listing",
-                            "params": {}
-                        }
-                        qc_result = orchestrator.submit_qc_request(
-                            user_id=user_id,
-                            username=user_name,
-                            request_data=request_data
-                        )
-                        if qc_result.get('success'):
-                            request_id = qc_result.get('request_id')
-                            if request_id:
-                                import time
-                                max_wait = 10
-                                waited = 0
-                                while waited < max_wait:
-                                    status_result = orchestrator.check_status(request_id)
-                                    if status_result.get('status') == 'completed':
-                                        qc_list_data = status_result.get('results', {})
-                                        # Extract phenotype from files (format: phenotype.csv)
-                                        files = qc_list_data.get('files', [])
-                                        if files:
-                                            first_file = files[0]
-                                            if isinstance(first_file, str) and first_file.endswith('.csv'):
-                                                phenotype = first_file[:-4]  # Remove .csv extension
-                                                logging.info(f"Retrieved phenotype '{phenotype}' from orchestrator")
-                                                break
-                                    elif status_result.get('status') == 'failed':
-                                        break
-                                    time.sleep(0.5)
-                                    waited += 0.5
-                    else:
-                        # Fallback to direct QC Controller
-                        qc_list_response = http_requests.post(
-                            f"{QC_CONTROLLER_URL}/api/qc",
-                            json={
-                                "username": user_name,
-                                "action": "listing"
-                            },
-                            timeout=30
-                        )
-                        if qc_list_response.status_code == 200:
-                            qc_list_data = qc_list_response.json()
-                            # Extract phenotype from rawdata filenames (format: phenotype.csv)
-                            if qc_list_data.get('success') and qc_list_data.get('rawdata_files'):
-                                rawdata_files = qc_list_data.get('rawdata_files', [])
-                                if rawdata_files:
-                                    first_file = rawdata_files[0]
-                                    if isinstance(first_file, dict):
-                                        filename = first_file.get('filename', '')
-                                    else:
-                                        filename = str(first_file)
-                                    if filename.endswith('.csv'):
-                                        phenotype = filename[:-4]  # Remove .csv extension
-                                        logging.info(f"Retrieved phenotype '{phenotype}' from QC Controller rawdata")
-                except Exception as qc_fetch_error:
-                    logging.warning(f"Could not fetch phenotype from QC service: {str(qc_fetch_error)}")
-        
-        # Final validation
-        if not phenotype or phenotype == 'N/A' or (isinstance(phenotype, str) and phenotype.strip() == ''):
-            return jsonify({
-                "error": "Phenotype is required. Please ensure you have uploaded metadata or raw data with a valid phenotype name."
-            }), 400
-        
-        phenotype = str(phenotype).strip()  # Ensure it's a clean string
-        
-        # Choose between Orchestrator (Kubernetes) or Direct QC Controller
-        if USE_ORCHESTRATOR and orchestrator:
-            # Use Kubernetes Orchestrator - SYNC MODE (wait for results)
-            logging.info(f"🚀 Using Orchestrator for QC request (sync): {user_name}, {phenotype}, {method}")
-            
-            qc_result = orchestrator.submit_qc_request(
-                username=user_name,
-                user_id=user_id,
-                phenotype=phenotype,
-                method=method,
-                action='create'
-            )
-            
-            # Check for errors
-            if not qc_result.get('success'):
-                error_msg = qc_result.get('error', 'Unknown error')
-                logging.error(f"❌ Orchestrator error: {error_msg}")
-                return jsonify({"error": error_msg}), 500
-            
-            # Wait for results (synchronous mode for QC create)
-            request_id = qc_result.get('request_id')
-            import time
-            max_wait = 180  # 3 minutes max
-            waited = 0
-            poll_interval = 2  # Poll every 2 seconds
-            
-            while waited < max_wait:
-                status_result = orchestrator.check_status(request_id)
-                status = status_result.get('status')
-                
-                if status == 'completed':
-                    # Get results
-                    results = status_result.get('results', {})
-                    if results and results.get('success'):
-                        qc_data_csv = results.get('data', '')
-                        # If data not in callback (too large), fetch from MongoDB
-                        if not qc_data_csv and results.get('data_in_mongodb'):
-                            mongodb_filename = results.get('mongodb_filename')
-                            if mongodb_filename:
-                                # Fetch from orchestrator/QC worker's MongoDB
-                                fetch_result = orchestrator.submit_qc_request(
-                                    username=user_name,
-                                    user_id=user_id,
-                                    phenotype=phenotype,
-                                    method=method,
-                                    action='get',
-                                    params={'filename': mongodb_filename}
-                                )
-                                if fetch_result.get('success'):
-                                    fetch_request_id = fetch_result.get('request_id')
-                                    # Wait for fetch to complete
-                                    fetch_waited = 0
-                                    while fetch_waited < 30:
-                                        fetch_status = orchestrator.check_status(fetch_request_id)
-                                        if fetch_status.get('status') == 'completed':
-                                            fetch_results = fetch_status.get('results', {})
-                                            qc_data_csv = fetch_results.get('data', '')
-                                            if qc_data_csv:
-                                                break
-                                        elif fetch_status.get('status') == 'failed':
-                                            break
-                                        time.sleep(0.5)
-                                        fetch_waited += 0.5
-                        
-                        if qc_data_csv:
-                            # Process the results same as direct QC Controller
-                            break
-                        else:
-                            return jsonify({"error": "No data returned from QC processing"}), 500
-                    else:
-                        error_msg = results.get('error', 'QC processing failed')
-                        return jsonify({"error": error_msg}), 500
-                elif status == 'failed':
-                    error_msg = status_result.get('error', 'QC processing failed')
-                    return jsonify({"error": error_msg}), 500
-                elif status in ['queued', 'processing']:
-                    # Still processing, wait and retry
-                    time.sleep(poll_interval)
-                    waited += poll_interval
-                else:
-                    # Unknown status, wait and retry
-                    time.sleep(poll_interval)
-                    waited += poll_interval
-            
-            if waited >= max_wait:
-                return jsonify({"error": "QC processing timed out. Please try again."}), 504
-            
-            # Process qc_data_csv same as direct QC Controller flow
-            if not qc_data_csv:
-                return jsonify({"error": "No data returned from QC processing"}), 500
-        else:
-            # Use Direct QC Controller (original synchronous method)
-            logging.info(f"📡 Using Direct QC Controller: {user_name}, {phenotype}, {method}")
-            
-            response = http_requests.post(
-                f"{QC_CONTROLLER_URL}/api/qc",
-                json={
-                    "username": user_name,
-                    "phenotype": phenotype,
-                    "method": method,
-                    "action": "create"
-                },
-                timeout=120  # QC can take time
-            )
-            
-            if response.status_code != 200:
-                return jsonify(response.json()), response.status_code
-                
-            qc_result = response.json()
-        
-        # Get QC data from QC Controller response
-        if USE_ORCHESTRATOR and orchestrator:
-            # qc_data_csv already set from orchestrator results above
-            pass
-        else:
-            qc_data_csv = qc_result.get('data', '')
-            if not qc_data_csv:
-                return jsonify({"error": "No data returned from QC Controller"}), 500
-        
-        # Parse CSV data into the EXACT same format as regular uploaded datasets
-        import io
-        df = pd.read_csv(io.StringIO(qc_data_csv), index_col=0)
-        df.index.name = 'sample_id'
-        
-        # Validate DataFrame is not empty
-        if df.empty:
-            return jsonify({"error": "QC Controller returned empty dataset"}), 500
-        
-        # Convert to the EXACT format used by regular datasets (same as update_qc_data file upload)
-        data = {}
-        for sample_id, row in df.iterrows():
-            data[str(sample_id)] = row.to_dict()
-        
-        # Validate data was created
-        if not data or len(data) == 0:
-            return jsonify({"error": "Failed to convert QC data to required format"}), 500
-        
-        # Validate phenotype is not None or empty
-        if not phenotype or (isinstance(phenotype, str) and phenotype.strip() == ''):
-            return jsonify({"error": "Phenotype cannot be empty or None. Please provide a valid phenotype name."}), 400
-        
-        # Store in datasets collection in EXACT SAME FORMAT as regular datasets
-        # Format: {user_id, phenotype, number_of_samples, data}
-        # Only difference: add is_qc_data flag for filtering
-        phenotype_clean = str(phenotype).strip()
-        output_name = f"{phenotype_clean}_{method}"  # Create descriptive output name
-        
-        dataset = {
-            "user_id": str(user_id),
-            "phenotype": phenotype_clean,  # Ensure phenotype is a clean string (no leading/trailing spaces)
-            "number_of_samples": str(len(df)),
-            "data": data,  # Actual QC-processed data in same format as regular datasets
-            "is_qc_data": True,  # Flag to identify QC datasets (for filtering)
-            "qc_method": method,  # Store QC method for reference
-            "qc_output_name": output_name  # Store output name for display
-        }
-        
-        logging.info(f"📝 Creating QC dataset with phenotype: '{phenotype_clean}', method: {method}, output_name: '{output_name}'")
-        
-        # Estimate document size (approximate)
-        import sys
-        estimated_size = sys.getsizeof(str(dataset)) / (1024 * 1024)  # MB
-        if estimated_size > 14:  # Leave 2MB buffer under 16MB limit
-            logging.warning(f"⚠️  Large dataset detected: ~{estimated_size:.2f}MB. May exceed MongoDB 16MB limit.")
-        
-        # Insert into datasets collection in MAIN MongoDB (test database)
-        # This is the SAME database and collection as regular uploaded datasets
-        # Database: test (from collaborativestudy MongoDB Atlas cluster)
-        try:
-            result = db['datasets'].insert_one(dataset)
-            qc_dataset_id = str(result.inserted_id)
-        except Exception as insert_error:
-            error_msg = str(insert_error)
-            if "document too large" in error_msg.lower() or "16" in error_msg:
-                logging.error(f"❌ Dataset too large for MongoDB (16MB limit): ~{estimated_size:.2f}MB")
-                return jsonify({
-                    "error": f"Dataset too large ({estimated_size:.2f}MB). MongoDB document limit is 16MB.",
-                    "details": "Consider using a smaller dataset or different QC method."
-                }), 413
-            raise
-        
-        # Verify the dataset was inserted with data (catch silent failures)
-        inserted_dataset = db['datasets'].find_one({"_id": result.inserted_id})
-        if not inserted_dataset:
-            return jsonify({"error": "Failed to verify dataset was stored"}), 500
-        
-        if 'data' not in inserted_dataset or not inserted_dataset.get('data') or len(inserted_dataset.get('data', {})) == 0:
-            # Clean up the incomplete dataset
-            db['datasets'].delete_one({"_id": result.inserted_id})
-            logging.error(f"❌ Dataset inserted but 'data' field is missing or empty. Deleted incomplete record.")
-            return jsonify({
-                "error": "Dataset was created but data was not stored. Possible causes: data too large or MongoDB insertion issue.",
-                "estimated_size_mb": round(estimated_size, 2)
-            }), 500
-        
-        logging.info(f"✅ QC dataset stored in MAIN MongoDB 'test' database, 'datasets' collection")
-        logging.info(f"   Dataset ID: {qc_dataset_id}, Samples: {len(df)}, Columns: {len(df.columns)}, Phenotype: {phenotype}, Method: {method}")
-        logging.info(f"   Data samples in stored dataset: {len(inserted_dataset.get('data', {}))}")
-        
-        return jsonify({
-            "success": True,
-            "message": f"QC data created successfully using {method}",
-            "dataset_id": qc_dataset_id,
-            "phenotype": phenotype,
-            "qc_method": method,
-            "rows": len(df),
-            "columns": len(df.columns)
-        }), 200
-
-    except Exception as e:
-        logging.error(f"Error in qc_create: {str(e)}")
-        logging.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+    # Deprecated: single-method QC now runs on the local Site Agent.
+    return jsonify({"error": "Endpoint removed. QC now runs locally via the Site Agent."}), 410
 
 
 @app.route('/api/qc/datasets', methods=['GET'])
@@ -2729,9 +2449,21 @@ def get_qc_methods():
     return jsonify({"methods": methods}), 200
 
 
+@app.route('/api/agent/enrollment-code', methods=['POST'])
+def agent_enrollment_code():
+    """Authenticated: mint a one-time enrollment code the user pastes into their local agent."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    mint = app.config.get("AGENT_MINT_ENROLLMENT_CODE")
+    if not mint:
+        return jsonify({"error": "Agent API not initialized"}), 500
+    return jsonify({"code": mint(str(current_user.id))}), 200
+
+
 @app.route('/api/qc/create_chained', methods=['POST'])
 def qc_create_chained():
-    """Run chained QC (Missing -> MAF -> HWE) on a user's raw data via orchestrator."""
+    """Queue a chained QC (Missing -> MAF -> HWE) job for the user's local Site Agent."""
     try:
         current_user, error_response = get_current_user()
         if error_response:
@@ -2774,81 +2506,25 @@ def qc_create_chained():
         if not phenotype:
             return jsonify({"error": "Phenotype not found for this user"}), 400
 
-        user_doc = db['users'].find_one({"_id": ObjectId(user_id)}, {"name": 1, "email": 1}) or {}
-        username = user_doc.get('name') or (user_doc.get('email') or '').split('@')[0] or f"user_{user_id}"
-        username = str(username).strip() or f"user_{user_id}"
-
-        if not USE_ORCHESTRATOR or not orchestrator:
-            return jsonify({"error": "Chained QC requires orchestrator. Set USE_ORCHESTRATOR=true."}), 503
-
-        result = orchestrator.submit_chained_qc_request(
-            username=username,
-            user_id=user_id,
-            phenotype=phenotype,
+        # Enqueue a chained_qc job for this user's local Site Agent. The agent
+        # runs the filter chain on its local raw data and posts back surviving
+        # SNP/sample IDs (and PCA coordinates) — raw genotypes never come here.
+        job_id = enqueue_job(
             collaboration_uuid=collaboration_uuid,
-            methods=filter_methods,
-            dataset_id=dataset_id
+            user_id=user_id,
+            action="chained_qc",
+            params={
+                "phenotype": phenotype,
+                "dataset_id": dataset_id,
+                "methods": filter_methods,
+            },
         )
-        if not result.get('success'):
-            return jsonify({"error": result.get('error', 'Orchestrator request failed')}), 500
 
-        request_id = result.get('request_id')
-        if not request_id:
-            return jsonify({"error": "No request ID returned"}), 500
-
-        # Poll for completion
-        max_wait = 180
-        poll_interval = 2
-        waited = 0
-        while waited < max_wait:
-            status_result = orchestrator.check_status(request_id)
-            st = status_result.get('status')
-            if st == 'completed':
-                results = status_result.get('results', {})
-                # Update user's collaboration dataset with filtered data
-                # so pairwise QC (Sample Relatedness / Pop Strat) uses cleaned data
-                csv_data = results.get('data', '')
-                if csv_data:
-                    try:
-                        filtered_df = pd.read_csv(io.StringIO(csv_data), index_col=0)
-                        filtered_df.index.name = 'sample_id'
-                        data_dict = {}
-                        for sample_id, row in filtered_df.iterrows():
-                            data_dict[str(sample_id)] = row.to_dict()
-                        
-                        # Find this user's dataset ID in the collaboration
-                        dataset_id = None
-                        if str(collaboration['creator_id']) == user_id:
-                            dataset_id = str(collaboration['creator_dataset_id'])
-                        else:
-                            for iu in collaboration.get('invited_users', []):
-                                if str(iu.get('user_id')) == user_id:
-                                    dataset_id = str(iu.get('user_dataset_id'))
-                                    break
-                        if dataset_id and data_dict:
-                            db['datasets'].update_one(
-                                {"_id": ObjectId(dataset_id)},
-                                {"$set": {"data": data_dict}}
-                            )
-                            logging.info(f"Updated dataset {dataset_id} with filtered data ({len(data_dict)} samples)")
-                    except Exception as update_err:
-                        logging.warning(f"Could not update dataset with filtered data: {update_err}")
-
-                return jsonify({
-                    "message": "Chained QC completed",
-                    "status": "complete",
-                    "surviving_snps": results.get('surviving_snps', []),
-                    "surviving_samples": results.get('surviving_samples', []),
-                    "snp_count": results.get('snp_count', 0),
-                    "sample_count": results.get('sample_count', 0),
-                }), 200
-            if st == 'failed':
-                err = status_result.get('error', 'Chained QC failed')
-                return jsonify({"error": err}), 500
-            time.sleep(poll_interval)
-            waited += poll_interval
-
-        return jsonify({"error": "Chained QC timed out"}), 504
+        return jsonify({
+            "message": "Chained QC job queued for your local agent",
+            "status": "queued",
+            "job_id": job_id,
+        }), 202
 
     except Exception as e:
         logging.error(f"qc_create_chained error: {str(e)}")
@@ -3011,23 +2687,23 @@ def update_qc_data():
         df = pd.read_csv(file, index_col=0)
         df.index.name = 'sample_id'  # Set the index name
 
-        if not df.empty:
-            data = {}
-
-            for sample_id, row in df.iterrows():
-                data[str(sample_id)] = row.to_dict()
-
         dataset = db['datasets'].find_one({"_id": ObjectId(dataset_id)})
         if not dataset:
             return jsonify({"error": "Dataset not found"}), 404
 
-
+        # Privacy invariant: the central server stores metadata only, never raw
+        # genotype rows. Raw data stays on the collaborator's machine and is
+        # processed there by the local Site Agent.
         db['datasets'].update_one(
             {"_id": ObjectId(dataset_id)},
-            {"$set": {"data": data}}
+            {"$set": {
+                "number_of_samples": int(df.shape[0]),
+                "column_names": [str(c) for c in df.columns.tolist()],
+                "metadata_updated_at": datetime.utcnow(),
+            }}
         )
 
-        return jsonify({"message": "Dataset updated successfully"}), 200
+        return jsonify({"message": "Dataset metadata recorded (raw data stays local)"}), 200
 
     except Exception as e:
         logging.error(f'Error updating dataset with CSV data: {str(e)}')
@@ -3037,7 +2713,7 @@ def update_qc_data():
 
 @app.route('/api/create_gwas_dataset', methods=['POST'])
 def create_gwas_dataset():
-    """Create GWAS stat dataset from raw data using QC-filtered sample list via orchestrator."""
+    """Queue a GWAS summary job (per-SNP counts on QC-filtered samples) for the local Site Agent."""
     try:
         auth_header = request.headers.get('Authorization')
         if not auth_header:
@@ -3077,51 +2753,27 @@ def create_gwas_dataset():
         if not phenotype:
             return jsonify({"error": "Phenotype not found for this user in collaboration"}), 400
 
-        user_doc = db['users'].find_one({"_id": ObjectId(user_id)}, {"name": 1, "email": 1}) or {}
-        username = user_doc.get('name') or (user_doc.get('email') or '').split('@')[0] or f"user_{user_id}"
-        username = str(username).strip() or f"user_{user_id}"
-
         # Get surviving SNPs for this user (from chained QC)
         surviving_snps = collaboration.get('surviving_snps', {}).get(user_id, [])
 
-        if not USE_ORCHESTRATOR or not orchestrator:
-            return jsonify({"error": "GWAS dataset creation requires orchestrator. Set USE_ORCHESTRATOR=true."}), 503
-
-        result = orchestrator.submit_gwas_summary_request(
-            username=username,
-            user_id=user_id,
-            phenotype=phenotype,
+        # Enqueue a gwas_summary job. The agent computes per-SNP case/control
+        # counts locally on the QC-filtered samples and posts back only counts.
+        job_id = enqueue_job(
             collaboration_uuid=collaboration_uuid,
-            sample_ids=sample_ids,
-            snp_ids=surviving_snps if surviving_snps else None
+            user_id=user_id,
+            action="gwas_summary",
+            params={
+                "phenotype": phenotype,
+                "sample_ids": sample_ids,
+                "snp_ids_to_include": surviving_snps if surviving_snps else None,
+            },
         )
-        if not result.get('success'):
-            return jsonify({"error": result.get('error', 'Orchestrator request failed')}), 500
 
-        request_id = result.get('request_id')
-        if not request_id:
-            return jsonify({"error": "No request ID returned"}), 500
-
-        # Poll for completion (sync mode, same as QC create)
-        max_wait = 120
-        poll_interval = 2
-        waited = 0
-        while waited < max_wait:
-            status_result = orchestrator.check_status(request_id)
-            st = status_result.get('status')
-            if st == 'completed':
-                return jsonify({
-                    "message": "GWAS dataset created successfully",
-                    "status": "complete"
-                }), 200
-            if st == 'failed':
-                err = status_result.get('error', 'GWAS creation failed')
-                logging.error(f"GWAS creation failed: {err}")
-                return jsonify({"error": err}), 500
-            time.sleep(poll_interval)
-            waited += poll_interval
-
-        return jsonify({"error": "GWAS dataset creation timed out"}), 504
+        return jsonify({
+            "message": "GWAS summary job queued for your local agent",
+            "status": "queued",
+            "job_id": job_id,
+        }), 202
 
     except Exception as e:
         logging.error(f"create_gwas_dataset error: {str(e)}")
@@ -3204,6 +2856,7 @@ def upload_csv_stats():
                 logging.error("Collaboration entry not found or not updated")
                 return jsonify({'message': 'Collaboration entry not found or not updated'}), 404
 
+            notifications.notify_progress(db, collaboration_uuid)
             return jsonify({'message': 'CSV file processed and stats updated successfully'}), 200
 
         except Exception as e:
@@ -3478,6 +3131,48 @@ def combine_datasets_to_dataframe(datasets_data):
     return pd.DataFrame()
 
 
+def _resolve_uploaded_matrix(field_value):
+    """Resolve a per-user uploaded matrix, dereferencing qc_results overflow if needed."""
+    if isinstance(field_value, dict) and "__ref__" in field_value:
+        doc = db["qc_results"].find_one({"ref": field_value["__ref__"]})
+        return (doc or {}).get("value", {})
+    return field_value or {}
+
+
+def _uploaded_matrix_to_df(matrix, user_id):
+    """Convert {sample_id: {col: val}} (agent-uploaded, privacy-transformed/PCA) to a
+    MultiIndex (sample_id, user_id) DataFrame — same shape the pairwise QC expects."""
+    samples = []
+    for sample_id, row in (matrix or {}).items():
+        rec = dict(row)
+        rec["sample_id"] = str(sample_id)
+        rec["user_id"] = str(user_id)
+        samples.append(rec)
+    if not samples:
+        return None
+    df = pd.DataFrame(samples).set_index(["sample_id", "user_id"])
+    return df
+
+
+def _combine_uploaded(collaboration_data, field, user_ids):
+    """Build a combined MultiIndex DataFrame from agent-uploaded per-user matrices.
+
+    `field` is 'transformed_data' (Sample Relatedness) or 'pca_coords'
+    (Population Stratification). Raw genotypes are never read here.
+    """
+    field_map = collaboration_data.get(field, {}) or {}
+    dfs = []
+    for uid in user_ids:
+        matrix = _resolve_uploaded_matrix(field_map.get(str(uid)))
+        df = _uploaded_matrix_to_df(matrix, uid)
+        if df is not None:
+            dfs.append(df)
+    if not dfs:
+        return pd.DataFrame()
+    combined = pd.concat(dfs)
+    return combined[sorted(combined.columns)]
+
+
 def get_combined_datasets(collab_uuid):
     try:
         collaboration_data = fetch_collaboration_data(collab_uuid)
@@ -3486,22 +3181,15 @@ def get_combined_datasets(collab_uuid):
 
         threshold = collaboration_data.get("threshold", 1)
         invited_users = collaboration_data.get("invited_users", [])
-        creator_dataset_id = collaboration_data.get("creator_dataset_id")
+        creator_id = collaboration_data.get("creator_id")
 
-        all_dataset_ids = []
+        user_ids = [str(u.get("user_id")) for u in invited_users if u.get("status") == "accepted"]
+        if creator_id:
+            user_ids.append(str(creator_id))
 
-        for user in invited_users:
-            if user["status"] == "accepted":
-                all_dataset_ids.append(user["user_dataset_id"])
-        
-        if creator_dataset_id:
-            all_dataset_ids.append(creator_dataset_id)
-
-        datasets_data = fetch_datasets_by_ids(all_dataset_ids)
-        if not datasets_data:
-            return jsonify({"error": "No datasets found for the provided IDs."}), 404
-
-        combined_df = combine_datasets_to_dataframe(datasets_data)
+        combined_df = _combine_uploaded(collaboration_data, "transformed_data", user_ids)
+        if combined_df.empty:
+            return jsonify({"error": "No uploaded QC outputs yet. Waiting on local agents to post results."}), 409
 
         return combined_df, threshold
 
@@ -3516,22 +3204,17 @@ def get_combined_datasets_for_pca(collab_uuid):
 
         threshold = collaboration_data.get("threshold", 1)
         invited_users = collaboration_data.get("invited_users", [])
-        creator_dataset_id = collaboration_data.get("creator_dataset_id")
+        creator_id = collaboration_data.get("creator_id")
 
-        user_dataset_ids = []
+        invitee_ids = [str(u.get("user_id")) for u in invited_users if u.get("status") == "accepted"]
 
-        for user in invited_users:
-            if user["status"] == "accepted":
-                user_dataset_ids.append(user["user_dataset_id"])
+        creator_dataset_df = pd.DataFrame()
+        if creator_id:
+            creator_dataset_df = _combine_uploaded(collaboration_data, "pca_coords", [str(creator_id)])
 
-        if creator_dataset_id:
-            creator_dataset = fetch_datasets_by_ids([creator_dataset_id])
-            creator_dataset_df = combine_datasets_to_dataframe(creator_dataset)
-        datasets_data = fetch_datasets_by_ids(user_dataset_ids)
-        if not datasets_data:
-            return jsonify({"error": "No datasets found for the provided IDs."}), 404
-
-        combined_df = combine_datasets_to_dataframe(datasets_data)
+        combined_df = _combine_uploaded(collaboration_data, "pca_coords", invitee_ids)
+        if combined_df.empty:
+            return jsonify({"error": "No uploaded PCA coordinates yet. Waiting on local agents to post results."}), 409
 
         return combined_df, threshold, creator_dataset_df
 
@@ -3609,10 +3292,10 @@ def initiate_qc(collab_uuid):
         # Handle Sample Relatedness QC
         if 'Sample Relatedness' in qc_methods:
             print("Processing Sample Relatedness QC...")
-            df, threshold = get_combined_datasets(collab_uuid)
-
-            if isinstance(df, dict):
-                return df
+            res = get_combined_datasets(collab_uuid)
+            if not (isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], pd.DataFrame)):
+                return res
+            df, threshold = res
 
             sample_results = compute_coefficients_array(df)
 
@@ -3627,12 +3310,12 @@ def initiate_qc(collab_uuid):
         if 'Population Stratification' in qc_methods:
             print("Processing Population Stratification QC...")
             try:
-                # Get combined datasets for PCA
-                df, threshold, creator_df = get_combined_datasets_for_pca(collab_uuid)
-                
-                if isinstance(df, dict):
-                    return df
-                
+                # Get combined PCA coordinates (agent-uploaded) for stratification
+                res = get_combined_datasets_for_pca(collab_uuid)
+                if not (isinstance(res, tuple) and len(res) == 3 and isinstance(res[0], pd.DataFrame)):
+                    return res
+                df, threshold, creator_df = res
+
                 # Calculate pairwise distances for population stratification
                 pairwise_results = calculate_pairwise_distances_pca(df, creator_df)
                 
@@ -3732,6 +3415,10 @@ def get_filtered_qc_results(collab_uuid):
 
         if threshold_update_result.matched_count == 0:
             return jsonify({"error": "Failed to update threshold."}), 500
+
+        # Threshold is set -> the stat-data stage is open for everyone. Notify ALL
+        # participants (not just the initiator) that it's their turn to generate stats.
+        notifications.notify_stat_stage(db, collab_uuid)
 
         final_results = {}
 
@@ -3900,6 +3587,23 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
             {"$set": {"chi_square_results": chi_square_results}},
             upsert=False
         )
+
+        # Notify all participants that results are ready (best-effort; never blocks).
+        try:
+            recipient_emails = []
+            for pid in obligated_user_ids:
+                try:
+                    u = db.users.find_one({"_id": ObjectId(pid)}, {"email": 1})
+                except Exception:
+                    u = None
+                if u and u.get("email"):
+                    recipient_emails.append(u["email"])
+            if recipient_emails:
+                email_utils.notify_results_ready(
+                    recipient_emails, collaboration.get("name", "your collaboration"),
+                    collaboration_uuid)
+        except Exception as e:
+            logging.warning(f"Results-ready email skipped for {collaboration_uuid}: {e}")
 
         return {"message": "Chi-square results calculated and stored successfully"}, 200
 
@@ -4249,4 +3953,6 @@ def fl_get_defaults():
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Honor PORT (avoid macOS AirPlay Receiver, which squats on 5000 and returns 403).
+    port = int(os.getenv("PORT", "5050"))
+    app.run(debug=True, host="127.0.0.1", port=port)

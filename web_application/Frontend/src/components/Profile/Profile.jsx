@@ -19,6 +19,37 @@ const Profile = () => {
     confirmNewPassword: '',
   });
 
+  // "Connect my computer": one-time code the collaborator pastes into the local agent.
+  const [agentCode, setAgentCode] = useState('');
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleConnectComputer = async () => {
+    setAgentBusy(true);
+    setCopied(false);
+    try {
+      const response = await axios.post(`${URL}/api/agent/enrollment-code`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setAgentCode(response.data.code);
+    } catch (error) {
+      console.error('Could not generate connection code', error);
+      alert('Sorry, we could not generate a code. Please try again.');
+    } finally {
+      setAgentBusy(false);
+    }
+  };
+
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(agentCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (_) {
+      /* clipboard may be blocked; the user can still select the text manually */
+    }
+  };
+
   useEffect(() => {
     axios.get(`${URL}/api/profile`, {
       headers: {
@@ -139,6 +170,36 @@ const Profile = () => {
           Update Profile
         </Button>
       </form>
+
+      <Box mt={6} p={3} sx={{ border: '1px solid #e0e0e0', borderRadius: 2 }}>
+        <Typography variant="h6" gutterBottom>
+          Connect my computer
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Get a one-time code, then paste it into the setup helper on your computer.
+          The code is valid for 24 hours.
+        </Typography>
+
+        <Button variant="outlined" onClick={handleConnectComputer} disabled={agentBusy}>
+          {agentBusy ? 'Generating…' : 'Generate connection code'}
+        </Button>
+
+        {agentCode && (
+          <Box mt={2}>
+            <TextField
+              fullWidth
+              multiline
+              label="Your connection code"
+              value={agentCode}
+              InputProps={{ readOnly: true }}
+              onFocus={(e) => e.target.select()}
+            />
+            <Button size="small" sx={{ mt: 1 }} onClick={handleCopyCode}>
+              {copied ? 'Copied!' : 'Copy code'}
+            </Button>
+          </Box>
+        )}
+      </Box>
     </Container>
   );
 };

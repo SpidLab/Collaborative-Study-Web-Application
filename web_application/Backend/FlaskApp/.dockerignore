@@ -1,0 +1,17 @@
+# Keep the central API image lean. Build context = this folder (deploy/Dockerfile.api).
+# Exclude local dev artifacts and anything the running server doesn't import.
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.git
+.agentconfig*
+*.md
+
+# Test/sample data — the server reads from MongoDB, not from local CSVs
+*.csv
+
+# QC algorithm modules live with (and run on) the local Site Agent, not the server
+Collaborator_Server/
