@@ -27,7 +27,11 @@ logger = logging.getLogger("agent_api")
 
 # Outputs the agent is allowed to send back, and where each lands on the
 # collaboration document (keyed per user id).
-ALLOWED_RESULT_KEYS = {"surviving_samples", "surviving_snps", "pca_coords", "transformed_data", "stats"}
+ALLOWED_RESULT_KEYS = {"surviving_samples", "surviving_snps", "pca_coords", "transformed_data", "stats",
+                       # Federated Learning: PCA coords reuse "pca_coords"; a training
+                       # round returns a "model_update" (weights + sample count + local
+                       # metrics). Round-scoped FL results are also stored on the job doc.
+                       "model_update"}
 
 # Arrays/objects larger than this many entries are offloaded to the qc_results
 # collection to stay under MongoDB's 16 MB document limit (existing pattern).
@@ -287,8 +291,13 @@ def register_agent_api(app, db, signing_key=None):
             if key in payload:
                 _store_per_user(collab_uuid, str(uid), key, payload[key])
 
-        jobs.update_one({"job_id": job_id}, {"$set": {
-            "status": "complete", "completed_at": datetime.utcnow()}})
+        completion = {"status": "complete", "completed_at": datetime.utcnow()}
+        # Federated Learning rounds/projection are round-scoped: keep the full
+        # payload on the job doc so the FL orchestrator can collect this exact
+        # round's results by job id (per-user collab keys get overwritten each round).
+        if str(job.get("action", "")).startswith("fl_"):
+            completion["result"] = payload
+        jobs.update_one({"job_id": job_id}, {"$set": completion})
 
         # A QC/stat result just landed — nudge the next blocker / notify on stage completion.
         if collab_uuid:

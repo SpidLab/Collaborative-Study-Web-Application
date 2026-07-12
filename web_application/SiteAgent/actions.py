@@ -284,3 +284,31 @@ def run_gwas_summary(df, sample_ids, params):
         snp_ids_to_include=params.get("snp_ids_to_include"),
     )
     return {"stats": build_stats_dict(stat_df)}
+
+
+# --------------------------------------------------------------------------- #
+# Federated Learning (Sub Aim 1.3) — local compute, weights/coords only leave.
+# --------------------------------------------------------------------------- #
+def _fl_panel_path(models_dir, params):
+    name = params.get("pca_model_name", "fl_pca_model")
+    return os.path.join(models_dir, f"{name}.npz")
+
+
+def run_fl_project(df, params, models_dir):
+    """Stage 1: PCA-project local genotypes + Laplace DP noise → pca_coords."""
+    import fl_local
+    panel_path = _fl_panel_path(models_dir, params)
+    if not os.path.isfile(panel_path):
+        raise ValueError(f"FL PCA panel not found: {panel_path}")
+    panel = fl_local.load_pca_panel(panel_path)
+    epsilon = float(params.get("epsilon", 3.0))
+    clip_norm = float(params.get("clip_norm", 5.0))
+    seed = params.get("seed")
+    return fl_local.run_project(df, panel, epsilon, clip_norm=clip_norm,
+                                seed=int(seed) if seed is not None else None)
+
+
+def run_fl_train_round(df, params):
+    """Stage 3: train the genotype→phenotype CNN locally for one FL round."""
+    import fl_local
+    return fl_local.run_train_round(df, params)

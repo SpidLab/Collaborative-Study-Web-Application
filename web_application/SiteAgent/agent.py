@@ -28,6 +28,9 @@ logger = logging.getLogger("siteagent")
 # produces is a QC-derived aggregate; the raw input is never in here.
 ALLOWED_RESULT_KEYS = {
     "surviving_samples", "surviving_snps", "pca_coords", "transformed_data", "stats",
+    # Federated Learning: PCA coords reuse "pca_coords"; training rounds return a
+    # model weight update (weights + sample count + local metrics — no raw data).
+    "model_update",
 }
 
 
@@ -115,7 +118,13 @@ def handle_job(job, client):
     df = load_dataframe(csv_path)
     logger.info("Job %s action=%s phenotype=%s shape=%s", job.get("id"), action, phenotype, df.shape)
 
-    if action == "chained_qc":
+    if action == "fl_project":
+        # Federated Learning stage 1: PCA-project local genotypes + DP noise.
+        result = actions.run_fl_project(df, params, Config.MODELS_DIR)
+    elif action == "fl_train_round":
+        # Federated Learning stage 3: one local training round on this site's data.
+        result = actions.run_fl_train_round(df, params)
+    elif action == "chained_qc":
         result = actions.run_chained_qc(df, params.get("methods", []), Config.MODELS_DIR)
     elif action == "privacy_transform":
         result = actions.run_privacy_transform(df, params)

@@ -68,7 +68,14 @@ def _strip_quote(value: str) -> str:
 
 def _load_synpop(snps_path: Path, labels_path: Path) -> tuple[pd.DataFrame, pd.Series]:
     logger.info("Loading synpop SNPs from %s", snps_path)
-    snps = pd.read_csv(snps_path, index_col=0)
+    # The synpop CSV has NO index column — every column is a SNP and every row is
+    # an individual. Read with a default RangeIndex, then assign a UNIQUE synthetic
+    # sample_id per individual. (Using index_col=0 here would silently consume the
+    # first SNP as a non-unique "index" of genotype values 0/1/2 — which collapses
+    # per-sample keying downstream in the agent path.)
+    snps = pd.read_csv(snps_path)
+    snps.index = [f"ind_{i}" for i in range(len(snps))]
+    snps.index.name = "sample_id"
     logger.info("Loading synpop labels from %s", labels_path)
     labels_raw = pd.read_csv(labels_path)
     label_col = labels_raw.columns[0]

@@ -1195,7 +1195,10 @@ def _maybe_trigger_auto_fl(collaboration_uuid: str):
 
     try:
         fl_pipeline.bootstrap_fl_state(db['collaborations'], str(collaboration_uuid))
-        fl_pipeline.launch_projection_and_emd(db['collaborations'], str(collaboration_uuid))
+        fl_pipeline.launch_projection_and_emd(
+            db['collaborations'], str(collaboration_uuid),
+            jobs=db['jobs'], enqueue_job=enqueue_job,
+            datasets=db['datasets'], qc_results=db['qc_results'])
         logging.info(f"✅ FL pipeline launched for {collaboration_uuid}")
     except Exception as exc:
         logging.exception("Failed to launch FL pipeline for %s", collaboration_uuid)
@@ -3827,7 +3830,10 @@ def fl_kickoff(collab_uuid):
     if EXPERIMENT_FL not in (collab.get('experiments') or []):
         return jsonify({"error": "Not a Federated Learning collaboration"}), 400
     fl_pipeline.bootstrap_fl_state(db['collaborations'], collab_uuid)
-    fl_pipeline.launch_projection_and_emd(db['collaborations'], collab_uuid)
+    fl_pipeline.launch_projection_and_emd(
+        db['collaborations'], collab_uuid,
+        jobs=db['jobs'], enqueue_job=enqueue_job,
+        datasets=db['datasets'], qc_results=db['qc_results'])
     return jsonify({"message": "FL projection + EMD pipeline launched"}), 202
 
 
@@ -3910,7 +3916,10 @@ def fl_start_training():
     if patch:
         db['collaborations'].update_one({"uuid": collab_uuid}, {"$set": patch})
 
-    fl_pipeline.launch_training(db['collaborations'], collab_uuid)
+    fl_pipeline.launch_training(
+        db['collaborations'], collab_uuid,
+        jobs=db['jobs'], enqueue_job=enqueue_job,
+        datasets=db['datasets'], qc_results=db['qc_results'])
     return jsonify({"message": "FL training launched", "survivors": survivors}), 202
 
 

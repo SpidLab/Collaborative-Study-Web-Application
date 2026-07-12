@@ -59,10 +59,13 @@ deploy/
 **/.cfg_creator/
 **/.cfg_invited/
 **/.agentconfig_*/
+**/.cfg_fl_*/
+**/.fl_logs/
 # Generated collaborator kit
 collabstudy-agent-kit.zip
 # Agent local working data (per-site raw genotype CSVs — never leave the site)
 web_application/SiteAgent/raw-data/
+web_application/SiteAgent/fl-data/
 
 # ===== Logs & temp =====
 *.log

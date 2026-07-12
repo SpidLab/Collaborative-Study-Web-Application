@@ -384,28 +384,357 @@ def run_training(
 
 
 # ---------------------------------------------------------------------------
+# Agent mode — federate over the Site Agent job queue (Sub Aim 1.3, real FL)
+#
+# Each participant runs a local Site Agent. The server never sees raw genotypes:
+# it enqueues jobs, the agents compute on their own machines, and only PCA
+# coordinates (projection) and model weight updates (training rounds) come back.
+# ---------------------------------------------------------------------------
+
+FL_PROJECT_ACTION = "fl_project"
+FL_TRAIN_ACTION = "fl_train_round"
+# How long to wait for every agent to finish a stage before giving up. Generous,
+# because agents may be started by collaborators minutes after jobs are enqueued.
+AGENT_STAGE_TIMEOUT = int(os.getenv("FL_AGENT_STAGE_TIMEOUT", "3600"))
+AGENT_POLL_SECONDS = int(os.getenv("FL_AGENT_POLL_SECONDS", "3"))
+
+
+def execution_mode() -> str:
+    """'agents' (federate over Site Agents) or 'simulation' (in-process, synpop)."""
+    return os.getenv("FL_EXECUTION", "agents").strip().lower()
+
+
+def _fl_participants(collaborations: Collection, datasets: Collection, uuid: str) -> list[dict]:
+    """Creator + accepted invitees, each as {uid, phenotype, dataset_id}."""
+    doc = _load_collaboration(collaborations, uuid)
+    parts: list[dict] = []
+    creator_id = str(doc["creator_id"])
+    creator_ds_id = doc.get("creator_dataset_id")
+    creator_pheno = None
+    if creator_ds_id and datasets is not None:
+        cds = datasets.find_one({"_id": creator_ds_id}, {"phenotype": 1}) or {}
+        creator_pheno = cds.get("phenotype")
+    parts.append({
+        "uid": creator_id,
+        "phenotype": creator_pheno,
+        "dataset_id": str(creator_ds_id) if creator_ds_id else None,
+    })
+    for iu in doc.get("invited_users", []):
+        if iu.get("status") != "accepted":
+            continue
+        uid = str(iu["user_id"])
+        if uid == creator_id:
+            continue
+        parts.append({
+            "uid": uid,
+            "phenotype": iu.get("phenotype"),
+            "dataset_id": str(iu.get("user_dataset_id")) if iu.get("user_dataset_id") else None,
+        })
+    return parts
+
+
+def _coords_dict_to_array(coords: dict) -> np.ndarray:
+    """{sample_id: {PC_1:.., PC_2:..}} -> [n_samples, n_pcs] sorted by sample id."""
+    if not coords:
+        return np.zeros((0, 0), dtype=np.float32)
+    sample_ids = sorted(coords.keys())
+    pc_names = sorted(coords[sample_ids[0]].keys(), key=lambda s: int(s.split("_")[1]))
+    return np.array(
+        [[float(coords[sid][pc]) for pc in pc_names] for sid in sample_ids],
+        dtype=np.float32,
+    )
+
+
+def _resolve_job_result(jobs: Collection, qc_results: Collection | None, job: dict) -> dict:
+    """Return a job's FL result payload, resolving any overflow ref."""
+    result = job.get("result")
+    if isinstance(result, dict) and "__ref__" in result and qc_results is not None:
+        ref = qc_results.find_one({"ref": result["__ref__"]})
+        return (ref or {}).get("value", {})
+    return result or {}
+
+
+def _wait_for_jobs(
+    jobs: Collection,
+    collaborations: Collection,
+    uuid: str,
+    job_id_by_uid: dict[str, str],
+    heartbeat_key: str,
+    timeout: int = AGENT_STAGE_TIMEOUT,
+) -> dict[str, dict]:
+    """Block until every job completes or fails (or timeout). Returns {uid: job}.
+
+    Updates a heartbeat + waiting count on fl_state each poll so the UI can show
+    live "waiting for N/M agents" progress. Raises on timeout or if any job failed.
+    """
+    deadline = time.time() + timeout
+    all_ids = set(job_id_by_uid.values())
+    while True:
+        docs = {j["job_id"]: j for j in jobs.find({"job_id": {"$in": list(all_ids)}})}
+        done, failed, pending = {}, {}, 0
+        for uid, jid in job_id_by_uid.items():
+            j = docs.get(jid)
+            st = (j or {}).get("status")
+            if st == "complete":
+                done[uid] = j
+            elif st == "failed":
+                failed[uid] = (j or {}).get("error", "unknown error")
+            else:
+                pending += 1
+        _set_fl_state(collaborations, uuid, {
+            f"fl_state.{heartbeat_key}": _utcnow_iso(),
+            "fl_state.agent_progress": {
+                "completed": len(done), "failed": len(failed),
+                "pending": pending, "total": len(job_id_by_uid),
+            },
+        })
+        if failed:
+            raise RuntimeError(
+                "Agent job(s) failed: " + "; ".join(f"{u}: {e}" for u, e in failed.items())
+            )
+        if len(done) == len(job_id_by_uid):
+            return done
+        if time.time() >= deadline:
+            raise TimeoutError(
+                f"Timed out after {timeout}s waiting for agents "
+                f"({len(done)}/{len(job_id_by_uid)} done). Are all collaborators' agents running?"
+            )
+        time.sleep(AGENT_POLL_SECONDS)
+
+
+def run_projection_and_emd_agents(
+    collaborations: Collection,
+    jobs: Collection,
+    enqueue_job,
+    datasets: Collection,
+    uuid: str,
+    qc_results: Collection | None = None,
+) -> None:
+    """Agent-mode stage 1+2: enqueue fl_project per participant, collect the
+    DP-protected PCA coords their agents upload, assemble the EMD matrix."""
+    try:
+        bootstrap_fl_state(collaborations, uuid)
+        state = _load_collaboration(collaborations, uuid)["fl_state"]
+        cfg = state["config"]
+        participants = _fl_participants(collaborations, datasets, uuid)
+        if len(participants) < 2:
+            raise ValueError("FL requires ≥ 2 participants (initiator + 1 accepted invitee).")
+
+        _set_fl_state(collaborations, uuid, {
+            "fl_state.stage": STAGE_PROJECTING,
+            "fl_state.execution": "agents",
+            "fl_state.participants": participants,
+        })
+
+        job_id_by_uid = {}
+        for p in participants:
+            params = {
+                "phenotype": p["phenotype"],
+                "dataset_id": p["dataset_id"],
+                "epsilon": float(cfg["epsilon"]),
+                "clip_norm": float(cfg.get("clip_norm", 5.0)),
+                "pca_model_name": "fl_pca_model",
+            }
+            job_id_by_uid[p["uid"]] = enqueue_job(uuid, p["uid"], FL_PROJECT_ACTION, params)
+        _set_fl_state(collaborations, uuid, {"fl_state.projection_jobs": job_id_by_uid})
+        logger.info("FL(agents) enqueued %d projection jobs for %s", len(job_id_by_uid), uuid)
+
+        done = _wait_for_jobs(jobs, collaborations, uuid, job_id_by_uid, "projection_heartbeat")
+
+        projections, site_summary = {}, {}
+        for uid, job in done.items():
+            payload = _resolve_job_result(jobs, qc_results, job)
+            coords = payload.get("pca_coords") or {}
+            arr = _coords_dict_to_array(coords)
+            if arr.shape[0] == 0:
+                raise ValueError(f"Agent for {uid} returned no projection coordinates.")
+            projections[uid] = arr
+            site_summary[uid] = {"num_samples": int(arr.shape[0]), "n_components": int(arr.shape[1])}
+
+        _set_fl_state(collaborations, uuid, {"fl_state.stage": STAGE_EMD, "fl_state.site_summary": site_summary})
+
+        emd = pairwise_emd_matrix(projections)
+        creator_id = str(_load_collaboration(collaborations, uuid)["creator_id"])
+        rows = surviving_collaborators(creator_id, emd, float(cfg["emd_threshold"]))
+        _set_fl_state(collaborations, uuid, {
+            "fl_state.emd": {"client_order": emd.client_order, "matrix": emd.matrix.tolist()},
+            "fl_state.survivors_preview": rows,
+            "fl_state.stage": STAGE_AWAITING_THRESHOLD,
+        })
+        logger.info("FL(agents) projection+EMD complete for %s (%d clients)", uuid, len(projections))
+    except Exception as exc:
+        logger.exception("FL(agents) projection/EMD failed for %s", uuid)
+        _set_fl_state(collaborations, uuid, {
+            "fl_state.stage": STAGE_FAILED,
+            "fl_state.error": f"{type(exc).__name__}: {exc}",
+            "fl_state.error_trace": traceback.format_exc(limit=10),
+        })
+
+
+def _fedavg_encoded(updates: list[tuple[str, int]]) -> str:
+    """Weighted-average base64 weight updates by sample count → base64 weights."""
+    from .weights import decode_weights, encode_weights
+
+    total = sum(n for _, n in updates) or 1
+    decoded = [(decode_weights(w), n) for w, n in updates]
+    num_tensors = len(decoded[0][0])
+    averaged = []
+    for t in range(num_tensors):
+        acc = np.zeros_like(decoded[0][0][t], dtype=np.float64)
+        for arrays, n in decoded:
+            acc += arrays[t].astype(np.float64) * (n / total)
+        averaged.append(acc.astype(decoded[0][0][t].dtype))
+    return encode_weights(averaged)
+
+
+def run_training_agents(
+    collaborations: Collection,
+    jobs: Collection,
+    enqueue_job,
+    datasets: Collection,
+    uuid: str,
+    qc_results: Collection | None = None,
+) -> None:
+    """Agent-mode stage 3: run FedAvg over the surviving agents, one job per round."""
+    try:
+        doc = _load_collaboration(collaborations, uuid)
+        state = doc.get("fl_state") or {}
+        cfg = state.get("config") or {}
+        survivors = state.get("survivors") or []
+        participants = {p["uid"]: p for p in (state.get("participants") or [])}
+        if len(survivors) < 2:
+            raise ValueError("Need ≥ 2 surviving collaborators. Loosen the EMD threshold.")
+
+        num_classes = int(cfg.get("num_classes", len(SUPER_POPULATIONS)))
+        class_names = cfg.get("label_names", SUPER_POPULATIONS)
+        num_rounds = int(cfg.get("num_rounds", DEFAULT_FL_ROUNDS))
+        local_epochs = int(cfg.get("local_epochs", DEFAULT_LOCAL_EPOCHS))
+        batch_size = int(cfg.get("batch_size", DEFAULT_BATCH_SIZE))
+        learning_rate = float(cfg.get("learning_rate", DEFAULT_LEARNING_RATE))
+
+        _set_fl_state(collaborations, uuid, {
+            "fl_state.stage": STAGE_TRAINING,
+            "fl_state.execution": "agents",
+            "fl_state.training_started_at": _utcnow_iso(),
+            "fl_state.training_heartbeat": _utcnow_iso(),
+            "fl_state.training_history": [],
+            "fl_state.final_metrics": {},
+        })
+
+        global_weights = None
+        round_history: list[dict] = []
+        final_metrics: dict = {}
+
+        for rnd in range(1, num_rounds + 1):
+            job_id_by_uid = {}
+            for uid in survivors:
+                p = participants.get(uid, {})
+                params = {
+                    "phenotype": p.get("phenotype"),
+                    "dataset_id": p.get("dataset_id"),
+                    "round": rnd,
+                    "num_classes": num_classes,
+                    "class_names": class_names,
+                    "local_epochs": local_epochs,
+                    "batch_size": batch_size,
+                    "learning_rate": learning_rate,
+                    "seed": 42,
+                    "global_weights": global_weights,
+                }
+                job_id_by_uid[uid] = enqueue_job(uuid, uid, FL_TRAIN_ACTION, params)
+            _set_fl_state(collaborations, uuid, {
+                "fl_state.round_jobs": {"round": rnd, "jobs": job_id_by_uid},
+            })
+            logger.info("FL(agents) round %d/%d: enqueued %d train jobs", rnd, num_rounds, len(job_id_by_uid))
+
+            done = _wait_for_jobs(jobs, collaborations, uuid, job_id_by_uid, "training_heartbeat")
+
+            updates, val_accs, val_f1s, train_losses = [], [], [], []
+            for uid, job in done.items():
+                mu = _resolve_job_result(jobs, qc_results, job).get("model_update") or {}
+                if "weights" not in mu:
+                    raise ValueError(f"Agent {uid} returned no model weights in round {rnd}.")
+                n = int(mu.get("num_samples", 1))
+                updates.append((mu["weights"], n))
+                val_accs.append((float(mu.get("val_accuracy", 0.0)), n))
+                val_f1s.append((float(mu.get("val_f1", 0.0)), n))
+                train_losses.append((float(mu.get("train_loss", 0.0)), n))
+
+            global_weights = _fedavg_encoded(updates)
+            tot = sum(n for _, n in updates) or 1
+            agg_loss = sum(v * n for v, n in train_losses) / tot
+            agg_acc = sum(v * n for v, n in val_accs) / tot
+            agg_f1 = sum(v * n for v, n in val_f1s) / tot
+
+            round_history.append({"round": rnd, "phase": "fit", "train_loss": agg_loss})
+            round_history.append({"round": rnd, "phase": "evaluate", "accuracy": agg_acc, "f1_macro": agg_f1})
+            final_metrics = {"accuracy": agg_acc, "f1_macro": agg_f1, "train_loss": agg_loss}
+            _set_fl_state(collaborations, uuid, {
+                "fl_state.training_history": list(round_history),
+                "fl_state.final_metrics": dict(final_metrics),
+                "fl_state.training_progress": {"current_round": rnd, "total_rounds": num_rounds},
+                "fl_state.training_heartbeat": _utcnow_iso(),
+            })
+            logger.info("FL(agents) round %d aggregate: acc=%.4f f1=%.4f loss=%.4f",
+                        rnd, agg_acc, agg_f1, agg_loss)
+
+        # Persist the final global model weights (base64) for later inference/download.
+        _set_fl_state(collaborations, uuid, {
+            "fl_state.stage": STAGE_COMPLETE,
+            "fl_state.final_metrics": final_metrics,
+            "fl_state.training_history": round_history,
+            "fl_state.global_model": global_weights,
+            "fl_state.training_completed_at": _utcnow_iso(),
+        })
+        logger.info("FL(agents) training complete for %s: %s", uuid, final_metrics)
+    except Exception as exc:
+        logger.exception("FL(agents) training failed for %s", uuid)
+        _set_fl_state(collaborations, uuid, {
+            "fl_state.stage": STAGE_FAILED,
+            "fl_state.error": f"{type(exc).__name__}: {exc}",
+            "fl_state.error_trace": traceback.format_exc(limit=10),
+        })
+
+
+# ---------------------------------------------------------------------------
 # Thread helpers (fire-and-forget from Flask routes)
 # ---------------------------------------------------------------------------
 
 
-def launch_projection_and_emd(collaborations: Collection, uuid: str) -> str:
+def launch_projection_and_emd(
+    collaborations: Collection,
+    uuid: str,
+    jobs: Collection | None = None,
+    enqueue_job=None,
+    datasets: Collection | None = None,
+    qc_results: Collection | None = None,
+) -> str:
     bootstrap_fl_state(collaborations, uuid)
-    thread = threading.Thread(
-        target=run_projection_and_emd,
-        args=(collaborations, uuid),
-        name=f"fl-pca-emd-{uuid[:8]}",
-        daemon=True,
-    )
+    use_agents = execution_mode() == "agents" and enqueue_job is not None and jobs is not None
+    if use_agents:
+        target, args = run_projection_and_emd_agents, (
+            collaborations, jobs, enqueue_job, datasets, uuid, qc_results)
+    else:
+        target, args = run_projection_and_emd, (collaborations, uuid)
+    thread = threading.Thread(target=target, args=args, name=f"fl-pca-emd-{uuid[:8]}", daemon=True)
     thread.start()
     return thread.name
 
 
-def launch_training(collaborations: Collection, uuid: str) -> str:
-    thread = threading.Thread(
-        target=run_training,
-        args=(collaborations, uuid),
-        name=f"fl-train-{uuid[:8]}",
-        daemon=True,
-    )
+def launch_training(
+    collaborations: Collection,
+    uuid: str,
+    jobs: Collection | None = None,
+    enqueue_job=None,
+    datasets: Collection | None = None,
+    qc_results: Collection | None = None,
+) -> str:
+    use_agents = execution_mode() == "agents" and enqueue_job is not None and jobs is not None
+    if use_agents:
+        target, args = run_training_agents, (
+            collaborations, jobs, enqueue_job, datasets, uuid, qc_results)
+    else:
+        target, args = run_training, (collaborations, uuid)
+    thread = threading.Thread(target=target, args=args, name=f"fl-train-{uuid[:8]}", daemon=True)
     thread.start()
     return thread.name
