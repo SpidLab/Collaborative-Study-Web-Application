@@ -32,6 +32,7 @@ INCLUDE=(
   "config.py"
   "agent.py"
   "actions.py"
+  "fl_local.py"
   "jobs_client.py"
   "data_loader.py"
 )
