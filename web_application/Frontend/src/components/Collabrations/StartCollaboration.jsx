@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   Container, TextField, Button, Checkbox, IconButton, Typography, Box, Divider,
-  Snackbar, Alert, CircularProgress, Grid, Card, CardContent, Chip, FormControl, InputLabel, Select, MenuItem, Slider, Collapse
+  Snackbar, Alert, CircularProgress, Grid, Card, CardContent, Chip, FormControl, InputLabel, Select, MenuItem, Slider, Collapse, FormControlLabel
 } from '@mui/material';
+import PublicIcon from '@mui/icons-material/Public';
 import { Add, Delete, Upload, Info, RadioButtonUncheckedRounded } from '@mui/icons-material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SearchPage from '../Search/Search';
@@ -46,6 +47,7 @@ const StartCollaboration = () => {
   const [selectedQcSchemes, setSelectedQcSchemes] = useState([]);
   const [qcMethodParams, setQcMethodParams] = useState({});
   const [flEpsilon, setFlEpsilon] = useState(FL_EPSILON_DEFAULT);
+  const [publishModel, setPublishModel] = useState(false);
 
   const isFederatedLearning = experimentList.includes(EXPERIMENT_FL);
 
@@ -192,6 +194,8 @@ const StartCollaboration = () => {
       experiments: experimentList,
       collabQcScheme: collabQcSchemePayload,
       creatorDatasetId: selectedDataset.dataset_id,
+      // FL only: publish the trained global model to the public Model Repository.
+      publishModel: isFederatedLearning ? publishModel : false,
       invitedUsers: selectedUsers.map(user => ({
         _id: user._id,
         dataset_id: user.dataset_id,
@@ -249,6 +253,7 @@ const StartCollaboration = () => {
       setFileName('');
       setSelectedUsers([]);
       setSelectedDataset('');
+      setPublishModel(false);
       // Re-seed the default QC scheme (the mount effect won't re-run) so the form
       // is immediately valid again for starting another collaboration. (Note: we do
       // NOT clear experimentOptions — those are fetched once on mount and clearing
@@ -465,6 +470,36 @@ const StartCollaboration = () => {
                       max={FL_EPSILON_MAX}
                       step={0.1}
                       valueLabelDisplay="auto"
+                    />
+                  </Box>
+
+                  {/* Opt in to publishing the trained global model publicly. */}
+                  <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px dashed', borderColor: '#90CAF9' }}>
+                    <FormControlLabel
+                      sx={{ alignItems: 'flex-start', m: 0 }}
+                      control={
+                        <Checkbox
+                          checked={publishModel}
+                          onChange={(e) => setPublishModel(e.target.checked)}
+                          sx={{ pt: 0.25 }}
+                        />
+                      }
+                      label={
+                        <Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                            <PublicIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              Publish the global model to the Model Repository
+                            </Typography>
+                          </Box>
+                          <Typography variant="caption" color="text.secondary">
+                            When this collaboration finishes training, the final aggregated model
+                            (weights + metrics + metadata — never any raw genotype data) is added to
+                            the public Model Repository, where every user of this app can view and
+                            download it. Leave unchecked to keep the model private to this collaboration.
+                          </Typography>
+                        </Box>
+                      }
                     />
                   </Box>
                 </Box>

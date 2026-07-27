@@ -13,6 +13,7 @@ import SessionsResults from "./components/Session/SessionsResults";
 import Profile from "./components/Profile/Profile";
 import StartCollaboration from "./components/Collabrations/StartCollaboration";
 import MyData from "./components/MyData/MyData";
+import ModelRepository from "./components/ModelRepository/ModelRepository";
 
 function App() {
 
@@ -105,6 +106,7 @@ function App() {
         <Route path="/session/viewresults" element={ <SessionsResults />} />
         <Route path="/collaboration" element={isLoggedIn ? <CollaborationsPage /> : <Navigate to="/login" />} />
         <Route path="/start-collaboration" element={isLoggedIn ? <StartCollaboration /> : <Navigate to="/login" />} />
+        <Route path="/models" element={isLoggedIn ? <ModelRepository /> : <Navigate to="/login" />} />
         <Route path="/collaboration/:uuid" element={isLoggedIn ? <CollaborationDetails /> : <Navigate to="/login" />} /> 
         <Route path="/forgot/username" element={<ForgotUsername />} />
         <Route path="/forgot/password" element={<ForgotPassword />} />

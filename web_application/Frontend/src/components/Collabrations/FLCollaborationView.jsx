@@ -7,6 +7,9 @@ import {
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import PendingIcon from '@mui/icons-material/HourglassTop';
+import PublicIcon from '@mui/icons-material/Public';
+import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
+import { Link as RouterLink } from 'react-router-dom';
 import axios from 'axios';
 import URL from '../../config';
 
@@ -38,19 +41,20 @@ const StatusDot = ({ status }) => {
 
 const FLCollaborationView = ({ collaboration }) => {
   const uuid = collaboration?.uuid;
-  const isInitiator = collaboration?.is_sender === true ||
-    (collaboration?.creator_id && collaboration?.current_user_id &&
-      String(collaboration.creator_id) === String(collaboration.current_user_id));
-  const creatorIdStr = collaboration?.creator_id ? String(collaboration.creator_id) : null;
 
   const [fetchError, setFetchError] = useState(null);
   const [flState, setFlState] = useState(null);
+  // Authoritative identity comes from /api/fl/state (server compares the JWT's
+  // user against the collaboration's creator_id). We fall back to the props
+  // threaded in from the parent only until that first response lands.
+  const [flIdentity, setFlIdentity] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [pendingThreshold, setPendingThreshold] = useState(null);
   const [isApplyingThreshold, setIsApplyingThreshold] = useState(false);
   const [isStartingTraining, setIsStartingTraining] = useState(false);
   const [isKickingOff, setIsKickingOff] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [numRounds, setNumRounds] = useState(null);
   const [localEpochs, setLocalEpochs] = useState(null);
   const pollTimer = useRef(null);
@@ -63,6 +67,14 @@ const FLCollaborationView = ({ collaboration }) => {
       const resp = await axios.get(`${URL}/api/fl/state/${uuid}`, { headers: authHeader() });
       const state = resp?.data?.fl_state || null;
       setFlState(state);
+      setFlIdentity({
+        creator_id: resp?.data?.creator_id ?? null,
+        current_user_id: resp?.data?.current_user_id ?? null,
+        is_initiator: resp?.data?.is_initiator === true,
+        publish_model: resp?.data?.publish_model === true,
+        published_model_id: resp?.data?.published_model_id ?? null,
+        has_weights: resp?.data?.has_weights === true,
+      });
       setFetchError(null);
       if (state?.config) {
         if (pendingThreshold === null && typeof state.config.emd_threshold === 'number') {
@@ -82,6 +94,23 @@ const FLCollaborationView = ({ collaboration }) => {
     pollTimer.current = setInterval(fetchState, POLL_INTERVAL_MS);
     return () => { if (pollTimer.current) clearInterval(pollTimer.current); };
   }, [fetchState]);
+
+  // Prefer the server's authoritative answer; fall back to the props threaded
+  // from the parent (used only for the brief window before the first fl/state
+  // response, or if that endpoint can't authenticate).
+  const creatorIdStr = flIdentity?.creator_id
+    ? String(flIdentity.creator_id)
+    : (collaboration?.creator_id ? String(collaboration.creator_id) : null);
+  const isInitiator = flIdentity
+    ? (flIdentity.is_initiator === true ||
+        (!!flIdentity.creator_id && !!flIdentity.current_user_id &&
+          String(flIdentity.creator_id) === String(flIdentity.current_user_id)))
+    : (collaboration?.is_sender === true ||
+        (!!collaboration?.creator_id && !!collaboration?.current_user_id &&
+          String(collaboration.creator_id) === String(collaboration.current_user_id)));
+  const modelPublic = flIdentity?.publish_model === true || collaboration?.publish_model === true;
+  const modelPublished = !!flIdentity?.published_model_id; // backend breadcrumb — actually in the repo
+  const modelHasWeights = flIdentity?.has_weights === true; // downloadable weights exist
 
   const stage = flState?.stage || 'idle';
   const stageInfo = STAGE_LABELS[stage] || { label: stage, color: 'default' };
@@ -163,6 +192,35 @@ const FLCollaborationView = ({ collaboration }) => {
       setSnackbar({ open: true, message: `Kickoff failed: ${msg}`, severity: 'error' });
     } finally {
       setIsKickingOff(false);
+    }
+  };
+
+  const downloadModel = async () => {
+    const modelId = flIdentity?.published_model_id;
+    if (!modelId) {
+      setSnackbar({ open: true, message: 'This model has not been published yet.', severity: 'warning' });
+      return;
+    }
+    setIsDownloading(true);
+    try {
+      const resp = await axios.get(`${URL}/api/models/${modelId}/download`, { headers: authHeader() });
+      const blob = new Blob([JSON.stringify(resp.data, null, 2)], { type: 'application/json' });
+      const safe = (collaboration?.collab_name || collaboration?.name || 'model')
+        .replace(/[^a-z0-9-_]+/gi, '_').replace(/^_+|_+$/g, '') || 'model';
+      const link = document.createElement('a');
+      const objectUrl = window.URL.createObjectURL(blob);
+      link.href = objectUrl;
+      link.download = `${safe}.model.json`;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(objectUrl);
+      document.body.removeChild(link);
+      setSnackbar({ open: true, message: 'Model downloaded.', severity: 'success' });
+    } catch (err) {
+      const msg = err?.response?.data?.error || err.message;
+      setSnackbar({ open: true, message: `Download failed: ${msg}`, severity: 'error' });
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -479,8 +537,52 @@ const FLCollaborationView = ({ collaboration }) => {
                 <Stack direction="row" spacing={3} sx={{ mt: 1 }} flexWrap="wrap">
                   <Typography variant="body2">accuracy: <b>{formatMetric(finalMetrics.accuracy)}</b></Typography>
                   <Typography variant="body2">F1 (macro): <b>{formatMetric(finalMetrics.f1_macro)}</b></Typography>
-                  <Typography variant="body2">val loss: <b>{formatMetric(finalMetrics.train_loss)}</b></Typography>
+                  {finalMetrics.loss != null ? (
+                    <Typography variant="body2">val loss: <b>{formatMetric(finalMetrics.loss)}</b></Typography>
+                  ) : (
+                    <Typography variant="body2">train loss: <b>{formatMetric(finalMetrics.train_loss)}</b></Typography>
+                  )}
                 </Stack>
+
+                {modelPublished ? (
+                  <Box sx={{ mt: 2, pt: 2, borderTop: '1px dashed #a5d6a7' }}>
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Chip size="small" color="success" icon={<PublicIcon />} label="Published to Model Repository" />
+                      <Typography variant="caption" color="text.secondary">
+                        This global model is public — any user can view{modelHasWeights ? ' and download' : ''} it.
+                      </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={1.5} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
+                      <Button
+                        variant="contained" size="small"
+                        startIcon={isDownloading ? <CircularProgress size={16} color="inherit" /> : <DownloadRoundedIcon />}
+                        onClick={downloadModel} disabled={isDownloading || !modelHasWeights}
+                      >
+                        {isDownloading ? 'Preparing…' : 'Download model'}
+                      </Button>
+                      <Button variant="outlined" size="small" component={RouterLink} to="/models">
+                        View in Model Repository
+                      </Button>
+                    </Stack>
+                    {!modelHasWeights && (
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                        Downloadable weights aren&apos;t available for this run (produced by the in-process
+                        simulation backend); metadata and metrics are still shared.
+                      </Typography>
+                    )}
+                  </Box>
+                ) : modelPublic ? (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
+                    Publishing this global model to the Model Repository…
+                  </Typography>
+                ) : (
+                  isInitiator && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
+                      This model is private to the collaboration. (Publishing to the Model Repository is
+                      opted in when the collaboration is created.)
+                    </Typography>
+                  )
+                )}
               </Box>
             )}
           </CardContent>

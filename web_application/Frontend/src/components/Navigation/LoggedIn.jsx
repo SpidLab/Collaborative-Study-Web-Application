@@ -85,6 +85,7 @@ export default function LoggedIn({ onLogout }) {
       <Button color="inherit" component={RouterLink} to="/">Home</Button>
       <Button color="inherit" component={RouterLink} to="/upload">Metadata</Button>
       <Button color="inherit" component={RouterLink} to="/my-data">My Data</Button>
+      <Button color="inherit" component={RouterLink} to="/models">Model Repository</Button>
       
       <Badge badgeContent={pendingCount} color="error">
         <Button

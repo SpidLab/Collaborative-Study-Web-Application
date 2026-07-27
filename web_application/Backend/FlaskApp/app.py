@@ -1832,6 +1832,11 @@ def post_start_collaboration():
                 'phenotype': phenotype,
             })
 
+        # For Federated Learning, the initiator may opt in to publishing the
+        # trained global model to the public Model Repository once the
+        # collaboration completes. Ignored for non-FL experiments.
+        publish_model = bool(data.get('publishModel')) and (EXPERIMENT_FL in experiments)
+
         collaboration = {
             'uuid': str(uuid.uuid4()),
             'name': collab_name,
@@ -1840,6 +1845,7 @@ def post_start_collaboration():
             'creator_id': ObjectId(creator_id),
             'creator_dataset_id': ObjectId(creator_dataset_id),
             'invited_users': invited_users_with_new_datasets,
+            'publish_model': publish_model,
             # 'created_at': datetime.datetime.utcnow()  # Optionally add timestamp
         }
 
@@ -3791,8 +3797,12 @@ def _fl_unavailable_response():
 
 
 def _fl_state_for_response(collab_doc):
-    """Trim the fl_state for API consumers (strip big matrices when not needed)."""
-    state = collab_doc.get('fl_state') or {}
+    """Trim fl_state for API consumers: drop the bulky/internal fields the UI
+    never needs — the base64 global-model weights (downloaded via the Model
+    Repository instead), internal agent job ids, and stack traces."""
+    state = dict(collab_doc.get('fl_state') or {})
+    for k in ('global_model', 'error_trace', 'projection_jobs', 'round_jobs'):
+        state.pop(k, None)
     return state
 
 
@@ -3800,16 +3810,34 @@ def _fl_state_for_response(collab_doc):
 def fl_get_state(collab_uuid):
     if not FL_AVAILABLE:
         return _fl_unavailable_response()
+    # FL state is sensitive (EMD/genetic-distance matrix, per-site sample counts,
+    # participant identities), so require a logged-in participant. Identifying the
+    # caller also lets the UI reliably tell the initiator apart from collaborators,
+    # which gates the threshold slider + "start training" controls.
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
     collab = db['collaborations'].find_one({"uuid": collab_uuid})
     if not collab:
         return jsonify({"error": "Collaboration not found"}), 404
     if EXPERIMENT_FL not in (collab.get('experiments') or []):
         return jsonify({"error": "Not a Federated Learning collaboration"}), 400
+    uid = str(current_user.id)
+    creator_id = str(collab.get('creator_id'))
+    member_ids = {creator_id} | {str(iu.get('user_id')) for iu in (collab.get('invited_users') or [])}
+    if uid not in member_ids:
+        return jsonify({"error": "You are not a participant in this collaboration"}), 403
+    state = collab.get('fl_state') or {}
     return jsonify({
         "uuid": collab_uuid,
         "experiment": EXPERIMENT_FL,
         "fl_state": _fl_state_for_response(collab),
-        "creator_id": str(collab.get('creator_id')),
+        "creator_id": creator_id,
+        "current_user_id": uid,
+        "is_initiator": creator_id == uid,
+        "publish_model": bool(collab.get('publish_model')),
+        "published_model_id": state.get('published_model_id'),
+        "has_weights": bool(state.get('global_model')),
         "super_populations": FL_SUPER_POPULATIONS,
     }), 200
 
@@ -3959,6 +3987,88 @@ def fl_get_defaults():
         "super_populations": FL_SUPER_POPULATIONS,
         "fl_qc_method": FL_QC_METHOD,
     }), 200
+
+
+# ---------------------------------------------------------------------------
+# Model Repository — published FL global models, viewable/downloadable by any
+# logged-in user. Populated by fl.pipeline.publish_global_model when an
+# opted-in ("publish_model") FL collaboration finishes training.
+# ---------------------------------------------------------------------------
+
+def _model_repo_collection():
+    name = fl_pipeline.MODEL_REPO_COLLECTION if FL_AVAILABLE else "model_repository"
+    return db[name]
+
+
+def _model_meta(doc, include_history=False):
+    """Public-facing metadata view of a repository entry (never the weights blob)."""
+    meta = {
+        "model_id": doc.get("model_id"),
+        "name": doc.get("name"),
+        "collaboration_name": doc.get("collaboration_name"),
+        "created_by_name": doc.get("created_by_name"),
+        "published_at": doc.get("published_at"),
+        "task": doc.get("task"),
+        "framework": doc.get("framework"),
+        "architecture": doc.get("architecture"),
+        "num_classes": doc.get("num_classes"),
+        "class_names": doc.get("class_names") or [],
+        "epsilon": doc.get("epsilon"),
+        "num_rounds": doc.get("num_rounds"),
+        "local_epochs": doc.get("local_epochs"),
+        "num_participants": doc.get("num_participants"),
+        "metrics": doc.get("metrics") or {},
+        "has_weights": bool(doc.get("has_weights")),
+    }
+    if include_history:
+        meta["training_history"] = doc.get("training_history") or []
+        meta["weights_format"] = doc.get("weights_format")
+        meta["load_instructions"] = doc.get("load_instructions")
+    return meta
+
+
+@app.route('/api/models', methods=['GET'])
+def list_models():
+    """List every published global model (metadata only). Any logged-in user."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    docs = _model_repo_collection().find({}, {"weights_b64": 0}).sort("published_at", -1)
+    models = [_model_meta(d) for d in docs]
+    return jsonify({"models": models, "count": len(models)}), 200
+
+
+@app.route('/api/models/<model_id>', methods=['GET'])
+def get_model(model_id):
+    """One model's full metadata (still no weights blob). Any logged-in user."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    doc = _model_repo_collection().find_one({"model_id": model_id}, {"weights_b64": 0})
+    if not doc:
+        return jsonify({"error": "Model not found"}), 404
+    return jsonify(_model_meta(doc, include_history=True)), 200
+
+
+@app.route('/api/models/<model_id>/download', methods=['GET'])
+def download_model(model_id):
+    """Return the full, self-describing model artifact (weights + metadata) as a
+    JSON payload. Any logged-in user may download."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    doc = _model_repo_collection().find_one({"model_id": model_id})
+    if not doc:
+        return jsonify({"error": "Model not found"}), 404
+    if not doc.get("weights_b64"):
+        return jsonify({
+            "error": "Model weights are not available for download.",
+            "hint": "This model was produced by the in-process simulation backend, "
+                    "which does not export downloadable weights.",
+        }), 409
+    artifact = _model_meta(doc, include_history=True)
+    artifact["weights_b64"] = doc.get("weights_b64")
+    return jsonify(artifact), 200
 
 
 if __name__ == '__main__':

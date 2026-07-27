@@ -373,6 +373,7 @@ def run_training(
             "fl_state.final_metrics": summary["final_metrics"],
             "fl_state.training_completed_at": _utcnow_iso(),
         })
+        _maybe_publish(collaborations, uuid)
         logger.info("FL training complete for %s: %s", uuid, summary["final_metrics"])
     except Exception as exc:
         logger.exception("FL training failed for %s", uuid)
@@ -686,6 +687,7 @@ def run_training_agents(
             "fl_state.global_model": global_weights,
             "fl_state.training_completed_at": _utcnow_iso(),
         })
+        _maybe_publish(collaborations, uuid)
         logger.info("FL(agents) training complete for %s: %s", uuid, final_metrics)
     except Exception as exc:
         logger.exception("FL(agents) training failed for %s", uuid)
@@ -694,6 +696,101 @@ def run_training_agents(
             "fl_state.error": f"{type(exc).__name__}: {exc}",
             "fl_state.error_trace": traceback.format_exc(limit=10),
         })
+
+
+# ---------------------------------------------------------------------------
+# Model Repository — publish a completed global model so any user can view /
+# download it (opt-in per collaboration via the `publish_model` flag).
+# ---------------------------------------------------------------------------
+
+MODEL_REPO_COLLECTION = "model_repository"
+
+
+def publish_global_model(collaborations: Collection, uuid: str) -> dict | None:
+    """Publish the just-completed global model to the public Model Repository.
+
+    Best-effort and idempotent: no-op unless the collaboration opted in
+    (`publish_model`) and training actually completed. Upserts one repository
+    entry per collaboration (keyed by collaboration uuid) so re-runs refresh it.
+    Only the aggregated model weights + metrics + metadata are stored — never any
+    raw genotype data.
+    """
+    doc = _load_collaboration(collaborations, uuid)
+    if not doc.get("publish_model"):
+        return None
+
+    state = doc.get("fl_state") or {}
+    if state.get("stage") != STAGE_COMPLETE:
+        return None
+
+    cfg = state.get("config") or {}
+    survivors = state.get("survivors") or []
+    weights_b64 = state.get("global_model")  # None in the in-process sim backend
+
+    db = collaborations.database
+    creator_id = str(doc.get("creator_id"))
+    creator_name = None
+    try:
+        from bson import ObjectId
+        creator = db["users"].find_one({"_id": doc.get("creator_id")}, {"name": 1}) \
+            or db["users"].find_one({"_id": ObjectId(creator_id)}, {"name": 1})
+        creator_name = (creator or {}).get("name")
+    except Exception:
+        creator_name = None
+
+    # Public handle for the model. Derived one-way from the collaboration uuid so
+    # it is stable (idempotent re-publish) but does NOT expose the uuid itself —
+    # the uuid is a capability key for other collaboration endpoints and must not
+    # leak into the public repository listing.
+    import hashlib
+    model_id = "mdl_" + hashlib.sha256(f"fl-model:{uuid}".encode()).hexdigest()[:20]
+
+    class_names = cfg.get("label_names") or list(SUPER_POPULATIONS)
+    entry = {
+        "model_id": model_id,
+        "collaboration_uuid": uuid,  # internal only — never returned by the API
+        "name": f"{doc.get('name', 'Federated model')} — global model",
+        "collaboration_name": doc.get("name"),
+        "created_by_id": creator_id,
+        "created_by_name": creator_name or "Unknown",
+        "published_at": _utcnow_iso(),
+        "task": "Genotype → super-population classification",
+        "framework": "PyTorch",
+        "architecture": "GenoPhenoCNN (1D CNN + MLP classifier head)",
+        "num_classes": int(cfg.get("num_classes", len(class_names))),
+        "class_names": class_names,
+        "epsilon": cfg.get("epsilon"),
+        "num_rounds": cfg.get("num_rounds"),
+        "local_epochs": cfg.get("local_epochs"),
+        "num_participants": len(survivors),
+        "metrics": state.get("final_metrics") or {},
+        "training_history": state.get("training_history") or [],
+        "has_weights": bool(weights_b64),
+        "weights_format": "base64(npz with keys w0..wK = model.state_dict() values, in order)",
+        "weights_b64": weights_b64,
+        "load_instructions": (
+            "from fl.model import build_model, set_model_parameters\n"
+            "from fl.weights import decode_weights\n"
+            "model = build_model(num_snps=3000, num_classes=NUM_CLASSES)  # num_snps is arbitrary (AdaptiveAvgPool)\n"
+            "set_model_parameters(model, decode_weights(WEIGHTS_B64))\n"
+            "model.eval()"
+        ),
+    }
+    db[MODEL_REPO_COLLECTION].update_one(
+        {"model_id": model_id}, {"$set": entry}, upsert=True
+    )
+    # Leave a breadcrumb on the collaboration so the FL view can link/download.
+    _set_fl_state(collaborations, uuid, {"fl_state.published_model_id": model_id})
+    logger.info("Published global model for %s to the Model Repository as %s", uuid, model_id)
+    return entry
+
+
+def _maybe_publish(collaborations: Collection, uuid: str) -> None:
+    """Wrapper that never lets a publish error break training completion."""
+    try:
+        publish_global_model(collaborations, uuid)
+    except Exception:
+        logger.exception("Model Repository publish failed for %s (non-fatal)", uuid)
 
 
 # ---------------------------------------------------------------------------
