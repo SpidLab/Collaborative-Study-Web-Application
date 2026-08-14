@@ -31,7 +31,17 @@ ALLOWED_RESULT_KEYS = {
     # Federated Learning: PCA coords reuse "pca_coords"; training rounds return a
     # model weight update (weights + sample count + local metrics — no raw data).
     "model_update",
+    # Confirmation that the final global model was written to this machine.
+    "model_saved",
+    # Black-box inference. "samples" is the one payload the collaborator
+    # deliberately sends out — only for a classification THEY requested — and
+    # "predictions" is all a model owner ever returns.
+    "samples", "predictions",
 }
+
+# Jobs that operate on a model or a supplied payload rather than on a local
+# dataset. These must not try to resolve a phenotype folder.
+DATASET_FREE_ACTIONS = {"fl_save_model", "classify_samples"}
 
 
 def egress_guard(result):
@@ -98,6 +108,18 @@ def handle_job(job, client):
     phenotype = job.get("phenotype") or params.get("phenotype")
     dataset_id = job.get("dataset_id") or params.get("dataset_id")
 
+    # Model custody + black-box inference work on this machine's own model store,
+    # not on a local dataset — dispatch them before any dataset is resolved.
+    if action in DATASET_FREE_ACTIONS:
+        if action == "fl_save_model":
+            result = actions.run_save_model(params, Config.OWNED_MODELS_DIR, client.fetch)
+        else:  # classify_samples
+            result = actions.run_classify_samples(params, Config.OWNED_MODELS_DIR, client.fetch)
+        egress_guard(result)
+        client.post_result(job["id"], result)
+        logger.info("Job %s (%s) complete; uploaded keys=%s", job.get("id"), action, sorted(result))
+        return
+
     csv_path, dataset_dir = data_loader.resolve_dataset(Config.DATA_DIR, phenotype)
 
     # Register / verify the dataset fingerprint without uploading any rows.
@@ -128,6 +150,10 @@ def handle_job(job, client):
         result = actions.run_chained_qc(df, params.get("methods", []), Config.MODELS_DIR)
     elif action == "privacy_transform":
         result = actions.run_privacy_transform(df, params)
+    elif action == "export_samples":
+        # The collaborator asked a third party's model to classify these samples,
+        # so they leave this machine deliberately and bounded.
+        result = actions.run_export_samples(df, params)
     elif action == "gwas_summary":
         sample_ids = params.get("sample_ids") or [str(i) for i in df.index.tolist()]
         # Support both case/control conventions: a phenotype column inside the CSV
@@ -182,6 +208,25 @@ def main():
         version = client.version()
         logger.info("Connected to %s (server version: %s)", Config.SERVER_URL,
                     version.get("version", version) if isinstance(version, dict) else version)
+    except requests.HTTPError as e:
+        # A saved token the server refuses is dead — it was signed with a key the
+        # server no longer uses, or the account is gone. Silently polling with it
+        # would just 401 forever, so trade the enrollment code in again.
+        status = getattr(e.response, "status_code", None)
+        if status in (401, 403) and code and not explicit:
+            logger.info("The saved login is no longer accepted by the server — "
+                        "re-enrolling with your enrollment code...")
+            token = JobsClient.enroll(Config.SERVER_URL, code, Config.REQUEST_TIMEOUT)
+            Config.save_token(token)
+            client = JobsClient(Config.SERVER_URL, token, Config.REQUEST_TIMEOUT)
+            logger.info("Re-enrolled successfully.")
+        elif status in (401, 403):
+            raise SystemExit(
+                "The server rejected this agent's login. Get a fresh enrollment code from the "
+                "website (Connect your data / agent) and restart with ENROLL_CODE set."
+            )
+        else:
+            logger.warning("Version check failed (continuing): %s", e)
     except Exception as e:
         logger.warning("Version check failed (continuing): %s", e)
 

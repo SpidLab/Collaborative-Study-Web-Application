@@ -285,3 +285,49 @@ def run_train_round(df, params):
         "val_f1": val_f1,
         "class_names": class_names,
     }}
+
+
+def run_classify(samples, weights_b64, num_classes, class_names=None):
+    """Classify samples with a model held locally. Black-box service side.
+
+    samples: {sample_id: {marker: value}} sent by the requester.
+    Returns {sample_id: {predicted_class, confidence}} — predictions only, never
+    anything derived from the model's parameters.
+    """
+    import pandas as pd
+    import torch
+
+    if not samples:
+        return {}
+
+    df = pd.DataFrame.from_dict(samples, orient="index")
+    # Drop any label column that rode along; we are predicting the label.
+    drop = [c for c in df.columns if str(c).strip().lower() in _LABEL_COLS]
+    if drop:
+        df = df.drop(columns=drop)
+    # Stable column order so every sample lines up with the same feature slots.
+    df = df.reindex(sorted(df.columns, key=str), axis=1)
+    X = df.apply(lambda s: pd.to_numeric(s, errors="coerce")).fillna(0.0).to_numpy(dtype=np.float32)
+
+    num_classes = int(num_classes or 2)
+    model = _build_model(X.shape[1], num_classes)
+    _set_weights(model, decode_weights(weights_b64))
+    model.eval()
+
+    with torch.no_grad():
+        logits = model(torch.as_tensor(X, dtype=torch.float32))
+        if num_classes == 2:
+            prob_pos = torch.sigmoid(logits).numpy().ravel()
+            idx = (prob_pos >= 0.5).astype(int)
+            conf = np.where(idx == 1, prob_pos, 1.0 - prob_pos)
+        else:
+            probs = torch.softmax(logits, dim=1).numpy()
+            idx = probs.argmax(axis=1)
+            conf = probs.max(axis=1)
+
+    names = list(class_names or [])
+    out = {}
+    for i, sid in enumerate(df.index.tolist()):
+        label = names[int(idx[i])] if int(idx[i]) < len(names) else int(idx[i])
+        out[str(sid)] = {"predicted_class": label, "confidence": round(float(conf[i]), 4)}
+    return out

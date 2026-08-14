@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container, TextField, Button, Checkbox, IconButton, Typography, Box, Divider,
-  Snackbar, Alert, CircularProgress, Grid, Card, CardContent, Chip, FormControl, InputLabel, Select, MenuItem, Slider, Collapse, FormControlLabel
+  Snackbar, Alert, CircularProgress, Grid, Card, CardContent, FormControl, FormLabel,
+  InputLabel, Select, MenuItem, Radio, RadioGroup, Slider, Collapse, FormControlLabel
 } from '@mui/material';
 import PublicIcon from '@mui/icons-material/Public';
-import { Add, Delete, Upload, Info, RadioButtonUncheckedRounded } from '@mui/icons-material';
+import { RadioButtonUncheckedRounded } from '@mui/icons-material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SearchPage from '../Search/Search';
 import axios from 'axios';
@@ -24,14 +25,15 @@ const FL_EPSILON_DEFAULT = 3.0;
 const FL_EPSILON_MIN = 0.1;
 const FL_EPSILON_MAX = 10.0;
 
+const VISIBILITY_PRIVATE = 'private';
+const VISIBILITY_PUBLIC = 'public';
 
-
-//we need to make changes here
 const StartCollaboration = () => {
   const [collabName, setCollabName] = useState('');
-  // const [experimentName, setExperimentName] = useState('');
-  const [experimentList, setExperimentList] = useState([]);
+  const [experimentType, setExperimentType] = useState('');
   const [experimentOptions, setExperimentOptions] = useState([]);
+  const [isLoadingOptions, setIsLoadingOptions] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   // const [phenoType, setPhenotype] = useState('');
   // const [samples, setSamples] = useState('');
   // const [rawData, setRawData] = useState(null);
@@ -47,10 +49,11 @@ const StartCollaboration = () => {
   const [selectedQcSchemes, setSelectedQcSchemes] = useState([]);
   const [qcMethodParams, setQcMethodParams] = useState({});
   const [flEpsilon, setFlEpsilon] = useState(FL_EPSILON_DEFAULT);
-  const [publishModel, setPublishModel] = useState(false);
+  const [modelVisibility, setModelVisibility] = useState(VISIBILITY_PRIVATE);
+  const [allowInferenceRequests, setAllowInferenceRequests] = useState(false);
 
-  const isFederatedLearning = experimentList.includes(EXPERIMENT_FL);
-
+  const isFederatedLearning = experimentType === EXPERIMENT_FL;
+  const isModelPublic = modelVisibility === VISIBILITY_PUBLIC;
 
 
   // **Fetch Datasets on Component Mount**
@@ -62,10 +65,12 @@ const StartCollaboration = () => {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
         });
-        const fetchedQcSchemes = response.data.qc_schemes[0]?.quality_control_scheme || [];
+        // Every one of these is optional on the wire — a partial payload must not
+        // throw out of the mapping and leave the form permanently empty.
+        const fetchedQcSchemes = response.data?.qc_schemes?.[0]?.quality_control_scheme || [];
         setQcSchemes(fetchedQcSchemes);
-        setExperimentOptions(response.data.experiments[0]?.experiment_types || []);
-        setDatasets(response.data.datasets || []);
+        setExperimentOptions(response.data?.experiments?.[0]?.experiment_types || []);
+        setDatasets(Array.isArray(response.data?.datasets) ? response.data.datasets : []);
         // Ensure the first QC scheme is selected by default
         if (fetchedQcSchemes.length > 0) {
           setSelectedQcSchemes([fetchedQcSchemes[0]]);
@@ -73,52 +78,26 @@ const StartCollaboration = () => {
           if (defaults) setQcMethodParams({ [fetchedQcSchemes[0]]: { threshold: defaults.threshold } });
         }
 
+        setLoadError(null);
       } catch (error) {
         console.error("Error fetching datasets:", error);
-        setSnackbar({
-          open: true,
-          message: 'Failed to fetch datasets. Please try again.',
-          severity: 'error'
-        });
+        setLoadError(error?.response?.data?.error || error.message);
+      } finally {
+        setIsLoadingOptions(false);
       }
     };
 
     fetchDatasets();
   }, []);
 
-  // useEffect(() => {
-  //   const fetchOptions = async () => {
-  //     try {
-  //       // TODO: Replace this with actual API call when backend is ready
-  //       // const response = await axios.get("YOUR_BACKEND_API_URL");
-  //       // setExperimentOptions(response.data);
-  //       const data = ["Chi-Square", "Odd Ratio"];
-  //       setExperimentOptions(data);
-  //     } catch (error) {
-  //       console.error("Error fetching experiment options:", error);
-  //     }
-  //   };
-  //   fetchOptions();
-  // }, []);
-
-  // const handleAddExperiment = () => {
-  //   if (experimentName.trim()) {
-  //     setExperimentList([...experimentList, experimentName]);
-  //     setExperimentName('');
-  //   }
-  // };
-
-  const handleAddExperiment = (event) => {
-    const selectedExperiment = event.target.value;
-    if (selectedExperiment && !experimentList.includes(selectedExperiment)) {
-      setExperimentList([...experimentList, selectedExperiment]);
-    }
+  // A model nobody can see cannot advertise a black-box service, so going
+  // private clears the offer instead of leaving a stale checked box behind.
+  const handleVisibilityChange = (event) => {
+    const value = event.target.value;
+    setModelVisibility(value);
+    if (value !== VISIBILITY_PUBLIC) setAllowInferenceRequests(false);
   };
 
-  const handleDeleteExperiment = (index) => {
-    const updatedList = experimentList.filter((_, i) => i !== index);
-    setExperimentList(updatedList);
-  };
   const handleQcScheme = (label) => {
     setSelectedQcSchemes((prevSelected) => {
       if (prevSelected.includes(label)) {
@@ -144,15 +123,20 @@ const StartCollaboration = () => {
   //   setData(e.target.files[0]);
   // };
 
+  // Cancelling the OS picker fires `change` with an empty FileList, and dragging
+  // anything that isn't a file (text, a link) leaves dataTransfer.files empty —
+  // both used to blow up on `file.name`.
   const handleFileChange = (event) => {
-    const file = event.target.files[0];
+    const file = event.target.files?.[0];
+    if (!file) return;
     setCSVFile(file);
     setFileName(file.name);
   };
 
   const handleDrop = (event) => {
     event.preventDefault();
-    const file = event.dataTransfer.files[0];
+    const file = event.dataTransfer?.files?.[0];
+    if (!file) return;
     setCSVFile(file);
     setFileName(file.name);
   };
@@ -162,6 +146,11 @@ const StartCollaboration = () => {
   };
   const handleCreateCollaboration = async () => {
     // console.log("Selected Users:", selectedUsers);
+
+    if (!experimentType) {
+      setSnackbar({ open: true, message: "Please choose an experiment type.", severity: 'error' });
+      return;
+    }
 
     if (selectedUsers.length === 0) {
       setSnackbar({ open: true, message: "Please select users for invitation.", severity: 'error' });
@@ -173,16 +162,16 @@ const StartCollaboration = () => {
       return;
     }
 
-    if (selectedQcSchemes.length === 0) {
+    if (!isFederatedLearning && selectedQcSchemes.length === 0) {
       setSnackbar({ open: true, message: "Please select at least one QC scheme.", severity: 'error' });
       return;
     }
 
 
     setIsLoading(true);
-    // For Federated Learning, the backend ignores `collabQcScheme` and installs
-    // the fixed FL preprocessing (public PCA + DP), but we still ship the
-    // user-chosen epsilon so it shows up in the collaboration doc.
+    // Federated Learning has a fixed preprocessing step; the backend canonicalizes
+    // `collabQcScheme`, but we still ship the user-chosen epsilon so it lands on
+    // the collaboration doc.
     const collabQcSchemePayload = isFederatedLearning
       ? [{ method: FL_QC_METHOD, params: { epsilon: Number(flEpsilon) } }]
       : selectedQcSchemes.map(method => ({
@@ -191,11 +180,13 @@ const StartCollaboration = () => {
         }));
     const collaborationData = {
       collabName,
-      experiments: experimentList,
+      // The server rejects anything other than exactly one experiment.
+      experiments: [experimentType],
       collabQcScheme: collabQcSchemePayload,
       creatorDatasetId: selectedDataset.dataset_id,
-      // FL only: publish the trained global model to the public Model Repository.
-      publishModel: isFederatedLearning ? publishModel : false,
+      // FL only: how the trained model is listed in the Model Repository.
+      modelVisibility: isFederatedLearning ? modelVisibility : VISIBILITY_PRIVATE,
+      allowInferenceRequests: isFederatedLearning && isModelPublic && allowInferenceRequests,
       invitedUsers: selectedUsers.map(user => ({
         _id: user._id,
         dataset_id: user.dataset_id,
@@ -245,19 +236,25 @@ const StartCollaboration = () => {
       });
 
       setCollabName('');
-      setExperimentList([]);
+      setExperimentType('');
       // setPhenotype('');
       // setSamples('');
       // setRawData(null);
       setCSVFile(null);
       setFileName('');
+      // The <input type="file"> keeps its DOM value after we clear React state,
+      // so re-picking the same CSV for the next collaboration would fire no
+      // change event and silently attach nothing.
+      const csvInput = document.getElementById('csv-file-input');
+      if (csvInput) csvInput.value = '';
       setSelectedUsers([]);
       setSelectedDataset('');
-      setPublishModel(false);
+      setModelVisibility(VISIBILITY_PRIVATE);
+      setAllowInferenceRequests(false);
       // Re-seed the default QC scheme (the mount effect won't re-run) so the form
       // is immediately valid again for starting another collaboration. (Note: we do
       // NOT clear experimentOptions — those are fetched once on mount and clearing
-      // them would permanently empty the Experiment Type dropdown.)
+      // them would permanently empty the Experiment Type list.)
       if (qcScheme.length > 0) {
         setSelectedQcSchemes([qcScheme[0]]);
         const defaults = QC_METHOD_DEFAULTS[qcScheme[0]];
@@ -272,7 +269,7 @@ const StartCollaboration = () => {
       console.error("Error creating collaboration or sending invitations:", error);
       setSnackbar({
         open: true,
-        message: 'Failed to create collaboration or send invitations. Please try again.',
+        message: error?.response?.data?.error || error.message || 'Failed to create collaboration or send invitations. Please try again.',
         severity: 'error'
       });
     } finally {
@@ -287,9 +284,14 @@ const StartCollaboration = () => {
     setSnackbar({ ...snackbar, open: false });
   };
 
-  const handleUserSelect = (users) => {
+  // MUST stay referentially stable: <SearchPage> calls onUserSelect from a
+  // useEffect that lists onUserSelect in its dependency array. A fresh closure
+  // on every render would re-fire that effect, push a brand-new array into
+  // selectedUsers, re-render us, and loop until React throws "Maximum update
+  // depth exceeded".
+  const handleUserSelect = useCallback((users) => {
     setSelectedUsers(users);
-  };
+  }, []);
 
   const handleDatasetChange = (event) => {
     const selectedDataset = event.target.value;
@@ -301,6 +303,11 @@ const StartCollaboration = () => {
       <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'light' }}>
         Start a New Collaboration
       </Typography>
+      {loadError && (
+        <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
+          Could not load experiment types, QC schemes and datasets: {loadError}
+        </Alert>
+      )}
       <Card sx={{ height: '100%', marginBottom: '20px', border: '1px solid #ccc', borderRadius: 2, boxShadow: 'none' }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -340,60 +347,114 @@ const StartCollaboration = () => {
           />
 
           <Box mt={2}>
-            {/* <TextField
-              label="Experiment Name"
-              variant="outlined"
-              fullWidth
-              value={experimentName}
-              onChange={(e) => setExperimentName(e.target.value)}
-              sx={{ mb: 1 }}
-            />
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<Add />}
-              onClick={handleAddExperiment}
-              sx={{ mb: 2 }}
-            >
-              Add Experiment
-            </Button>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {experimentList.map((experiment, index) => (
-                <Chip
-                  key={index}
-                  label={experiment}
-                  onDelete={() => handleDeleteExperiment(index)}
-                  color="primary"
-                  variant="outlined"
-                />
-              ))}
-            </Box>*/}
-            <FormControl fullWidth sx={{ mb: 1 }}>
-              <InputLabel id="experiment-select-label" >Experiment Type</InputLabel>
-              <Select
-                value=""
-                onChange={handleAddExperiment}
-                labelId="experiment-select-label"
-                label="Experiment Name"
-                sx={{ borderRadius: 2, borderColor: 'divider' }}>
-                {experimentOptions.map((option, index) => (
-                  <MenuItem key={index} value={option}>
-                    {option}
-                  </MenuItem>
-                ))}
-              </Select>
+            <FormControl fullWidth>
+              <FormLabel id="experiment-type-label" sx={{ fontWeight: 500 }}>
+                Experiment Type
+              </FormLabel>
+              <Typography variant="caption" color="text.secondary">
+                A collaboration runs exactly one experiment type. Choose one.
+              </Typography>
+              {isLoadingOptions ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1.5 }}>
+                  <CircularProgress size={18} />
+                  <Typography variant="body2" color="text.secondary">
+                    Loading experiment types…
+                  </Typography>
+                </Box>
+              ) : experimentOptions.length === 0 ? (
+                <Alert severity="info" sx={{ mt: 1.5, borderRadius: 2 }}>
+                  No experiment types are available right now.
+                </Alert>
+              ) : (
+                <RadioGroup
+                  aria-labelledby="experiment-type-label"
+                  value={experimentType}
+                  onChange={(e) => setExperimentType(e.target.value)}
+                  sx={{ mt: 0.5 }}
+                >
+                  {experimentOptions.map((option) => (
+                    <FormControlLabel
+                      key={option}
+                      value={option}
+                      control={<Radio />}
+                      label={<Typography variant="body2">{option}</Typography>}
+                    />
+                  ))}
+                </RadioGroup>
+              )}
             </FormControl>
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-              {experimentList.map((experiment, index) => (
-                <Chip
-                  key={index}
-                  label={experiment}
-                  onDelete={() => handleDeleteExperiment(index)}
-                  color="primary"
-                  variant="outlined"
-                />
-              ))}
-            </Box>
+
+            {isFederatedLearning && (
+              <Box sx={{ mt: 2, p: 1.5, backgroundColor: '#FAFAFA', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5 }}>
+                  <PublicIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    Model Visibility
+                  </Typography>
+                </Box>
+                <Typography variant="caption" color="text.secondary">
+                  The Model Repository is a catalog of entries — it describes models, it does not
+                  store them. The trained model is saved onto the participating sites&apos; own
+                  machines and is never downloadable from this app.
+                </Typography>
+                <RadioGroup value={modelVisibility} onChange={handleVisibilityChange} sx={{ mt: 1 }}>
+                  <FormControlLabel
+                    value={VISIBILITY_PRIVATE}
+                    sx={{ alignItems: 'flex-start', m: 0, mb: 1 }}
+                    control={<Radio size="small" sx={{ pt: 0.25 }} />}
+                    label={
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>Private</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Only you see this model in the Model Repository, and the trained
+                          model is saved onto your machine alone — the other sites do not
+                          keep a copy.
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                  <FormControlLabel
+                    value={VISIBILITY_PUBLIC}
+                    sx={{ alignItems: 'flex-start', m: 0 }}
+                    control={<Radio size="small" sx={{ pt: 0.25 }} />}
+                    label={
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>Public</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Everyone can see what this model is and how it performed, and every
+                          site that trained it keeps its own copy of the model.
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                </RadioGroup>
+                <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px dashed', borderColor: 'divider' }}>
+                  <FormControlLabel
+                    sx={{ alignItems: 'flex-start', m: 0 }}
+                    control={
+                      <Checkbox
+                        checked={allowInferenceRequests}
+                        disabled={!isModelPublic}
+                        onChange={(e) => setAllowInferenceRequests(e.target.checked)}
+                        sx={{ pt: 0.25 }}
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          Offer black-box classification to other researchers
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Other researchers can send you samples; your Site Agent runs the model on
+                          your own machine and returns only the predictions.
+                          {!isModelPublic && ' Available once the model is public.'}
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                </Box>
+              </Box>
+            )}
           </Box>
         </CardContent>
       </Card>
@@ -470,36 +531,6 @@ const StartCollaboration = () => {
                       max={FL_EPSILON_MAX}
                       step={0.1}
                       valueLabelDisplay="auto"
-                    />
-                  </Box>
-
-                  {/* Opt in to publishing the trained global model publicly. */}
-                  <Box sx={{ mt: 2, pt: 1.5, borderTop: '1px dashed', borderColor: '#90CAF9' }}>
-                    <FormControlLabel
-                      sx={{ alignItems: 'flex-start', m: 0 }}
-                      control={
-                        <Checkbox
-                          checked={publishModel}
-                          onChange={(e) => setPublishModel(e.target.checked)}
-                          sx={{ pt: 0.25 }}
-                        />
-                      }
-                      label={
-                        <Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                            <PublicIcon sx={{ fontSize: 18, color: 'primary.main' }} />
-                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                              Publish the global model to the Model Repository
-                            </Typography>
-                          </Box>
-                          <Typography variant="caption" color="text.secondary">
-                            When this collaboration finishes training, the final aggregated model
-                            (weights + metrics + metadata — never any raw genotype data) is added to
-                            the public Model Repository, where every user of this app can view and
-                            download it. Leave unchecked to keep the model private to this collaboration.
-                          </Typography>
-                        </Box>
-                      }
                     />
                   </Box>
                 </Box>
@@ -719,12 +750,16 @@ const StartCollaboration = () => {
           fullWidth
           size="large"
           onClick={handleCreateCollaboration}
-          disabled={isLoading || selectedQcSchemes.length === 0}
+          disabled={isLoading || !experimentType || (!isFederatedLearning && selectedQcSchemes.length === 0)}
           sx={{ py: 2, fontSize: '1.1rem', borderRadius: 100 }}
         >
           {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Create Collaboration'}
         </Button>
-        {selectedQcSchemes.length === 0 && (
+        {!experimentType ? (
+          <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1, textAlign: 'center' }}>
+            Choose an experiment type to create a collaboration.
+          </Typography>
+        ) : (!isFederatedLearning && selectedQcSchemes.length === 0) && (
           <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1, textAlign: 'center' }}>
             Select at least one QC scheme to create a collaboration.
           </Typography>

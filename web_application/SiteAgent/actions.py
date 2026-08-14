@@ -312,3 +312,124 @@ def run_fl_train_round(df, params):
     """Stage 3: train the genotype→phenotype CNN locally for one FL round."""
     import fl_local
     return fl_local.run_train_round(df, params)
+
+
+# --------------------------------------------------------------------------- #
+# Model custody + black-box inference — the model lives HERE, not on the server.
+#
+# When federated training finishes, each participating site downloads the final
+# global model and keeps it. The server then deletes its copy, so the only
+# lasting copies are on the participants' own machines. If the owner offers a
+# classification service, samples come to this machine, the model runs here, and
+# only the predictions go back — the model never moves.
+# --------------------------------------------------------------------------- #
+def models_store_dir(owned_dir):
+    """Where this site keeps the models it owns (a persistent volume in Docker)."""
+    os.makedirs(owned_dir, exist_ok=True)
+    return owned_dir
+
+
+def model_paths(owned_dir, model_id):
+    store = models_store_dir(owned_dir)
+    # model_id comes from the server, so keep it to characters that cannot walk
+    # out of the store directory.
+    safe = "".join(c for c in str(model_id) if c.isalnum() or c in "-_")
+    if not safe:
+        raise ValueError(f"Invalid model id: {model_id!r}")
+    return (os.path.join(store, f"{safe}.weights.b64"),
+            os.path.join(store, f"{safe}.json"))
+
+
+def run_save_model(params, owned_dir, fetch):
+    """Save the final global model to this machine.
+
+    `fetch` pulls the weights over the agent's own authenticated channel, so the
+    weights are never carried inside the job parameters.
+    """
+    import json as _json
+
+    model_id = params.get("model_id")
+    if not model_id:
+        raise ValueError("save_model job is missing model_id")
+    payload = fetch(params.get("weights_path") or f"/api/agent/models/{model_id}/weights")
+    weights_b64 = payload.get("weights_b64")
+    if not weights_b64:
+        raise ValueError("The server returned no weights for this model.")
+
+    weights_path, meta_path = model_paths(owned_dir, model_id)
+    with open(weights_path, "w") as f:
+        f.write(weights_b64)
+    meta = {
+        "model_id": model_id,
+        "collaboration_name": params.get("collaboration_name"),
+        "num_classes": payload.get("num_classes") or params.get("num_classes"),
+        "class_names": payload.get("class_names") or params.get("class_names") or [],
+        "weights_format": payload.get("weights_format"),
+        "saved_at": datetime.utcnow().isoformat() + "Z",
+    }
+    with open(meta_path, "w") as f:
+        _json.dump(meta, f, indent=2)
+    logger.info("Saved global model %s to %s", model_id, weights_path)
+    # Confirmation only — the server drops its copy once every site reports this.
+    return {"model_saved": {"model_id": model_id, "saved_at": meta["saved_at"],
+                            "num_classes": meta["num_classes"]}}
+
+
+def run_export_samples(df, params):
+    """Export a bounded set of local samples for someone else's model to classify.
+
+    This is the one place where the collaborator deliberately sends their own
+    genotypes off the machine — it is the whole point of asking a third party to
+    classify them, and it happens only after they themselves raised the request.
+    Label columns are dropped: the labels are what they're asking for.
+    """
+    max_samples = int(params.get("max_samples", 100))
+    if max_samples < 1:
+        raise ValueError("max_samples must be at least 1")
+    colform = _strip_label_columns(_to_column_form(df))
+    if len(colform) > max_samples:
+        colform = colform.head(max_samples)
+    matrix = _matrix_dict(colform)
+    logger.info("Exporting %d sample(s) for classification.", len(matrix))
+    return {"samples": matrix}
+
+
+def run_classify_samples(params, owned_dir, fetch):
+    """Run this site's own local model over samples someone sent for classification.
+
+    The model file never leaves this machine — only per-sample predictions go back.
+    """
+    import json as _json
+
+    import fl_local
+
+    model_id = params.get("model_id")
+    if not model_id:
+        raise ValueError("classify_samples job is missing model_id")
+    weights_path, meta_path = model_paths(owned_dir, model_id)
+    if not os.path.isfile(weights_path):
+        raise ValueError(
+            f"Model {model_id} is not on this machine ({weights_path}). It is saved "
+            "automatically when federated training finishes — if this site has not run "
+            "that collaboration, it cannot serve this model."
+        )
+    with open(weights_path) as f:
+        weights_b64 = f.read().strip()
+    meta = {}
+    if os.path.isfile(meta_path):
+        try:
+            with open(meta_path) as f:
+                meta = _json.load(f)
+        except Exception:
+            meta = {}
+
+    payload = fetch(params.get("samples_path") or f"/api/agent/inference/{params.get('request_id')}/samples")
+    samples = payload.get("samples") or {}
+    if not samples:
+        raise ValueError("No samples were provided to classify.")
+
+    class_names = meta.get("class_names") or params.get("class_names") or []
+    num_classes = int(meta.get("num_classes") or params.get("num_classes") or max(len(class_names), 2))
+    predictions = fl_local.run_classify(samples, weights_b64, num_classes, class_names)
+    logger.info("Classified %d sample(s) with local model %s.", len(predictions), model_id)
+    return {"predictions": predictions}

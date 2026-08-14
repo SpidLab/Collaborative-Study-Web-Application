@@ -1,238 +1,296 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Container, Divider,
-  Grid, Snackbar, Stack, Tooltip, Typography,
+  Alert, Box, Button, Card, CardContent, CircularProgress, Container, Dialog, DialogActions,
+  DialogContent, DialogContentText, DialogTitle, Grid, InputAdornment, Snackbar, Stack, Tab,
+  Tabs, TextField, Typography,
 } from '@mui/material';
-import PublicIcon from '@mui/icons-material/Public';
-import HubIcon from '@mui/icons-material/Hub';
-import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
-import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
-import EventIcon from '@mui/icons-material/Event';
-import GroupsIcon from '@mui/icons-material/Groups';
-import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
+import { Link as RouterLink } from 'react-router-dom';
+import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
+import SearchIcon from '@mui/icons-material/Search';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import AddIcon from '@mui/icons-material/Add';
+import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import axios from 'axios';
 import URL from '../../config';
+import ModelCard from './ModelCard';
+import RegisterModelDialog from './RegisterModelDialog';
+import EditModelDialog from './EditModelDialog';
+import RequestClassificationDialog from './RequestClassificationDialog';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
-const pct = (v) => (typeof v === 'number' && !Number.isNaN(v) ? `${(v * 100).toFixed(1)}%` : '—');
-const num = (v, d = 4) => (typeof v === 'number' && !Number.isNaN(v) ? v.toFixed(d) : '—');
-
-const prettyDate = (iso) => {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-};
-
-const MetricTile = ({ label, value, accent }) => (
-  <Box sx={{
-    flex: 1, minWidth: 92, textAlign: 'center', py: 1.25, px: 1,
-    borderRadius: 2, bgcolor: '#f6f9fc', border: '1px solid #e3ebf3',
-  }}>
-    <Typography variant="h6" sx={{ fontWeight: 700, color: accent || 'primary.main', lineHeight: 1.1 }}>
-      {value}
-    </Typography>
-    <Typography variant="caption" color="text.secondary">{label}</Typography>
-  </Box>
-);
-
-const MetaRow = ({ icon, children }) => (
-  <Stack direction="row" spacing={1} alignItems="center" sx={{ color: 'text.secondary' }}>
-    {icon}
-    <Typography variant="body2" color="text.secondary">{children}</Typography>
-  </Stack>
-);
-
-const ModelCard = ({ model, onDownload, downloading }) => {
-  const metrics = model.metrics || {};
-  return (
-    <Card
-      variant="outlined"
-      sx={{
-        height: '100%', display: 'flex', flexDirection: 'column', borderRadius: 3,
-        overflow: 'hidden', transition: 'box-shadow .2s, transform .2s',
-        '&:hover': { boxShadow: 6, transform: 'translateY(-2px)' },
-      }}
-    >
-      <Box sx={{ height: 6, background: 'linear-gradient(90deg,#1976d2,#42a5f5)' }} />
-      <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <Stack direction="row" spacing={1} alignItems="flex-start" justifyContent="space-between">
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.25 }}>
-            {model.name || model.collaboration_name || 'Federated model'}
-          </Typography>
-          <Tooltip title="Publicly shared model">
-            <PublicIcon fontSize="small" sx={{ color: 'success.main', mt: 0.4 }} />
-          </Tooltip>
-        </Stack>
-
-        <Stack direction="row" spacing={0.75} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
-          <Chip size="small" icon={<HubIcon />} label="Federated Learning" color="primary" variant="outlined" />
-          {model.framework && <Chip size="small" label={model.framework} variant="outlined" />}
-        </Stack>
-
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25 }}>
-          {model.task || 'Federated model'} · {model.architecture || '1D-CNN'}
-        </Typography>
-
-        <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-          <MetricTile label="Accuracy" value={pct(metrics.accuracy)} />
-          <MetricTile label="F1 (macro)" value={pct(metrics.f1_macro)} accent="#6a1b9a" />
-          {metrics.loss != null
-            ? <MetricTile label="Val loss" value={num(metrics.loss)} accent="#455a64" />
-            : <MetricTile label="Train loss" value={num(metrics.train_loss)} accent="#455a64" />}
-        </Stack>
-
-        {Array.isArray(model.class_names) && model.class_names.length > 0 && (
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="caption" color="text.secondary">Classes</Typography>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-              {model.class_names.map((c) => (
-                <Chip key={c} size="small" label={c} sx={{ bgcolor: '#eef3f8' }} />
-              ))}
-            </Stack>
-          </Box>
-        )}
-
-        <Divider sx={{ my: 2 }} />
-
-        <Stack spacing={0.75}>
-          <MetaRow icon={<PersonOutlineIcon fontSize="small" />}>Published by {model.created_by_name || 'Unknown'}</MetaRow>
-          <MetaRow icon={<EventIcon fontSize="small" />}>{prettyDate(model.published_at)}</MetaRow>
-          <MetaRow icon={<GroupsIcon fontSize="small" />}>
-            {model.num_participants ?? '—'} participating sites · {model.num_rounds ?? '—'} FedAvg rounds
-          </MetaRow>
-          <MetaRow icon={<ShieldOutlinedIcon fontSize="small" />}>
-            Privacy budget ε = {model.epsilon ?? '—'}
-          </MetaRow>
-        </Stack>
-
-        <Box sx={{ flex: 1 }} />
-
-        <Tooltip title={model.has_weights ? 'Download model weights + metadata (JSON)' : 'Weights not available for this model'}>
-          <span>
-            <Button
-              fullWidth variant="contained" sx={{ mt: 2, borderRadius: 2 }}
-              startIcon={downloading ? <CircularProgress size={16} color="inherit" /> : <DownloadRoundedIcon />}
-              disabled={!model.has_weights || downloading}
-              onClick={() => onDownload(model)}
-            >
-              {downloading ? 'Preparing…' : 'Download model'}
-            </Button>
-          </span>
-        </Tooltip>
-      </CardContent>
-    </Card>
-  );
-};
-
 const ModelRepository = () => {
+  const [tab, setTab] = useState('all');
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [downloadingId, setDownloadingId] = useState(null);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [inferenceTarget, setInferenceTarget] = useState(null);
+
+  const notify = (message, severity = 'success') => setSnackbar({ open: true, message, severity });
+
+  // Flipping tabs fires a second request while the first is still in flight. Without
+  // this guard the slower response wins and the list ends up showing the other tab's
+  // models (or clears `loading` while a newer fetch is still running).
+  const fetchSeq = useRef(0);
+
   const fetchModels = useCallback(async () => {
+    const seq = fetchSeq.current + 1;
+    fetchSeq.current = seq;
     setLoading(true);
     try {
-      const resp = await axios.get(`${URL}/api/models`, { headers: authHeader() });
+      const resp = await axios.get(`${URL}/api/models`, {
+        headers: authHeader(),
+        params: tab === 'mine' ? { mine: true } : undefined,
+      });
+      if (seq !== fetchSeq.current) return;
       setModels(resp?.data?.models || []);
-      setError(null);
+      setError('');
     } catch (err) {
-      setError(err?.response?.data?.error || err.message || 'Failed to load models');
+      if (seq !== fetchSeq.current) return;
+      setError(err?.response?.data?.error || err.message || 'Failed to load the model repository');
     } finally {
-      setLoading(false);
+      if (seq === fetchSeq.current) setLoading(false);
     }
-  }, []);
+  }, [tab]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
 
-  const handleDownload = async (model) => {
-    setDownloadingId(model.model_id);
+  const replaceModel = (fresh) => setModels((list) => list.map(
+    (m) => (m.model_id === fresh.model_id ? { ...m, ...fresh } : m),
+  ));
+
+  const patchModel = async (model, body) => {
     try {
-      const resp = await axios.get(`${URL}/api/models/${model.model_id}/download`, { headers: authHeader() });
-      const blob = new Blob([JSON.stringify(resp.data, null, 2)], { type: 'application/json' });
-      const safe = (model.collaboration_name || model.name || 'model')
-        .replace(/[^a-z0-9-_]+/gi, '_').replace(/^_+|_+$/g, '') || 'model';
-      const link = document.createElement('a');
-      const objectUrl = window.URL.createObjectURL(blob);
-      link.href = objectUrl;
-      link.download = `${safe}.model.json`;
-      document.body.appendChild(link);
-      link.click();
-      window.URL.revokeObjectURL(objectUrl);
-      document.body.removeChild(link);
-      setSnackbar({ open: true, message: 'Model downloaded.', severity: 'success' });
+      const resp = await axios.patch(`${URL}/api/models/${model.model_id}`, body, { headers: authHeader() });
+      replaceModel(resp.data);
+      if ('visibility' in body) {
+        notify(body.visibility === 'public'
+          ? 'Model is now public. Others can see the entry — never the weights.'
+          : 'Model is now private. Only you can see it, and classification requests are off.');
+      } else if ('allow_inference_requests' in body) {
+        notify(body.allow_inference_requests
+          ? 'Classification requests enabled. You approve each one.'
+          : 'Classification requests disabled.');
+      } else {
+        notify('Model updated.');
+      }
     } catch (err) {
-      const msg = err?.response?.data?.error || err.message || 'Download failed';
-      setSnackbar({ open: true, message: msg, severity: 'error' });
-    } finally {
-      setDownloadingId(null);
+      notify(err?.response?.data?.error || err.message || 'Update failed', 'error');
     }
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      await axios.delete(`${URL}/api/models/${deleteTarget.model_id}`, { headers: authHeader() });
+      setModels((list) => list.filter((m) => m.model_id !== deleteTarget.model_id));
+      setDeleteTarget(null);
+      notify('Model removed from the repository.');
+    } catch (err) {
+      notify(err?.response?.data?.error || err.message || 'Delete failed', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter((m) => [
+      m.name, m.dataset, m.task, m.framework, m.architecture, m.owner_name, m.collaboration_name,
+    ].some((field) => String(field || '').toLowerCase().includes(q)));
+  }, [models, query]);
+
+  const emptyState = tab === 'mine' ? {
+    icon: <Inventory2OutlinedIcon sx={{ fontSize: 52, color: 'text.disabled' }} />,
+    title: 'You have not listed any models yet',
+    body: 'Finish a Federated Learning collaboration and its global model is listed here automatically, '
+      + 'or register a model you already own — metadata only, no file.',
+  } : {
+    icon: <LibraryBooksIcon sx={{ fontSize: 52, color: 'text.disabled' }} />,
+    title: 'No models listed yet',
+    body: 'Public entries from every researcher show up here, alongside your own private ones. '
+      + 'Register a model, or run a Federated Learning collaboration to publish one.',
   };
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 6 }}>
-      {/* Hero */}
       <Box sx={{
-        p: { xs: 2.5, md: 3.5 }, mb: 3, borderRadius: 3, color: 'white',
+        p: { xs: 2.5, md: 3.5 }, mb: 3, borderRadius: 2, color: 'white',
         background: 'linear-gradient(120deg,#0f3a63 0%,#1976d2 60%,#42a5f5 100%)',
       }}>
         <Stack direction="row" spacing={1.5} alignItems="center">
-          <PublicIcon sx={{ fontSize: 34 }} />
+          <LibraryBooksIcon sx={{ fontSize: 34 }} />
           <Typography variant="h4" sx={{ fontWeight: 700 }}>Model Repository</Typography>
         </Stack>
-        <Typography variant="body1" sx={{ mt: 1, maxWidth: 780, opacity: 0.95 }}>
-          Global models trained by federated-learning collaborations whose initiators chose to share
-          them publicly. Every model here was aggregated across multiple sites without any raw genotype
-          data leaving its owner — only weights, metrics, and metadata are published. Browse and download
-          any model to reuse or evaluate.
+        <Typography variant="body1" sx={{ mt: 1, maxWidth: 820, opacity: 0.95 }}>
+          A catalog of what models exist, what they were trained on, and how they scored — models
+          aggregated by federated-learning collaborations here, plus models researchers already own
+          and choose to list. This is a listing, not a store: every model&apos;s weights stay on its
+          owner&apos;s machine, so there is nothing here to download.
+        </Typography>
+        <Typography variant="body2" sx={{ mt: 1.5, opacity: 0.9, maxWidth: 820 }}>
+          If an owner offers a black-box service you can send them samples instead: their agent runs
+          the model locally and returns predictions only.
         </Typography>
       </Box>
 
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-        <Typography variant="subtitle1" color="text.secondary">
-          {loading ? 'Loading…' : `${models.length} published model${models.length === 1 ? '' : 's'}`}
-        </Typography>
-        <Button size="small" startIcon={<RefreshIcon />} onClick={fetchModels} disabled={loading}>
-          Refresh
-        </Button>
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}
+        justifyContent="space-between" sx={{ mb: 2 }}>
+        <Tabs value={tab} onChange={(e, v) => setTab(v)}>
+          <Tab value="all" label="All models" />
+          <Tab value="mine" label="My models" />
+        </Tabs>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <Button size="small" component={RouterLink} to="/inference-requests"
+            startIcon={<ScienceOutlinedIcon />}>
+            Classification requests
+          </Button>
+          <Button size="small" startIcon={<RefreshIcon />} onClick={fetchModels} disabled={loading}>
+            Refresh
+          </Button>
+          <Button size="small" variant="contained" startIcon={<AddIcon />}
+            onClick={() => setRegisterOpen(true)} sx={{ borderRadius: 2 }}>
+            Register a model
+          </Button>
+        </Stack>
       </Stack>
 
-      {error && <Alert severity="warning" sx={{ mb: 3 }}>{error}</Alert>}
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}
+        justifyContent="space-between" sx={{ mb: 2.5 }}>
+        <TextField
+          size="small" placeholder="Search by name, dataset, task, owner…"
+          value={query} onChange={(e) => setQuery(e.target.value)}
+          sx={{ width: { xs: '100%', sm: 340 } }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
+            ),
+          }}
+        />
+        <Typography variant="body2" color="text.secondary">
+          {loading
+            ? 'Loading…'
+            : `${visible.length} model${visible.length === 1 ? '' : 's'}${tab === 'mine' ? ' you own' : ' visible to you'}`}
+        </Typography>
+      </Stack>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}
+          action={<Button size="small" onClick={fetchModels}>Retry</Button>}>
+          {error}
+        </Alert>
+      )}
 
       {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
-      ) : models.length === 0 && !error ? (
-        <Card variant="outlined" sx={{ borderRadius: 3, borderStyle: 'dashed' }}>
-          <CardContent sx={{ textAlign: 'center', py: 8 }}>
-            <PublicIcon sx={{ fontSize: 56, color: 'text.disabled' }} />
-            <Typography variant="h6" sx={{ mt: 1.5, fontWeight: 600 }}>No models published yet</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, maxWidth: 520, mx: 'auto' }}>
-              When a Federated Learning collaboration finishes training and its initiator opted to
-              publish the global model, it will appear here for everyone to download.
-            </Typography>
-          </CardContent>
-        </Card>
-      ) : (
+        <Stack alignItems="center" spacing={1.5} sx={{ py: 8 }}>
+          <CircularProgress />
+          <Typography variant="body2" color="text.secondary">Loading the catalog…</Typography>
+        </Stack>
+      ) : visible.length > 0 ? (
         <Grid container spacing={3}>
-          {models.map((model) => (
-            <Grid item xs={12} sm={6} md={4} key={model.model_id}>
+          {visible.map((model) => (
+            <Grid item xs={12} md={6} lg={4} key={model.model_id}>
               <ModelCard
                 model={model}
-                onDownload={handleDownload}
-                downloading={downloadingId === model.model_id}
+                onPatch={patchModel}
+                onEdit={setEditTarget}
+                onDelete={setDeleteTarget}
+                onRequestClassification={setInferenceTarget}
               />
             </Grid>
           ))}
         </Grid>
+      ) : error ? null : (
+        <Card variant="outlined" sx={{ borderRadius: 2, borderStyle: 'dashed' }}>
+          <CardContent sx={{ textAlign: 'center', py: 7 }}>
+            {query.trim() ? (
+              <>
+                <SearchIcon sx={{ fontSize: 52, color: 'text.disabled' }} />
+                <Typography variant="h6" sx={{ mt: 1.5, fontWeight: 600 }}>
+                  Nothing matches &ldquo;{query.trim()}&rdquo;
+                </Typography>
+                <Button sx={{ mt: 1 }} onClick={() => setQuery('')}>Clear search</Button>
+              </>
+            ) : (
+              <>
+                {emptyState.icon}
+                <Typography variant="h6" sx={{ mt: 1.5, fontWeight: 600 }}>{emptyState.title}</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1, maxWidth: 540, mx: 'auto' }}>
+                  {emptyState.body}
+                </Typography>
+                <Button variant="contained" startIcon={<AddIcon />} sx={{ mt: 2.5, borderRadius: 2 }}
+                  onClick={() => setRegisterOpen(true)}>
+                  Register a model
+                </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
       )}
+
+      <RegisterModelDialog
+        open={registerOpen}
+        onClose={() => setRegisterOpen(false)}
+        onRegistered={(model) => {
+          setRegisterOpen(false);
+          notify(`"${model.name}" is listed. Metadata only — your model file never left your machine.`);
+          // The new entry may not belong in the current tab's query result, so refetch.
+          fetchModels();
+        }}
+      />
+
+      <EditModelDialog
+        open={Boolean(editTarget)}
+        model={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSaved={(fresh) => {
+          replaceModel(fresh);
+          setEditTarget(null);
+          notify('Model details updated.');
+        }}
+      />
+
+      <RequestClassificationDialog
+        open={Boolean(inferenceTarget)}
+        model={inferenceTarget}
+        onClose={() => setInferenceTarget(null)}
+        onSubmitted={() => {
+          setInferenceTarget(null);
+          notify('Request sent. Track it under Classification requests.');
+        }}
+      />
+
+      <Dialog open={Boolean(deleteTarget)} onClose={() => !deleting && setDeleteTarget(null)}
+        PaperProps={{ sx: { borderRadius: 2 } }}>
+        <DialogTitle sx={{ fontWeight: 700 }}>Delete this entry?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            &ldquo;{deleteTarget?.name}&rdquo; will be removed from the catalog and any open
+            classification requests for it will be declined. Your model file is untouched — it was
+            never stored here. This cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={confirmDelete} disabled={deleting}
+            startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : null}>
+            {deleting ? 'Deleting…' : 'Delete entry'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={4500}
+        autoHideDuration={5000}
         onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar((s) => ({ ...s, open: false }))}>

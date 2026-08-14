@@ -31,7 +31,17 @@ ALLOWED_RESULT_KEYS = {"surviving_samples", "surviving_snps", "pca_coords", "tra
                        # Federated Learning: PCA coords reuse "pca_coords"; a training
                        # round returns a "model_update" (weights + sample count + local
                        # metrics). Round-scoped FL results are also stored on the job doc.
-                       "model_update"}
+                       "model_update",
+                       # The agent confirming it wrote the final global model to its own
+                       # local models dir. Only after this does the server drop its copy.
+                       "model_saved",
+                       # Black-box inference: the requester's agent exports the samples to
+                       # be classified, the model owner's agent returns predictions only.
+                       "samples", "predictions"}
+
+# Results that belong to a single request rather than a collaboration are kept on
+# the job document (see _store_job_payload) instead of on a collaboration doc.
+JOB_SCOPED_ACTIONS = {"fl_save_model", "export_samples", "classify_samples"}
 
 # Arrays/objects larger than this many entries are offloaded to the qc_results
 # collection to stay under MongoDB's 16 MB document limit (existing pattern).
@@ -134,6 +144,58 @@ def register_agent_api(app, db, signing_key=None):
             collaborations.update_one({"uuid": collab_uuid}, {"$set": {f"{key}.{uid}": {"__ref__": ref}}})
         else:
             collaborations.update_one({"uuid": collab_uuid}, {"$set": {f"{key}.{uid}": value}})
+
+    def _is_oversize(value):
+        """True if a value should be offloaded rather than embedded in a document.
+
+        Counts CELLS, not top-level keys: a genotype matrix arrives as
+        {sample_id: {snp: value}}, so 200 samples x 3000 markers is only 200
+        top-level keys but 600k cells — comfortably over Mongo's 16 MB doc limit
+        if stored inline.
+        """
+        if not isinstance(value, (list, dict)):
+            return False
+        n = len(value)
+        if n > OVERFLOW_THRESHOLD:
+            return True
+        try:
+            first = next(iter(value.values())) if isinstance(value, dict) else (value[0] if value else None)
+        except StopIteration:
+            return False
+        return isinstance(first, (list, dict)) and n * len(first) > OVERFLOW_THRESHOLD
+
+    def _store_job_payload(job_id, payload):
+        """Store a request-scoped result on the job document itself.
+
+        Used for work that isn't tied to a collaboration (model delivery, sample
+        export, black-box classification). Oversize values are offloaded to
+        qc_results and replaced by a {"__ref__": ...} pointer, matching the
+        convention already used for per-collaboration results.
+        """
+        stored = {}
+        for key, value in payload.items():
+            if _is_oversize(value):
+                ref = f"job:{job_id}:{key}:{uuid.uuid4().hex}"
+                qc_results.update_one({"ref": ref}, {"$set": {"ref": ref, "value": value}}, upsert=True)
+                stored[key] = {"__ref__": ref}
+            else:
+                stored[key] = value
+        return stored
+
+    def _record_model_delivery(collab_uuid, uid):
+        """An agent confirmed it saved the global model locally. Once every target
+        site has confirmed, drop the server's transient copy."""
+        if not collab_uuid:
+            return
+        collaborations.update_one(
+            {"uuid": collab_uuid},
+            {"$addToSet": {"fl_state.model_delivered_to": str(uid)}})
+        try:
+            from fl import pipeline as _fl
+            _fl.maybe_clear_delivered_model(collaborations, collab_uuid)
+        except Exception:
+            logger.exception("Could not finalize model delivery for %s (the server "
+                             "keeps its copy, which is the safe outcome)", collab_uuid)
 
     # ---- routes ------------------------------------------------------------
     @app.route("/api/agent/enroll", methods=["POST"])
@@ -287,23 +349,104 @@ def register_agent_api(app, db, signing_key=None):
             return jsonify({"error": f"Rejected unexpected result keys: {sorted(unexpected)}"}), 400
 
         collab_uuid = job.get("collaboration_uuid")
-        for key in ALLOWED_RESULT_KEYS:
-            if key in payload:
-                _store_per_user(collab_uuid, str(uid), key, payload[key])
+        action = str(job.get("action", ""))
+        job_scoped = action in JOB_SCOPED_ACTIONS or not collab_uuid
 
         completion = {"status": "complete", "completed_at": datetime.utcnow()}
-        # Federated Learning rounds/projection are round-scoped: keep the full
-        # payload on the job doc so the FL orchestrator can collect this exact
-        # round's results by job id (per-user collab keys get overwritten each round).
-        if str(job.get("action", "")).startswith("fl_"):
-            completion["result"] = payload
+        if job_scoped:
+            # Request-scoped work (model delivery, sample export, classification)
+            # and any job not attached to a collaboration: the result belongs to
+            # the job, not to a collaboration document.
+            completion["result"] = _store_job_payload(job_id, payload)
+        else:
+            for key in ALLOWED_RESULT_KEYS:
+                if key in payload:
+                    _store_per_user(collab_uuid, str(uid), key, payload[key])
+            # Federated Learning rounds/projection are round-scoped: keep the full
+            # payload on the job doc so the FL orchestrator can collect this exact
+            # round's results by job id (per-user collab keys get overwritten each round).
+            if action.startswith("fl_"):
+                completion["result"] = payload
         jobs.update_one({"job_id": job_id}, {"$set": completion})
 
+        if action == "fl_save_model" and payload.get("model_saved"):
+            _record_model_delivery(collab_uuid, uid)
+
         # A QC/stat result just landed — nudge the next blocker / notify on stage completion.
-        if collab_uuid:
+        if collab_uuid and not job_scoped:
             notifications.notify_progress(db, collab_uuid)
         return jsonify({"success": True, "status": "complete"}), 200
 
+    # ---- agent-authenticated payload fetches -------------------------------
+    # Bulk payloads (model weights, samples to classify) are fetched by the agent
+    # over its own authenticated channel rather than carried inside job params,
+    # so the job queue never holds a second copy of them.
+
+    @app.route("/api/agent/models/<model_id>/weights", methods=["GET"])
+    def agent_fetch_model_weights(model_id):
+        """The final global model, for a site that participated in training it.
+
+        This is the ONLY route by which model weights leave this server, and it
+        is reachable only by an agent token belonging to a participating site.
+        No website route serves weights to anyone.
+        """
+        uid, err = current_agent_uid()
+        if err:
+            return err
+        entry = db["model_repository"].find_one(
+            {"model_id": model_id}, {"collaboration_uuid": 1})
+        if not entry or not entry.get("collaboration_uuid"):
+            return jsonify({"error": "Model not found"}), 404
+        collab = collaborations.find_one({"uuid": entry["collaboration_uuid"]}) or {}
+        state = collab.get("fl_state") or {}
+        targets = {str(t) for t in (state.get("delivery_targets") or [])}
+        if str(uid) not in targets:
+            return jsonify({"error": "This site did not participate in training this model"}), 403
+        weights = state.get("global_model")
+        if not weights:
+            return jsonify({"error": "Weights are no longer held by the server"}), 410
+        cfg = state.get("config") or {}
+        return jsonify({
+            "model_id": model_id,
+            "weights_b64": weights,
+            "weights_format": "base64(npz with keys w0..wK = model.state_dict() values, in order)",
+            "num_classes": cfg.get("num_classes"),
+            "class_names": cfg.get("label_names"),
+        }), 200
+
+    @app.route("/api/agent/inference/<request_id>/samples", methods=["GET"])
+    def agent_fetch_inference_samples(request_id):
+        """Samples a requester asked this agent's owner to classify.
+
+        Readable only by the model owner's agent, only while the request is
+        awaiting classification. The server holds these samples transiently and
+        deletes them as soon as the predictions come back.
+        """
+        uid, err = current_agent_uid()
+        if err:
+            return err
+        req = db["inference_requests"].find_one({"request_id": request_id})
+        if not req:
+            return jsonify({"error": "Request not found"}), 404
+        if str(req.get("owner_id")) != str(uid):
+            return jsonify({"error": "This request is not addressed to you"}), 403
+        if req.get("status") != "classifying":
+            return jsonify({"error": f"Request is not awaiting classification (status={req.get('status')})"}), 409
+        samples = req.get("samples")
+        if isinstance(samples, dict) and "__ref__" in samples:
+            doc = qc_results.find_one({"ref": samples["__ref__"]}) or {}
+            samples = doc.get("value")
+        if not samples:
+            return jsonify({"error": "Samples are no longer available"}), 410
+        return jsonify({
+            "request_id": request_id,
+            "model_id": req.get("model_id"),
+            "samples": samples,
+        }), 200
+
     # Expose token minting for use by an authenticated website route in app.py.
     app.config["AGENT_MINT_ENROLLMENT_CODE"] = mint_enrollment_code
+    # Expose the oversize-value offload helper so app.py can resolve/store the
+    # same {"__ref__": ...} pointers the job pipeline writes.
+    app.config["AGENT_IS_OVERSIZE"] = _is_oversize
     return enqueue_job

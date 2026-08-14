@@ -13,6 +13,11 @@ class Config:
     POLL_TIMEOUT = int(os.environ.get("POLL_TIMEOUT", "30"))
     REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "60"))
     MODELS_DIR = os.environ.get("MODELS_DIR", os.path.join(os.path.dirname(__file__), "models"))
+    # Models THIS site owns (delivered after federated training, or otherwise its
+    # own). Kept separate from MODELS_DIR — that holds read-only assets baked into
+    # the image, while this must be a persistent volume: once the server confirms
+    # delivery it deletes its copy, so this can be the only copy that exists.
+    OWNED_MODELS_DIR = os.environ.get("OWNED_MODELS_DIR", os.path.join(MODELS_DIR, "owned"))
     AGENT_VERSION = "1.0.0"
     # Upload guard: reject result payloads larger than this (bytes, pre-gzip)
     MAX_RESULT_BYTES = int(os.environ.get("MAX_RESULT_BYTES", str(100 * 1024 * 1024)))

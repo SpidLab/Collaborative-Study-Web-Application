@@ -80,6 +80,20 @@ class JobsClient:
         data = resp.json()
         return data.get("job")
 
+    def fetch(self, path):
+        """GET a server path with this agent's credentials and return the JSON.
+
+        Used for bulk payloads a job refers to rather than carries: the final
+        model weights this site is entitled to keep, and samples someone asked
+        this site's model to classify.
+        """
+        if not str(path).startswith("/"):
+            raise ValueError(f"Refusing to fetch a non-server path: {path!r}")
+        url = f"{self.server_url}{path}"
+        resp = requests.get(url, headers=self._headers(), timeout=self.request_timeout)
+        resp.raise_for_status()
+        return resp.json()
+
     def post_result(self, job_id, result):
         """Upload a job result as gzipped JSON."""
         url = f"{self.server_url}/api/agent/jobs/{job_id}/result"

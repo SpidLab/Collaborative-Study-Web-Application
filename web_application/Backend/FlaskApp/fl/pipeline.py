@@ -687,7 +687,10 @@ def run_training_agents(
             "fl_state.global_model": global_weights,
             "fl_state.training_completed_at": _utcnow_iso(),
         })
-        _maybe_publish(collaborations, uuid)
+        # Catalog the model, then hand the weights to the participating sites so
+        # the only lasting copy is on their machines (the server-side copy is
+        # wiped once every site confirms it saved one).
+        _maybe_publish(collaborations, uuid, enqueue_job=enqueue_job)
         logger.info("FL(agents) training complete for %s: %s", uuid, final_metrics)
     except Exception as exc:
         logger.exception("FL(agents) training failed for %s", uuid)
@@ -699,33 +702,78 @@ def run_training_agents(
 
 
 # ---------------------------------------------------------------------------
-# Model Repository — publish a completed global model so any user can view /
-# download it (opt-in per collaboration via the `publish_model` flag).
+# Model Repository — a METADATA CATALOG.
+#
+# The repository never stores model weights. When training completes the final
+# global model is delivered to the participating sites' Site Agents and then
+# wiped from this server, so the only copy lives on the owners' machines. The
+# repository entry records what the model is, who owns it, and how it performed.
+#
+# `model_visibility` controls who can SEE the entry:
+#   private — only the owner (in "My models")
+#   public  — every logged-in user, metadata only (never a download)
 # ---------------------------------------------------------------------------
 
 MODEL_REPO_COLLECTION = "model_repository"
+FL_SAVE_MODEL_ACTION = "fl_save_model"
+
+VISIBILITY_PRIVATE = "private"
+VISIBILITY_PUBLIC = "public"
+
+
+def _model_id_for(uuid: str) -> str:
+    """Public handle for a collaboration's model.
+
+    Derived one-way from the collaboration uuid so it is stable (idempotent
+    re-publish) but does NOT expose the uuid itself — the uuid is a capability
+    key for other collaboration endpoints and must not leak into the catalog.
+    """
+    import hashlib
+    return "mdl_" + hashlib.sha256(f"fl-model:{uuid}".encode()).hexdigest()[:20]
+
+
+def _collaboration_visibility(doc: dict) -> tuple[str, bool]:
+    """(visibility, allow_inference_requests) for a collaboration, honoring the
+    legacy `publish_model` boolean for collaborations created before visibility
+    levels existed."""
+    vis = str(doc.get("model_visibility") or "").strip().lower()
+    if vis not in (VISIBILITY_PRIVATE, VISIBILITY_PUBLIC):
+        vis = VISIBILITY_PUBLIC if doc.get("publish_model") else VISIBILITY_PRIVATE
+    allow = bool(doc.get("allow_inference_requests")) and vis == VISIBILITY_PUBLIC
+    return vis, allow
+
+
+def _training_dataset_name(collaborations: Collection, doc: dict) -> str | None:
+    """The phenotype/dataset the model was trained on. The professor asked that
+    reported metrics always name the dataset they were obtained on."""
+    try:
+        datasets = collaborations.database["datasets"]
+        ds = datasets.find_one({"_id": doc.get("creator_dataset_id")}, {"phenotype": 1}) or {}
+        pheno = ds.get("phenotype")
+        if pheno:
+            return str(pheno)
+    except Exception:
+        pass
+    for p in (doc.get("fl_state") or {}).get("participants") or []:
+        if p.get("phenotype"):
+            return str(p["phenotype"])
+    return None
 
 
 def publish_global_model(collaborations: Collection, uuid: str) -> dict | None:
-    """Publish the just-completed global model to the public Model Repository.
+    """Record the just-completed global model in the Model Repository catalog.
 
-    Best-effort and idempotent: no-op unless the collaboration opted in
-    (`publish_model`) and training actually completed. Upserts one repository
-    entry per collaboration (keyed by collaboration uuid) so re-runs refresh it.
-    Only the aggregated model weights + metrics + metadata are stored — never any
-    raw genotype data.
+    Always writes an entry (even for `private` models — private means "listed for
+    the owner", not "absent", so the owner can flip it public later). Stores
+    METADATA ONLY: no weights ever reach this collection.
     """
     doc = _load_collaboration(collaborations, uuid)
-    if not doc.get("publish_model"):
-        return None
-
     state = doc.get("fl_state") or {}
     if state.get("stage") != STAGE_COMPLETE:
         return None
 
     cfg = state.get("config") or {}
     survivors = state.get("survivors") or []
-    weights_b64 = state.get("global_model")  # None in the in-process sim backend
 
     db = collaborations.database
     creator_id = str(doc.get("creator_id"))
@@ -738,59 +786,152 @@ def publish_global_model(collaborations: Collection, uuid: str) -> dict | None:
     except Exception:
         creator_name = None
 
-    # Public handle for the model. Derived one-way from the collaboration uuid so
-    # it is stable (idempotent re-publish) but does NOT expose the uuid itself —
-    # the uuid is a capability key for other collaboration endpoints and must not
-    # leak into the public repository listing.
-    import hashlib
-    model_id = "mdl_" + hashlib.sha256(f"fl-model:{uuid}".encode()).hexdigest()[:20]
-
+    model_id = _model_id_for(uuid)
+    visibility, allow_inference = _collaboration_visibility(doc)
     class_names = cfg.get("label_names") or list(SUPER_POPULATIONS)
+
     entry = {
         "model_id": model_id,
+        "source": "federated",
         "collaboration_uuid": uuid,  # internal only — never returned by the API
         "name": f"{doc.get('name', 'Federated model')} — global model",
         "collaboration_name": doc.get("name"),
-        "created_by_id": creator_id,
-        "created_by_name": creator_name or "Unknown",
+        "owner_id": creator_id,
+        "owner_name": creator_name or "Unknown",
+        "dataset": _training_dataset_name(collaborations, doc),
         "published_at": _utcnow_iso(),
+        "updated_at": _utcnow_iso(),
         "task": "Genotype → super-population classification",
         "framework": "PyTorch",
         "architecture": "GenoPhenoCNN (1D CNN + MLP classifier head)",
         "num_classes": int(cfg.get("num_classes", len(class_names))),
         "class_names": class_names,
-        "epsilon": cfg.get("epsilon"),
         "num_rounds": cfg.get("num_rounds"),
         "local_epochs": cfg.get("local_epochs"),
         "num_participants": len(survivors),
         "metrics": state.get("final_metrics") or {},
         "training_history": state.get("training_history") or [],
-        "has_weights": bool(weights_b64),
-        "weights_format": "base64(npz with keys w0..wK = model.state_dict() values, in order)",
-        "weights_b64": weights_b64,
-        "load_instructions": (
-            "from fl.model import build_model, set_model_parameters\n"
-            "from fl.weights import decode_weights\n"
-            "model = build_model(num_snps=3000, num_classes=NUM_CLASSES)  # num_snps is arbitrary (AdaptiveAvgPool)\n"
-            "set_model_parameters(model, decode_weights(WEIGHTS_B64))\n"
-            "model.eval()"
-        ),
     }
+    # Only set visibility on FIRST publish. A re-run of training must not silently
+    # revert a visibility the owner changed by hand after the first completion.
+    existing = db[MODEL_REPO_COLLECTION].find_one({"model_id": model_id}, {"visibility": 1})
+    if not existing:
+        entry["visibility"] = visibility
+        entry["allow_inference_requests"] = allow_inference
+
     db[MODEL_REPO_COLLECTION].update_one(
         {"model_id": model_id}, {"$set": entry}, upsert=True
     )
-    # Leave a breadcrumb on the collaboration so the FL view can link/download.
+    # Leave a breadcrumb on the collaboration so the FL view can link to the entry.
     _set_fl_state(collaborations, uuid, {"fl_state.published_model_id": model_id})
-    logger.info("Published global model for %s to the Model Repository as %s", uuid, model_id)
+    logger.info("Recorded global model for %s in the Model Repository as %s (visibility=%s)",
+                uuid, model_id, entry.get("visibility", "unchanged"))
     return entry
 
 
-def _maybe_publish(collaborations: Collection, uuid: str) -> None:
-    """Wrapper that never lets a publish error break training completion."""
+def delivery_targets_for(doc: dict) -> list[str]:
+    """Which sites receive a copy of the final global model.
+
+    The initiator's visibility choice decides this:
+      private — the initiator keeps the model. Only their site receives it.
+      public  — every site that trained it receives a copy.
+
+    Read from the collaboration (not the repository entry) because this is the
+    choice made when the collaboration was started. Delivery happens once, at
+    completion; flipping visibility afterwards changes who can SEE the catalog
+    entry, it does not move weights between machines.
+    """
+    state = doc.get("fl_state") or {}
+    creator_id = str(doc.get("creator_id") or "")
+    visibility, _ = _collaboration_visibility(doc)
+    if visibility == VISIBILITY_PRIVATE:
+        return [creator_id] if creator_id else []
+    targets = [str(u) for u in (state.get("survivors") or [])]
+    if creator_id and creator_id not in targets:
+        targets.append(creator_id)
+    return targets
+
+
+def deliver_model_to_sites(collaborations: Collection, enqueue_job, uuid: str) -> list[str]:
+    """Hand the final global model to the site(s) entitled to keep it.
+
+    The model must end up on an owner's machine, not here: the black-box
+    inference service runs the model locally at the owner's site, and the server
+    is only ever a transient parameter server. Each agent fetches the weights
+    over its own authenticated channel and writes them to its local models dir.
+
+    Returns the user ids the model was dispatched to. The server-side copy is
+    cleared later by `maybe_clear_delivered_model` — only once every target has
+    confirmed it saved the file, so a failed delivery can never destroy the model.
+    """
+    doc = _load_collaboration(collaborations, uuid)
+    state = doc.get("fl_state") or {}
+    if not state.get("global_model"):
+        return []  # simulation backend, or already delivered and cleared
+    model_id = _model_id_for(uuid)
+
+    targets = delivery_targets_for(doc)
+    if not targets:
+        return []
+    visibility, _ = _collaboration_visibility(doc)
+
+    cfg = state.get("config") or {}
+    job_ids = {}
+    for uid in targets:
+        job_ids[uid] = enqueue_job(uuid, uid, FL_SAVE_MODEL_ACTION, {
+            "model_id": model_id,
+            "collaboration_name": doc.get("name"),
+            "num_classes": int(cfg.get("num_classes", len(SUPER_POPULATIONS))),
+            "class_names": cfg.get("label_names") or list(SUPER_POPULATIONS),
+            # The agent fetches the weights itself rather than carrying them in
+            # the job params, so the queue never holds a second copy.
+            "weights_path": f"/api/agent/models/{model_id}/weights",
+        })
+    _set_fl_state(collaborations, uuid, {
+        "fl_state.delivery_jobs": job_ids,
+        "fl_state.delivery_targets": targets,
+        "fl_state.delivery_scope": ("initiator" if visibility == VISIBILITY_PRIVATE else "all_sites"),
+        "fl_state.model_delivered_to": state.get("model_delivered_to") or [],
+    })
+    logger.info("Dispatched global model %s to %d site(s) for %s (scope=%s)",
+                model_id, len(targets), uuid, visibility)
+    return targets
+
+
+def maybe_clear_delivered_model(collaborations: Collection, uuid: str) -> bool:
+    """Wipe the server's copy of the global model once every target site has
+    confirmed it saved its own. Returns True if the copy was cleared.
+
+    Gated on confirmed delivery on purpose: clearing early would destroy the only
+    remaining copy of the trained model if an agent was offline or the job failed.
+    """
+    doc = _load_collaboration(collaborations, uuid)
+    state = doc.get("fl_state") or {}
+    if not state.get("global_model"):
+        return False
+    targets = [str(u) for u in (state.get("delivery_targets") or [])]
+    delivered = {str(u) for u in (state.get("model_delivered_to") or [])}
+    if not targets or not all(t in delivered for t in targets):
+        return False
+    collaborations.update_one({"uuid": uuid}, {"$unset": {"fl_state.global_model": ""}})
+    logger.info("Cleared the server-side copy of the global model for %s "
+                "(delivered to %d site(s))", uuid, len(delivered))
+    return True
+
+
+def _maybe_publish(collaborations: Collection, uuid: str, enqueue_job=None) -> None:
+    """Catalog the model and hand it to the sites. Never breaks training completion."""
     try:
         publish_global_model(collaborations, uuid)
     except Exception:
         logger.exception("Model Repository publish failed for %s (non-fatal)", uuid)
+    if enqueue_job is None:
+        return
+    try:
+        deliver_model_to_sites(collaborations, enqueue_job, uuid)
+    except Exception:
+        logger.exception("Global model delivery failed for %s (non-fatal — the "
+                         "server keeps its copy until delivery succeeds)", uuid)
 
 
 # ---------------------------------------------------------------------------

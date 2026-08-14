@@ -57,10 +57,37 @@ except ImportError as _fl_exc:
     FL_AVAILABLE = False
     print(f"⚠️  FL pipeline not available: {_fl_exc}")
 
-# Experiment type constants
+# Experiment type constants. A collaboration runs EXACTLY ONE experiment type.
 EXPERIMENT_GWAS = "GWAS"
 EXPERIMENT_FL = "Federated Learning"
 ALLOWED_EXPERIMENT_TYPES = [EXPERIMENT_GWAS, EXPERIMENT_FL]
+
+# Legacy: "Data Sharing" used to be a collaboration experiment type. It is now a
+# standalone request/approve flow driven from My Data (see the Data Sharing
+# section further down) and can no longer be selected for a new collaboration.
+# The constant and its endpoints remain so collaborations created under the old
+# model keep working read-only.
+EXPERIMENT_DATA_SHARING = "Data Sharing"
+LEGACY_EXPERIMENT_TYPES = [EXPERIMENT_DATA_SHARING]
+
+# The privacy transform (randomized-response DP noise + row shuffle) — the
+# noise-only front half of the Sample Relatedness QC step, with NO KING
+# coefficients. Used by both the legacy DS experiment and the new per-dataset
+# sharing flow. The owner's Site Agent always runs it on its own machine.
+DS_QC_METHOD = "Privacy Transform (Data Sharing)"
+DS_DEFAULT_EPSILON = 5.0
+
+# Model Repository visibility. The repository is a METADATA CATALOG: model
+# weights live only on the owner's machine and are never downloadable through
+# this server by anyone.
+#   private — only the owner sees the entry (in "My models")
+#   public  — every logged-in user sees the metadata; still no download
+MODEL_VISIBILITY_PRIVATE = "private"
+MODEL_VISIBILITY_PUBLIC = "public"
+MODEL_VISIBILITIES = [MODEL_VISIBILITY_PRIVATE, MODEL_VISIBILITY_PUBLIC]
+
+# Cap on how many samples a requester may send for black-box classification.
+INFERENCE_MAX_SAMPLES = int(os.getenv("INFERENCE_MAX_SAMPLES", "500"))
 
 # FL's fixed QC scheme: PCA projection with local DP noise is the only
 # preprocessing step shared with the server (per Sub Aim 1.3).
@@ -427,8 +454,14 @@ def get_my_datasets():
         projection = {
             'phenotype': 1, 'number_of_samples': 1, 'n_snps': 1,
             'file_sha256': 1, 'metadata_updated_at': 1,
+            'description': 1, 'shareable': 1, 'share_epsilon': 1, 'share_mechanism': 1,
         }
         out = []
+        # How many people are waiting on each dataset, so My Data can badge it.
+        pending_by_dataset = {}
+        for r in db['data_requests'].find({"owner_id": uid, "status": "pending"}, {"dataset_id": 1}):
+            key = str(r.get('dataset_id'))
+            pending_by_dataset[key] = pending_by_dataset.get(key, 0) + 1
         for ds in db.datasets.find(query, projection):
             updated = ds.get('metadata_updated_at')
             out.append({
@@ -438,6 +471,8 @@ def get_my_datasets():
                 'n_snps': ds.get('n_snps'),
                 'file_sha256': ds.get('file_sha256'),
                 'metadata_updated_at': updated.isoformat() if hasattr(updated, 'isoformat') else updated,
+                'pending_requests': pending_by_dataset.get(str(ds['_id']), 0),
+                **_dataset_share_settings(ds),
             })
         return jsonify(out), 200
     except Exception as e:
@@ -552,8 +587,21 @@ def get_users_for_invitation():
                 "_id": user_id_str,
                 "name": user.get("name", "No Name Provided"),
                 "phenotype": phenotype,
-                "number_of_samples": doc.get('number_of_samples', "No Samples")
+                "number_of_samples": doc.get('number_of_samples', "No Samples"),
+                # Data-sharing advertisement: whether this owner has made the
+                # dataset available to request, and at what privacy budget.
+                **_dataset_share_settings(doc),
             })
+
+        # Mark datasets the caller has already asked for, so the UI doesn't offer
+        # a duplicate request button.
+        my_requests = {}
+        for r in db['data_requests'].find({"requester_id": str(current_user.get_id())},
+                                          {"dataset_id": 1, "status": 1, "request_id": 1}):
+            my_requests[str(r.get('dataset_id'))] = {
+                "status": r.get('status'), "request_id": r.get('request_id')}
+        for entry in users_list:
+            entry["my_request"] = my_requests.get(entry["dataset_id"])
 
         return jsonify(users_list), 200
 
@@ -1044,6 +1092,8 @@ def accept_invitation():
             experiments_for_hook = (collab_doc or {}).get('experiments') or []
             if EXPERIMENT_FL in experiments_for_hook:
                 _maybe_trigger_auto_fl(uuid)
+            elif EXPERIMENT_DATA_SHARING in experiments_for_hook:
+                _maybe_trigger_auto_data_sharing(uuid)
             else:
                 _maybe_trigger_auto_chained_qc(uuid)
         except Exception as e:
@@ -1147,6 +1197,8 @@ def reject_invitation():
             experiments_for_hook = (collab_doc or {}).get('experiments') or []
             if EXPERIMENT_FL in experiments_for_hook:
                 _maybe_trigger_auto_fl(uuid)
+            elif EXPERIMENT_DATA_SHARING in experiments_for_hook:
+                _maybe_trigger_auto_data_sharing(uuid)
             else:
                 _maybe_trigger_auto_chained_qc(uuid)
         except Exception as e:
@@ -1209,6 +1261,97 @@ def _maybe_trigger_auto_fl(collaboration_uuid: str):
                 "fl_state.error": f"{type(exc).__name__}: {exc}",
             }}
         )
+
+
+def _ds_participants(collab):
+    """Creator + accepted invitees for a Data Sharing collaboration, each as
+    {user_id, phenotype, dataset_id}."""
+    participants = []
+    creator_id = str(collab.get('creator_id'))
+    creator_dataset_id = collab.get('creator_dataset_id')
+    if creator_id and creator_dataset_id:
+        cds = db['datasets'].find_one({"_id": ObjectId(creator_dataset_id)}, {"phenotype": 1})
+        if cds and cds.get('phenotype'):
+            participants.append({"user_id": creator_id, "phenotype": cds.get('phenotype'),
+                                 "dataset_id": str(creator_dataset_id)})
+    for iu in (collab.get('invited_users') or []):
+        if iu.get('status') != 'accepted':
+            continue
+        uid = str(iu.get('user_id'))
+        pheno = iu.get('phenotype')
+        dsid = iu.get('user_dataset_id')
+        if uid and pheno and dsid:
+            participants.append({"user_id": uid, "phenotype": pheno, "dataset_id": str(dsid)})
+    return participants
+
+
+def _ds_config(collab):
+    """Privacy-transform params from the canonical Data Sharing qc_scheme."""
+    for m in (collab.get('qc_scheme') or []):
+        if isinstance(m, dict) and m.get('method') == DS_QC_METHOD:
+            return m.get('params') or {}
+    return {}
+
+
+def _maybe_trigger_auto_data_sharing(collaboration_uuid: str):
+    """Kick off the standalone privacy transform for each participant once every
+    invitee has responded. Enqueues a `privacy_transform` job per participant (the
+    same agent action Sample Relatedness uses for its noise step) — but stops there:
+    no KING coefficients, no pairwise QC. The resulting privacy-protected matrices
+    are what participants can share/download. Idempotent via the `ds_triggered` flag.
+    """
+    if not collaboration_uuid:
+        return
+    collab = db['collaborations'].find_one({"uuid": str(collaboration_uuid)})
+    if not collab:
+        return
+    if EXPERIMENT_DATA_SHARING not in (collab.get('experiments') or []):
+        return
+    invited = collab.get('invited_users', []) or []
+    if any((iu.get('status', 'pending') == 'pending') for iu in invited):
+        return  # still waiting on responses
+    if collab.get('ds_triggered'):
+        return  # already enqueued
+
+    participants = _ds_participants(collab)
+    if not participants:
+        db['collaborations'].update_one({"uuid": str(collaboration_uuid)}, {"$set": {"ds_triggered": True}})
+        return
+
+    # Atomically claim the trigger: only the writer that actually flips
+    # ds_triggered proceeds, so two invitees responding at once can't both
+    # enqueue jobs or double-send the "started" notification.
+    claimed = db['collaborations'].update_one(
+        {"uuid": str(collaboration_uuid), "ds_triggered": {"$ne": True}},
+        {"$set": {"ds_triggered": True, "collaboration_started_at": datetime.utcnow()}})
+    if claimed.modified_count != 1:
+        return
+
+    cfg = _ds_config(collab)
+    epsilon = float(cfg.get('epsilon', DS_DEFAULT_EPSILON))
+    try:
+        notifications.notify_started(db, str(collaboration_uuid))
+    except Exception as e:
+        logging.warning("Data Sharing start notification skipped for %s: %s", collaboration_uuid, e)
+
+    job_ids = {}
+    for p in participants:
+        job_ids[p["user_id"]] = enqueue_job(
+            collaboration_uuid=str(collaboration_uuid),
+            user_id=p["user_id"],
+            action="privacy_transform",
+            params={
+                "phenotype": p["phenotype"],
+                "dataset_id": p["dataset_id"],
+                "epsilon": epsilon,
+                "seed": int(cfg.get("seed", 1234)),
+                "shuffle": bool(cfg.get("shuffle", True)),
+                "num_synthetic_samples": int(cfg.get("num_synthetic_samples", 0)),
+            })
+    db['collaborations'].update_one(
+        {"uuid": str(collaboration_uuid)}, {"$set": {"ds_job_ids": job_ids}})
+    logging.info("✅ Data Sharing privacy transform enqueued for %s (%d participants)",
+                 collaboration_uuid, len(participants))
 
 
 def _maybe_trigger_auto_chained_qc(collaboration_uuid: str):
@@ -1459,14 +1602,16 @@ def get_experiment_list():
                 "quality_control_scheme": existing_schemes
             }), 200
         else:
-            # Create default experiments entry if none exists
+            # Create default experiments entry if none exists. insert_one mutates
+            # the dict it is given by stamping an ObjectId onto it, which is not
+            # JSON-serializable — so respond from a copy, not the inserted doc.
             default_data = {
                 "experiment_types": list(ALLOWED_EXPERIMENT_TYPES),
                 "quality_control_scheme": default_qc_schemes
             }
-            experiment_list_collection.insert_one(default_data)
+            experiment_list_collection.insert_one(dict(default_data))
             return jsonify(default_data), 200
-            
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1591,11 +1736,10 @@ def get_start_collaboration():
             qc_schemes_list = [{'quality_control_scheme': existing_schemes}]
         else:
             # Create default experiments entry if none exists
-            default_data = {
-                "experiment_types": ["GWAS"],
+            experiment_list_collection.insert_one({
+                "experiment_types": list(ALLOWED_EXPERIMENT_TYPES),
                 "quality_control_scheme": default_qc_schemes
-            }
-            experiment_list_collection.insert_one(default_data)
+            })
             qc_schemes_list = [{'quality_control_scheme': default_qc_schemes}]
         
         # Get raw datasets (metadata entries without QC processing)
@@ -1753,6 +1897,22 @@ def post_start_collaboration():
         data = request.get_json()
         collab_name = data.get('collabName')
         experiments = data.get('experiments', [])
+        if isinstance(experiments, str):
+            experiments = [experiments]
+        experiments = [e for e in (experiments or []) if e]
+
+        # A collaboration runs exactly one experiment type — mixing GWAS and
+        # Federated Learning in a single collaboration is not a supported shape.
+        if len(experiments) != 1:
+            return jsonify({
+                "error": "Select exactly one experiment type for a collaboration."
+            }), 400
+        if experiments[0] not in ALLOWED_EXPERIMENT_TYPES:
+            return jsonify({
+                "error": f"Unsupported experiment type: {experiments[0]}",
+                "allowed": ALLOWED_EXPERIMENT_TYPES,
+            }), 400
+
         raw_qc_scheme = data.get('collabQcScheme', [])
         # Normalize: accept both old format (["MAF"]) and new format ([{"method":"MAF","params":{}}])
         collabQcScheme = []
@@ -1832,10 +1992,24 @@ def post_start_collaboration():
                 'phenotype': phenotype,
             })
 
-        # For Federated Learning, the initiator may opt in to publishing the
-        # trained global model to the public Model Repository once the
-        # collaboration completes. Ignored for non-FL experiments.
-        publish_model = bool(data.get('publishModel')) and (EXPERIMENT_FL in experiments)
+        # For Federated Learning, the initiator chooses how the trained global
+        # model is listed in the Model Repository. The repository only ever holds
+        # METADATA — the weights are delivered to the participating sites and
+        # wiped from this server, so "public" means "others can see that this
+        # model exists and what it does", never "others can download it".
+        is_fl = EXPERIMENT_FL in experiments
+        model_visibility = str(data.get('modelVisibility') or '').strip().lower()
+        if model_visibility not in MODEL_VISIBILITIES:
+            # Back-compat with the old boolean checkbox.
+            model_visibility = (MODEL_VISIBILITY_PUBLIC if data.get('publishModel')
+                                else MODEL_VISIBILITY_PRIVATE)
+        allow_inference = bool(data.get('allowInferenceRequests'))
+        if model_visibility != MODEL_VISIBILITY_PUBLIC:
+            # A model nobody can see cannot advertise a black-box service.
+            allow_inference = False
+        if not is_fl:
+            model_visibility = MODEL_VISIBILITY_PRIVATE
+            allow_inference = False
 
         collaboration = {
             'uuid': str(uuid.uuid4()),
@@ -1845,7 +2019,8 @@ def post_start_collaboration():
             'creator_id': ObjectId(creator_id),
             'creator_dataset_id': ObjectId(creator_dataset_id),
             'invited_users': invited_users_with_new_datasets,
-            'publish_model': publish_model,
+            'model_visibility': model_visibility,
+            'allow_inference_requests': allow_inference,
             # 'created_at': datetime.datetime.utcnow()  # Optionally add timestamp
         }
 
@@ -3798,10 +3973,11 @@ def _fl_unavailable_response():
 
 def _fl_state_for_response(collab_doc):
     """Trim fl_state for API consumers: drop the bulky/internal fields the UI
-    never needs — the base64 global-model weights (downloaded via the Model
-    Repository instead), internal agent job ids, and stack traces."""
+    never needs — the base64 global-model weights (which no website route may
+    ever serve), internal agent job ids, and stack traces."""
     state = dict(collab_doc.get('fl_state') or {})
-    for k in ('global_model', 'error_trace', 'projection_jobs', 'round_jobs'):
+    for k in ('global_model', 'error_trace', 'projection_jobs', 'round_jobs',
+              'delivery_jobs'):
         state.pop(k, None)
     return state
 
@@ -3828,6 +4004,11 @@ def fl_get_state(collab_uuid):
     if uid not in member_ids:
         return jsonify({"error": "You are not a participant in this collaboration"}), 403
     state = collab.get('fl_state') or {}
+    model_id = state.get('published_model_id')
+    model_entry = _model_repo_collection().find_one(
+        {"model_id": model_id}, {"visibility": 1, "allow_inference_requests": 1}) if model_id else None
+    delivered = {str(u) for u in (state.get('model_delivered_to') or [])}
+    targets = [str(u) for u in (state.get('delivery_targets') or [])]
     return jsonify({
         "uuid": collab_uuid,
         "experiment": EXPERIMENT_FL,
@@ -3835,9 +4016,20 @@ def fl_get_state(collab_uuid):
         "creator_id": creator_id,
         "current_user_id": uid,
         "is_initiator": creator_id == uid,
-        "publish_model": bool(collab.get('publish_model')),
-        "published_model_id": state.get('published_model_id'),
-        "has_weights": bool(state.get('global_model')),
+        "model_visibility": _model_visibility(model_entry) if model_entry
+                            else (collab.get('model_visibility') or MODEL_VISIBILITY_PRIVATE),
+        "allow_inference_requests": bool((model_entry or collab).get('allow_inference_requests')),
+        "published_model_id": model_id,
+        # Where the trained model actually lives. The server keeps a copy only
+        # until every entitled site has saved its own. `scope` records the
+        # initiator's choice: a private model is kept by the initiator alone,
+        # a public one is copied to every site that trained it.
+        "model_delivered_to_me": uid in delivered,
+        "model_delivery": {
+            "delivered": len(delivered),
+            "targets": len(targets),
+            "scope": state.get('delivery_scope'),
+        } if targets else None,
         "super_populations": FL_SUPER_POPULATIONS,
     }), 200
 
@@ -3990,85 +4182,1119 @@ def fl_get_defaults():
 
 
 # ---------------------------------------------------------------------------
-# Model Repository — published FL global models, viewable/downloadable by any
-# logged-in user. Populated by fl.pipeline.publish_global_model when an
-# opted-in ("publish_model") FL collaboration finishes training.
+# Data Sharing — standalone privacy transform (DP noise + shuffle). Each
+# participant's agent transforms its own data locally; participants can then view
+# status and download one another's privacy-protected copies. No KING / pairwise.
 # ---------------------------------------------------------------------------
+
+_DS_LEFT_STATUSES = {"rejected", "withdrawn", "revoked"}
+
+
+def _ds_member_ids(collab):
+    """Who may VIEW Data Sharing state: the creator + invitees who have NOT opted out
+    (i.e. pending or accepted). Rejected/withdrawn/revoked invitees are excluded — they
+    left the collaboration and must not see its internals."""
+    ids = {str(collab.get('creator_id'))}
+    for iu in (collab.get('invited_users') or []):
+        if iu.get('status') not in _DS_LEFT_STATUSES:
+            ids.add(str(iu.get('user_id')))
+    ids.discard('None')
+    return ids
+
+
+def _ds_accepted_ids(collab):
+    """Actual participants that produce/receive shared data: creator + accepted invitees.
+    This is the boundary for downloading anyone's privacy-transformed dataset."""
+    ids = {str(collab.get('creator_id'))}
+    for iu in (collab.get('invited_users') or []):
+        if iu.get('status') == 'accepted':
+            ids.add(str(iu.get('user_id')))
+    ids.discard('None')
+    return ids
+
+
+def _ds_require_member(collab_uuid):
+    """(collab, uid, error_response). Requires an authenticated participant of a
+    Data Sharing collaboration."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return None, None, error_response
+    collab = db['collaborations'].find_one({"uuid": collab_uuid})
+    if not collab:
+        return None, None, (jsonify({"error": "Collaboration not found"}), 404)
+    if EXPERIMENT_DATA_SHARING not in (collab.get('experiments') or []):
+        return None, None, (jsonify({"error": "Not a Data Sharing collaboration"}), 400)
+    uid = str(current_user.id)
+    if uid not in _ds_member_ids(collab):
+        return None, None, (jsonify({"error": "You are not a participant in this collaboration"}), 403)
+    return collab, uid, None
+
+
+@app.route('/api/datasharing/state/<collab_uuid>', methods=['GET'])
+def data_sharing_state(collab_uuid):
+    collab, uid, error_response = _ds_require_member(collab_uuid)
+    if error_response:
+        return error_response
+
+    creator_id = str(collab.get('creator_id'))
+    invited = collab.get('invited_users', []) or []
+    transformed = collab.get('transformed_data', {}) or {}
+    cfg = _ds_config(collab)
+
+    # Latest privacy_transform job status per user (for a clear failed/Retry state).
+    job_status = {}
+    for j in db.jobs.find({"collaboration_uuid": collab_uuid, "action": "privacy_transform"}).sort("created_at", 1):
+        job_status[str(j.get("user_id"))] = {"status": j.get("status"), "error": (j.get("error") or "")[:300]}
+
+    def _counts(info):
+        """Cheap sample/SNP counts — only for inline (non-overflowed) matrices."""
+        if isinstance(info, dict) and "__ref__" not in info:
+            first = next(iter(info.values()), None)
+            return len(info), (len(first) if isinstance(first, dict) else None)
+        return None, None
+
+    def _entry(u, name, status):
+        done = u in transformed
+        n_samples, n_snps = _counts(transformed.get(u)) if done else (None, None)
+        return {"user_id": u, "name": name, "status": status, "transformed": done,
+                "n_samples": n_samples, "n_snps": n_snps,
+                "job": job_status.get(u, {}).get("status"),
+                "error": job_status.get(u, {}).get("error") or None}
+
+    participants = []
+    creator_user = db.users.find_one({"_id": collab.get('creator_id')}, {"name": 1})
+    participants.append(_entry(creator_id, (creator_user or {}).get("name", "Initiator"), "accepted"))
+    for iu in invited:
+        u = str(iu.get('user_id'))
+        ru = db.users.find_one({"_id": ObjectId(u)}, {"name": 1}) if u else None
+        participants.append(_entry(u, (ru or {}).get("name", "Unknown"), iu.get('status', 'pending')))
+
+    any_pending = any((iu.get('status', 'pending') == 'pending') for iu in invited)
+    accepted_ids = [creator_id] + [str(iu['user_id']) for iu in invited if iu.get('status') == 'accepted']
+    accepted_ids = list(dict.fromkeys(accepted_ids))
+
+    def _pstate(pid):
+        if pid in transformed:
+            return "done"
+        st = job_status.get(pid, {}).get("status")
+        if st == "failed":
+            return "failed"
+        if st in ("pending", "in_progress"):
+            return "running"
+        return "unknown"  # freshly enqueued (no job row seen yet) or not enqueued
+
+    pstates = [_pstate(pid) for pid in accepted_ids]
+    if any_pending:
+        stage = "waiting_for_responses"
+    elif not collab.get('ds_triggered'):
+        stage = "idle"
+    elif accepted_ids and all(s == "done" for s in pstates):
+        stage = "complete"
+    elif "running" in pstates or "unknown" in pstates:
+        stage = "transforming"
+    elif "failed" in pstates:
+        # Nothing left running and at least one participant failed permanently —
+        # surface it so the initiator gets a re-run affordance instead of an
+        # indefinite spinner.
+        stage = "failed"
+    else:
+        stage = "transforming"
+
+    return jsonify({
+        "uuid": collab_uuid,
+        "experiment": EXPERIMENT_DATA_SHARING,
+        "stage": stage,
+        "creator_id": creator_id,
+        "current_user_id": uid,
+        "is_initiator": creator_id == uid,
+        "config": {"epsilon": cfg.get("epsilon", DS_DEFAULT_EPSILON)},
+        "participants": participants,
+        "collab_name": collab.get("name"),
+    }), 200
+
+
+@app.route('/api/datasharing/kickoff/<collab_uuid>', methods=['POST'])
+def data_sharing_kickoff(collab_uuid):
+    """Initiator (re)runs the privacy transform for all participants (use if the
+    auto-trigger missed, or to regenerate after fixing a dataset)."""
+    collab, uid, error_response = _ds_require_member(collab_uuid)
+    if error_response:
+        return error_response
+    if str(collab.get('creator_id')) != uid:
+        return jsonify({"error": "Only the initiator can run the transform"}), 403
+    if any((iu.get('status', 'pending') == 'pending') for iu in (collab.get('invited_users') or [])):
+        return jsonify({"error": "Still waiting for all invitees to respond"}), 409
+    # Clear the idempotency flag AND the prior transformed copies + job map, so
+    # /state reports "transforming" (not a stale "complete") and downloads 409
+    # until fresh results land, instead of serving the previous run's data.
+    db['collaborations'].update_one(
+        {"uuid": collab_uuid},
+        {"$set": {"ds_triggered": False},
+         "$unset": {"transformed_data": "", "ds_job_ids": ""}})
+    _maybe_trigger_auto_data_sharing(collab_uuid)
+    return jsonify({"message": "Privacy transform (re)queued for all participants."}), 202
+
+
+@app.route('/api/datasharing/<collab_uuid>/data/<target_uid>/download', methods=['GET'])
+def data_sharing_download(collab_uuid, target_uid):
+    """Download a participant's privacy-protected (noised) dataset as CSV. Any
+    participant of the collaboration may download any participant's shared copy —
+    that is the point of the experiment. Raw genotypes are never exposed; only the
+    DP-transformed matrix the owner's agent produced."""
+    collab, uid, error_response = _ds_require_member(collab_uuid)
+    if error_response:
+        return error_response
+    # Only accepted participants may download shared data (both the requester and
+    # the owner whose copy is requested) — a pending or opted-out user cannot.
+    accepted = _ds_accepted_ids(collab)
+    if uid not in accepted:
+        return jsonify({"error": "Only accepted participants can download shared data"}), 403
+    target_uid = str(target_uid)
+    if target_uid not in accepted:
+        return jsonify({"error": "That user is not an accepted participant in this collaboration"}), 404
+    info = (collab.get('transformed_data', {}) or {}).get(target_uid)
+    if info is None:
+        return jsonify({"error": "This participant's privacy-transformed data isn't ready yet."}), 409
+    matrix = _resolve_uploaded_matrix(info)
+    if not matrix:
+        return jsonify({"error": "No transformed data available."}), 409
+
+    sample_ids = sorted(matrix.keys())
+    snp_ids = sorted({s for row in matrix.values() if isinstance(row, dict) for s in row.keys()})
+    lines = ["sample_id," + ",".join(snp_ids)]
+    for sid in sample_ids:
+        row = matrix.get(sid) or {}
+        lines.append(str(sid) + "," + ",".join("" if row.get(s) is None else str(row.get(s)) for s in snp_ids))
+    csv_text = "\n".join(lines)
+
+    owner = db.users.find_one({"_id": ObjectId(target_uid)}, {"name": 1}) if target_uid else None
+    return jsonify({
+        "collaboration_uuid": collab_uuid,
+        "owner_id": target_uid,
+        "owner_name": (owner or {}).get("name"),
+        "epsilon": _ds_config(collab).get("epsilon", DS_DEFAULT_EPSILON),
+        "note": "Privacy-transformed (differential-privacy noised) genotypes — safe to share. Not raw data.",
+        "sample_count": len(sample_ids),
+        "snp_count": len(snp_ids),
+        "csv": csv_text,
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Model Repository — a METADATA CATALOG of models.
+#
+# The server never serves model weights to a person. A federated model's weights
+# are delivered to the participating sites' agents and then wiped from here; an
+# externally registered model's weights never touch this server at all. What the
+# repository holds is metadata: what the model is, who owns it, how it performed.
+#
+# visibility:
+#   private — only the owner sees the entry (in "My models")
+#   public  — every logged-in user sees the metadata. Still no download.
+# allow_inference_requests (public only) — the owner offers a black-box
+#   classification service: send samples, the OWNER's agent runs the model on its
+#   own machine and returns predictions. The model itself never moves.
+# ---------------------------------------------------------------------------
+
+MODEL_SOURCE_FEDERATED = "federated"
+MODEL_SOURCE_EXTERNAL = "external"
+
 
 def _model_repo_collection():
     name = fl_pipeline.MODEL_REPO_COLLECTION if FL_AVAILABLE else "model_repository"
     return db[name]
 
 
-def _model_meta(doc, include_history=False):
-    """Public-facing metadata view of a repository entry (never the weights blob)."""
+def _model_visibility(doc):
+    """Effective visibility of a repository entry.
+
+    Entries written before visibility levels existed have no `visibility` field.
+    Those only got created when the initiator ticked the old "publish this model"
+    box — an explicit opt-in to a fully public listing — so they stay public here.
+    Every entry written since carries an explicit visibility.
+    """
+    vis = str((doc or {}).get("visibility") or "").strip().lower()
+    if vis in MODEL_VISIBILITIES:
+        return vis
+    return MODEL_VISIBILITY_PUBLIC
+
+
+def _model_meta(doc, viewer_id=None, include_history=False):
+    """Metadata view of a repository entry. There is no weights field to omit —
+    the repository never stores one."""
+    owner_id = str(doc.get("owner_id") or doc.get("created_by_id") or "")
+    visibility = _model_visibility(doc)
     meta = {
         "model_id": doc.get("model_id"),
+        "source": doc.get("source") or MODEL_SOURCE_FEDERATED,
         "name": doc.get("name"),
+        "description": doc.get("description"),
         "collaboration_name": doc.get("collaboration_name"),
-        "created_by_name": doc.get("created_by_name"),
+        "dataset": doc.get("dataset"),
+        "owner_id": owner_id,
+        "owner_name": doc.get("owner_name") or doc.get("created_by_name") or "Unknown",
         "published_at": doc.get("published_at"),
+        "updated_at": doc.get("updated_at"),
         "task": doc.get("task"),
         "framework": doc.get("framework"),
         "architecture": doc.get("architecture"),
         "num_classes": doc.get("num_classes"),
         "class_names": doc.get("class_names") or [],
-        "epsilon": doc.get("epsilon"),
         "num_rounds": doc.get("num_rounds"),
         "local_epochs": doc.get("local_epochs"),
         "num_participants": doc.get("num_participants"),
         "metrics": doc.get("metrics") or {},
-        "has_weights": bool(doc.get("has_weights")),
+        "visibility": visibility,
+        "allow_inference_requests": bool(doc.get("allow_inference_requests")) and visibility == MODEL_VISIBILITY_PUBLIC,
+        "is_owner": bool(viewer_id) and owner_id == str(viewer_id),
     }
     if include_history:
         meta["training_history"] = doc.get("training_history") or []
-        meta["weights_format"] = doc.get("weights_format")
-        meta["load_instructions"] = doc.get("load_instructions")
     return meta
+
+
+def _require_model_owner(model_id):
+    """(doc, uid, error_response) for an owner-only model operation."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return None, None, error_response
+    uid = str(current_user.id)
+    doc = _model_repo_collection().find_one({"model_id": model_id})
+    if not doc:
+        return None, None, (jsonify({"error": "Model not found"}), 404)
+    owner_id = str(doc.get("owner_id") or doc.get("created_by_id") or "")
+    if owner_id != uid:
+        return None, None, (jsonify({"error": "Only the model owner can do that"}), 403)
+    return doc, uid, None
 
 
 @app.route('/api/models', methods=['GET'])
 def list_models():
-    """List every published global model (metadata only). Any logged-in user."""
+    """The catalog. Every user sees public entries plus their own private ones.
+
+    `?mine=true` narrows it to the caller's own models.
+    """
     current_user, error_response = get_current_user()
     if error_response:
         return error_response
-    docs = _model_repo_collection().find({}, {"weights_b64": 0}).sort("published_at", -1)
-    models = [_model_meta(d) for d in docs]
+    uid = str(current_user.id)
+    mine_only = str(request.args.get('mine', '')).lower() in ('1', 'true', 'yes')
+
+    # Legacy entries predate the `visibility` field; they only existed at all
+    # because the owner opted into publishing, so they count as public. Owner
+    # id likewise moved from `created_by_id` to `owner_id`.
+    mine = {"$or": [{"owner_id": uid}, {"created_by_id": uid}]}
+    if mine_only:
+        query = mine
+    else:
+        query = {"$or": [
+            {"visibility": MODEL_VISIBILITY_PUBLIC},
+            {"visibility": {"$exists": False}},
+            {"owner_id": uid},
+            {"created_by_id": uid},
+        ]}
+    docs = _model_repo_collection().find(query, {"weights_b64": 0}).sort("published_at", -1)
+    models = [_model_meta(d, viewer_id=uid) for d in docs]
     return jsonify({"models": models, "count": len(models)}), 200
 
 
 @app.route('/api/models/<model_id>', methods=['GET'])
 def get_model(model_id):
-    """One model's full metadata (still no weights blob). Any logged-in user."""
+    """One entry's full metadata. Private entries are visible to their owner only."""
     current_user, error_response = get_current_user()
     if error_response:
         return error_response
+    uid = str(current_user.id)
     doc = _model_repo_collection().find_one({"model_id": model_id}, {"weights_b64": 0})
     if not doc:
         return jsonify({"error": "Model not found"}), 404
-    return jsonify(_model_meta(doc, include_history=True)), 200
+    owner_id = str(doc.get("owner_id") or doc.get("created_by_id") or "")
+    if _model_visibility(doc) != MODEL_VISIBILITY_PUBLIC and owner_id != uid:
+        # Don't confirm that a private model exists to someone who can't see it.
+        return jsonify({"error": "Model not found"}), 404
+    return jsonify(_model_meta(doc, viewer_id=uid, include_history=True)), 200
 
 
-@app.route('/api/models/<model_id>/download', methods=['GET'])
-def download_model(model_id):
-    """Return the full, self-describing model artifact (weights + metadata) as a
-    JSON payload. Any logged-in user may download."""
+@app.route('/api/models', methods=['POST'])
+def register_model():
+    """Register a model you already own — METADATA ONLY.
+
+    Researchers bring models that were never trained in this sandbox and want them
+    listed. No weights are accepted here, by design: the model file stays on the
+    owner's machine. If the owner offers a black-box service, their Site Agent
+    runs the model locally against samples the requester sends.
+    """
     current_user, error_response = get_current_user()
     if error_response:
         return error_response
-    doc = _model_repo_collection().find_one({"model_id": model_id})
-    if not doc:
-        return jsonify({"error": "Model not found"}), 404
-    if not doc.get("weights_b64"):
+    uid = str(current_user.id)
+    data = request.get_json(silent=True) or {}
+
+    name = str(data.get('name') or '').strip()
+    if not name:
+        return jsonify({"error": "A model name is required"}), 400
+
+    # Hard guard: never let a weights blob in, whatever the client sends.
+    for banned in ('weights_b64', 'weights', 'state_dict', 'model_file'):
+        if data.get(banned):
+            return jsonify({
+                "error": "The Model Repository stores metadata only — model weights "
+                         "are never uploaded. Keep your model file on your own machine."
+            }), 400
+
+    visibility = str(data.get('visibility') or MODEL_VISIBILITY_PRIVATE).strip().lower()
+    if visibility not in MODEL_VISIBILITIES:
+        return jsonify({"error": f"visibility must be one of {MODEL_VISIBILITIES}"}), 400
+    allow_inference = bool(data.get('allow_inference_requests')) and visibility == MODEL_VISIBILITY_PUBLIC
+
+    def _int_or_none(key):
+        try:
+            return int(data.get(key)) if data.get(key) not in (None, '') else None
+        except (TypeError, ValueError):
+            return None
+
+    metrics = {}
+    for key in ('accuracy', 'f1_macro', 'loss'):
+        raw = (data.get('metrics') or {}).get(key, data.get(key))
+        if raw in (None, ''):
+            continue
+        try:
+            metrics[key] = float(raw)
+        except (TypeError, ValueError):
+            pass
+
+    class_names = data.get('class_names') or []
+    if isinstance(class_names, str):
+        class_names = [c.strip() for c in class_names.split(',') if c.strip()]
+
+    model_id = "mdl_ext_" + uuid.uuid4().hex[:16]
+    now = datetime.utcnow().isoformat() + "Z"
+    entry = {
+        "model_id": model_id,
+        "source": MODEL_SOURCE_EXTERNAL,
+        "name": name,
+        "description": str(data.get('description') or '').strip() or None,
+        "dataset": str(data.get('dataset') or '').strip() or None,
+        "owner_id": uid,
+        "owner_name": (current_user.user_json or {}).get("name") or "Unknown",
+        "published_at": now,
+        "updated_at": now,
+        "task": str(data.get('task') or '').strip() or None,
+        "framework": str(data.get('framework') or '').strip() or None,
+        "architecture": str(data.get('architecture') or '').strip() or None,
+        "num_classes": _int_or_none('num_classes'),
+        "class_names": [str(c) for c in class_names],
+        "num_rounds": _int_or_none('num_rounds'),
+        "num_participants": _int_or_none('num_participants'),
+        "metrics": metrics,
+        "visibility": visibility,
+        "allow_inference_requests": allow_inference,
+    }
+    _model_repo_collection().insert_one(dict(entry))
+    logging.info("Registered external model %s for user %s (visibility=%s)", model_id, uid, visibility)
+    return jsonify(_model_meta(entry, viewer_id=uid)), 201
+
+
+@app.route('/api/models/<model_id>', methods=['PATCH', 'PUT'])
+def update_model(model_id):
+    """Owner edits their entry. Visibility is editable at any time — a model that
+    started private can be made public later (and vice versa)."""
+    doc, uid, error_response = _require_model_owner(model_id)
+    if error_response:
+        return error_response
+    data = request.get_json(silent=True) or {}
+
+    update = {}
+    if 'visibility' in data:
+        visibility = str(data.get('visibility') or '').strip().lower()
+        if visibility not in MODEL_VISIBILITIES:
+            return jsonify({"error": f"visibility must be one of {MODEL_VISIBILITIES}"}), 400
+        update['visibility'] = visibility
+
+    # Only free-text/descriptive fields are editable — never the measured results
+    # of a federated run, which would let an owner misreport what the sandbox
+    # actually computed.
+    editable = ['name', 'description', 'task', 'framework', 'architecture', 'dataset']
+    if (doc.get('source') or MODEL_SOURCE_FEDERATED) == MODEL_SOURCE_EXTERNAL:
+        editable += ['num_classes', 'num_rounds', 'num_participants']
+    for key in editable:
+        if key in data:
+            value = data[key]
+            if key in ('num_classes', 'num_rounds', 'num_participants'):
+                try:
+                    update[key] = int(value) if value not in (None, '') else None
+                except (TypeError, ValueError):
+                    return jsonify({"error": f"{key} must be a whole number"}), 400
+            else:
+                update[key] = str(value).strip() or None
+
+    if 'allow_inference_requests' in data:
+        update['allow_inference_requests'] = bool(data['allow_inference_requests'])
+
+    # A model nobody else can see cannot advertise a service.
+    effective_visibility = update.get('visibility', _model_visibility(doc))
+    if effective_visibility != MODEL_VISIBILITY_PUBLIC:
+        update['allow_inference_requests'] = False
+
+    if not update:
+        return jsonify({"error": "Nothing to update"}), 400
+    update['updated_at'] = datetime.utcnow().isoformat() + "Z"
+    _model_repo_collection().update_one({"model_id": model_id}, {"$set": update})
+    fresh = _model_repo_collection().find_one({"model_id": model_id}, {"weights_b64": 0})
+    return jsonify(_model_meta(fresh, viewer_id=uid, include_history=True)), 200
+
+
+@app.route('/api/models/<model_id>', methods=['DELETE'])
+def delete_model(model_id):
+    """Remove an entry from the catalog. Only externally registered models can be
+    deleted — a federated model's entry is the record of a collaboration that
+    actually happened, and its participants would lose that record."""
+    doc, uid, error_response = _require_model_owner(model_id)
+    if error_response:
+        return error_response
+    if (doc.get('source') or MODEL_SOURCE_FEDERATED) != MODEL_SOURCE_EXTERNAL:
         return jsonify({
-            "error": "Model weights are not available for download.",
-            "hint": "This model was produced by the in-process simulation backend, "
-                    "which does not export downloadable weights.",
-        }), 409
-    artifact = _model_meta(doc, include_history=True)
-    artifact["weights_b64"] = doc.get("weights_b64")
-    return jsonify(artifact), 200
+            "error": "A federated model's entry can't be deleted — it records a completed "
+                     "collaboration. Set it to private instead if you don't want it listed."
+        }), 400
+    _model_repo_collection().delete_one({"model_id": model_id})
+    db['inference_requests'].update_many(
+        {"model_id": model_id, "status": {"$in": ["pending", "collecting", "classifying"]}},
+        {"$set": {"status": "denied", "error": "The model was removed from the repository.",
+                  "responded_at": datetime.utcnow()}})
+    return jsonify({"message": "Model removed from the repository."}), 200
+
+
+# ---------------------------------------------------------------------------
+# Data Sharing — advertise a dataset, request a copy, approve, deliver.
+#
+# Replaces the old "Data Sharing" collaboration experiment. The shape the
+# professor asked for: everybody advertises which of their datasets are
+# shareable and at what epsilon; anyone who finds an interesting dataset through
+# Find Collaborators sends the owner a request; the owner approves, and only then
+# does their OWN agent produce a differentially-private copy and hand it over.
+# Strictly one-directional — the requester's data is not shared back.
+# ---------------------------------------------------------------------------
+
+DATA_REQUEST_ACTIVE = ("pending", "transforming")
+
+
+def _dataset_share_settings(ds):
+    """Sharing advertisement for a dataset document."""
+    return {
+        "shareable": bool(ds.get("shareable")),
+        "share_epsilon": float(ds.get("share_epsilon", DS_DEFAULT_EPSILON)),
+        "share_mechanism": ds.get("share_mechanism") or "Randomized response (ε-DP) + row shuffle",
+        "description": ds.get("description"),
+    }
+
+
+def _owned_dataset(dataset_id, uid):
+    """(dataset, error_response) — a raw dataset the caller owns."""
+    try:
+        oid = ObjectId(dataset_id)
+    except Exception:
+        return None, (jsonify({"error": "Invalid dataset id"}), 400)
+    ds = db['datasets'].find_one({"_id": oid})
+    if not ds:
+        return None, (jsonify({"error": "Dataset not found"}), 404)
+    if str(ds.get("user_id")) != str(uid):
+        return None, (jsonify({"error": "That dataset does not belong to you"}), 403)
+    if ds.get("is_qc_data") or ds.get("collaboration_specific"):
+        return None, (jsonify({"error": "Only your own raw datasets can be shared"}), 400)
+    return ds, None
+
+
+@app.route('/api/my-datasets/<dataset_id>', methods=['PATCH'])
+def update_my_dataset(dataset_id):
+    """Edit a dataset's descriptive metadata and its sharing advertisement.
+
+    This is where a researcher says "this dataset is available to share, at this
+    epsilon" — the setting other users see when they find it.
+    """
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    ds, error_response = _owned_dataset(dataset_id, uid)
+    if error_response:
+        return error_response
+
+    data = request.get_json(silent=True) or {}
+    update = {}
+    if 'description' in data:
+        update['description'] = str(data.get('description') or '').strip() or None
+    if 'shareable' in data:
+        update['shareable'] = bool(data.get('shareable'))
+    if 'share_epsilon' in data:
+        try:
+            eps = float(data.get('share_epsilon'))
+        except (TypeError, ValueError):
+            return jsonify({"error": "share_epsilon must be a number"}), 400
+        if not (0.1 <= eps <= 20.0):
+            return jsonify({
+                "error": "share_epsilon must be between 0.1 (very strong privacy) and 20 (very weak)."
+            }), 400
+        update['share_epsilon'] = eps
+    if not update:
+        return jsonify({"error": "Nothing to update"}), 400
+
+    db['datasets'].update_one({"_id": ds["_id"]}, {"$set": update})
+    fresh = db['datasets'].find_one({"_id": ds["_id"]})
+    return jsonify({
+        "id": str(fresh["_id"]),
+        "phenotype": fresh.get("phenotype"),
+        **_dataset_share_settings(fresh),
+    }), 200
+
+
+def _user_name(user_id):
+    """Display name for a user id, tolerant of ids that no longer resolve."""
+    if not user_id:
+        return "Unknown"
+    try:
+        user = db.users.find_one({"_id": ObjectId(str(user_id))}, {"name": 1})
+    except Exception:
+        return "Unknown"
+    return (user or {}).get("name") or "Unknown"
+
+
+def _request_doc(req, viewer_id):
+    """Client-facing view of a data request."""
+    return {
+        "request_id": req.get("request_id"),
+        "dataset_id": str(req.get("dataset_id")),
+        "phenotype": req.get("phenotype"),
+        "owner_id": str(req.get("owner_id")),
+        "owner_name": _user_name(req.get("owner_id")),
+        "requester_id": str(req.get("requester_id")),
+        "requester_name": _user_name(req.get("requester_id")),
+        "purpose": req.get("purpose"),
+        "status": req.get("status"),
+        "epsilon": req.get("epsilon"),
+        "mechanism": req.get("mechanism"),
+        "error": req.get("error"),
+        "created_at": _iso(req.get("created_at")),
+        "responded_at": _iso(req.get("responded_at")),
+        "completed_at": _iso(req.get("completed_at")),
+        "is_owner": str(req.get("owner_id")) == str(viewer_id),
+        "is_requester": str(req.get("requester_id")) == str(viewer_id),
+        "n_samples": req.get("n_samples"),
+        "n_snps": req.get("n_snps"),
+    }
+
+
+def _iso(value):
+    return value.isoformat() if hasattr(value, 'isoformat') else value
+
+
+def _reconcile_data_request(req):
+    """Advance a request whose agent job has finished.
+
+    The transform runs on the owner's agent; there is no background worker, so
+    each read of the request reconciles it against its job. Transitions are
+    guarded by status so concurrent readers can't double-apply them.
+    """
+    if req.get("status") != "transforming" or not req.get("job_id"):
+        return req
+    job = db.jobs.find_one({"job_id": req["job_id"]})
+    if not job:
+        return req
+    if job.get("status") == "failed":
+        db['data_requests'].update_one(
+            {"request_id": req["request_id"], "status": "transforming"},
+            {"$set": {"status": "failed", "completed_at": datetime.utcnow(),
+                      "error": (job.get("error") or "The owner's agent could not produce the shared copy.")[:500]}})
+        return db['data_requests'].find_one({"request_id": req["request_id"]})
+    if job.get("status") != "complete":
+        return req
+
+    result = job.get("result") or {}
+    payload = result.get("transformed_data")
+    if payload is None:
+        db['data_requests'].update_one(
+            {"request_id": req["request_id"], "status": "transforming"},
+            {"$set": {"status": "failed", "completed_at": datetime.utcnow(),
+                      "error": "The agent returned no transformed data."}})
+        return db['data_requests'].find_one({"request_id": req["request_id"]})
+
+    matrix = _resolve_uploaded_matrix(payload)
+    n_samples = len(matrix) if isinstance(matrix, dict) else None
+    first = next(iter(matrix.values()), None) if isinstance(matrix, dict) else None
+    n_snps = len(first) if isinstance(first, dict) else None
+    db['data_requests'].update_one(
+        {"request_id": req["request_id"], "status": "transforming"},
+        {"$set": {"status": "ready", "completed_at": datetime.utcnow(),
+                  "data": payload, "n_samples": n_samples, "n_snps": n_snps}})
+    return db['data_requests'].find_one({"request_id": req["request_id"]})
+
+
+@app.route('/api/data-requests', methods=['GET'])
+def list_data_requests():
+    """Requests the caller sent, and requests addressed to them."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    incoming, outgoing = [], []
+    for req in db['data_requests'].find({"$or": [{"owner_id": uid}, {"requester_id": uid}]}).sort("created_at", -1):
+        req = _reconcile_data_request(req)
+        view = _request_doc(req, uid)
+        (incoming if view["is_owner"] else outgoing).append(view)
+    return jsonify({"incoming": incoming, "outgoing": outgoing}), 200
+
+
+@app.route('/api/data-requests', methods=['POST'])
+def create_data_request():
+    """Ask a dataset's owner for a differentially-private copy.
+
+    The epsilon is whatever the OWNER advertised — the requester does not get to
+    choose how much privacy the owner's data is released with.
+    """
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    data = request.get_json(silent=True) or {}
+    dataset_id = data.get('dataset_id')
+    if not dataset_id:
+        return jsonify({"error": "dataset_id is required"}), 400
+    try:
+        ds = db['datasets'].find_one({"_id": ObjectId(dataset_id)})
+    except Exception:
+        return jsonify({"error": "Invalid dataset id"}), 400
+    if not ds:
+        return jsonify({"error": "Dataset not found"}), 404
+    owner_id = str(ds.get("user_id"))
+    if owner_id == uid:
+        return jsonify({"error": "That dataset is already yours"}), 400
+    if not ds.get("shareable"):
+        return jsonify({"error": "The owner has not made this dataset available for sharing"}), 403
+
+    existing = db['data_requests'].find_one({
+        "dataset_id": str(dataset_id), "requester_id": uid,
+        "status": {"$in": list(DATA_REQUEST_ACTIVE)}})
+    if existing:
+        return jsonify({"error": "You already have an open request for this dataset",
+                        "request_id": existing["request_id"]}), 409
+
+    req = {
+        "request_id": "dreq_" + uuid.uuid4().hex[:16],
+        "dataset_id": str(dataset_id),
+        "phenotype": ds.get("phenotype"),
+        "owner_id": owner_id,
+        "requester_id": uid,
+        "purpose": str(data.get('purpose') or '').strip() or None,
+        "status": "pending",
+        "epsilon": float(ds.get("share_epsilon", DS_DEFAULT_EPSILON)),
+        "mechanism": ds.get("share_mechanism") or "Randomized response (ε-DP) + row shuffle",
+        "created_at": datetime.utcnow(),
+    }
+    db['data_requests'].insert_one(dict(req))
+    try:
+        owner = db.users.find_one({"_id": ObjectId(owner_id)}, {"email": 1})
+        requester_name = (current_user.user_json or {}).get("name")
+        if owner and owner.get("email"):
+            email_utils.notify_data_request(owner["email"], requester_name, ds.get("phenotype"))
+    except Exception as e:
+        logging.warning("Data request email skipped for %s: %s", req["request_id"], e)
+    return jsonify(_request_doc(req, uid)), 201
+
+
+@app.route('/api/data-requests/<request_id>/respond', methods=['POST'])
+def respond_to_data_request(request_id):
+    """Owner approves or denies. Approving enqueues the privacy transform on the
+    OWNER's agent — the raw data never leaves their machine; only the noised copy
+    comes back, and only the requester can read it."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    decision = str((request.get_json(silent=True) or {}).get('decision') or '').strip().lower()
+    if decision not in ('approve', 'deny'):
+        return jsonify({"error": "decision must be 'approve' or 'deny'"}), 400
+
+    req = db['data_requests'].find_one({"request_id": request_id})
+    if not req:
+        return jsonify({"error": "Request not found"}), 404
+    if str(req.get("owner_id")) != uid:
+        return jsonify({"error": "Only the dataset owner can respond to this request"}), 403
+    if req.get("status") != "pending":
+        return jsonify({"error": f"This request is already {req.get('status')}"}), 409
+
+    if decision == 'deny':
+        claimed = db['data_requests'].update_one(
+            {"request_id": request_id, "status": "pending"},
+            {"$set": {"status": "denied", "responded_at": datetime.utcnow()}})
+        if claimed.modified_count != 1:
+            return jsonify({"error": "This request was already answered"}), 409
+        return jsonify({"message": "Request denied."}), 200
+
+    # Claim the approval atomically so a double-click can't enqueue two transforms.
+    claimed = db['data_requests'].update_one(
+        {"request_id": request_id, "status": "pending"},
+        {"$set": {"status": "transforming", "responded_at": datetime.utcnow()}})
+    if claimed.modified_count != 1:
+        return jsonify({"error": "This request was already answered"}), 409
+
+    job_id = enqueue_job(
+        collaboration_uuid=None,
+        user_id=uid,
+        action="privacy_transform",
+        params={
+            "phenotype": req.get("phenotype"),
+            "dataset_id": req.get("dataset_id"),
+            "epsilon": float(req.get("epsilon", DS_DEFAULT_EPSILON)),
+            "seed": 1234,
+            "shuffle": True,
+            "num_synthetic_samples": 0,
+            "data_request_id": request_id,
+        })
+    db['data_requests'].update_one({"request_id": request_id}, {"$set": {"job_id": job_id}})
+    logging.info("Data request %s approved; privacy transform job %s queued for owner %s",
+                 request_id, job_id, uid)
+    return jsonify({"message": "Approved. Your Site Agent will prepare the shared copy.",
+                    "job_id": job_id}), 202
+
+
+@app.route('/api/data-requests/<request_id>/download', methods=['GET'])
+def download_data_request(request_id):
+    """The requester downloads the approved, privacy-protected copy as CSV.
+
+    One-directional by construction: only the requester on this request can read
+    it, and it only ever contains the owner's DP-noised matrix, never raw data.
+    """
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    req = db['data_requests'].find_one({"request_id": request_id})
+    if not req:
+        return jsonify({"error": "Request not found"}), 404
+    if str(req.get("requester_id")) != uid:
+        return jsonify({"error": "Only the requester can download this data"}), 403
+    req = _reconcile_data_request(req)
+    if req.get("status") != "ready":
+        return jsonify({"error": f"This data isn't ready yet (status: {req.get('status')})"}), 409
+
+    matrix = _resolve_uploaded_matrix(req.get("data"))
+    if not matrix:
+        return jsonify({"error": "No shared data available."}), 409
+    sample_ids = sorted(matrix.keys())
+    snp_ids = sorted({s for row in matrix.values() if isinstance(row, dict) for s in row.keys()})
+    lines = ["sample_id," + ",".join(snp_ids)]
+    for sid in sample_ids:
+        row = matrix.get(sid) or {}
+        lines.append(str(sid) + "," + ",".join("" if row.get(s) is None else str(row.get(s)) for s in snp_ids))
+
+    owner = db.users.find_one({"_id": ObjectId(req["owner_id"])}, {"name": 1})
+    return jsonify({
+        "request_id": request_id,
+        "phenotype": req.get("phenotype"),
+        "owner_name": (owner or {}).get("name"),
+        "epsilon": req.get("epsilon"),
+        "mechanism": req.get("mechanism"),
+        "note": "Privacy-transformed (differentially-private) genotypes shared by the owner. Not raw data.",
+        "sample_count": len(sample_ids),
+        "snp_count": len(snp_ids),
+        "csv": "\n".join(lines),
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Black-box inference — machine learning as a service, model stays local.
+#
+# A model owner can offer classification without ever handing over the model.
+# The requester's agent exports the samples, the server relays them, the OWNER's
+# agent loads its own local copy of the model, classifies, and returns only the
+# predictions. The samples are deleted from this server as soon as they are.
+# ---------------------------------------------------------------------------
+
+INFERENCE_ACTIVE = ("pending", "collecting", "classifying")
+
+
+def _inference_view(req, viewer_id):
+    model = _model_repo_collection().find_one({"model_id": req.get("model_id")}, {"name": 1, "dataset": 1})
+    return {
+        "request_id": req.get("request_id"),
+        "model_id": req.get("model_id"),
+        "model_name": (model or {}).get("name"),
+        "owner_id": str(req.get("owner_id")),
+        "owner_name": _user_name(req.get("owner_id")),
+        "requester_id": str(req.get("requester_id")),
+        "requester_name": _user_name(req.get("requester_id")),
+        "phenotype": req.get("phenotype"),
+        "note": req.get("note"),
+        "status": req.get("status"),
+        "error": req.get("error"),
+        "n_samples": req.get("n_samples"),
+        "max_samples": req.get("max_samples"),
+        "created_at": _iso(req.get("created_at")),
+        "responded_at": _iso(req.get("responded_at")),
+        "completed_at": _iso(req.get("completed_at")),
+        "is_owner": str(req.get("owner_id")) == str(viewer_id),
+        "is_requester": str(req.get("requester_id")) == str(viewer_id),
+        "has_predictions": bool(req.get("predictions")),
+    }
+
+
+def _discard_inference_samples(req):
+    """Drop the relayed samples once they are no longer needed.
+
+    The server is a relay for these, not a store — so every copy has to go: the
+    offloaded qc_results document, the pointer on the request, AND the copy the
+    agent's own job result is holding (small payloads are stored inline on the
+    job document, so unsetting only the request would leave the samples sitting
+    in the job queue indefinitely).
+    """
+    if not req:
+        return
+    samples = req.get("samples")
+    if isinstance(samples, dict) and "__ref__" in samples:
+        db['qc_results'].delete_one({"ref": samples["__ref__"]})
+    db['inference_requests'].update_one(
+        {"request_id": req["request_id"]}, {"$unset": {"samples": ""}})
+    db.jobs.update_many(
+        {"action": "export_samples", "params.request_id": req["request_id"]},
+        {"$unset": {"result.samples": ""}})
+
+
+def _reconcile_inference_request(req):
+    """Drive the two-stage pipeline: collect samples from the requester's agent,
+    then classify on the owner's agent. Each transition is status-guarded."""
+    status = req.get("status")
+    if status not in ("collecting", "classifying") or not req.get("job_id"):
+        return req
+    job = db.jobs.find_one({"job_id": req["job_id"]})
+    if not job:
+        return req
+
+    if job.get("status") == "failed":
+        db['inference_requests'].update_one(
+            {"request_id": req["request_id"], "status": status},
+            {"$set": {"status": "failed", "completed_at": datetime.utcnow(),
+                      "error": (job.get("error") or "The agent could not complete this step.")[:500]}})
+        fresh = db['inference_requests'].find_one({"request_id": req["request_id"]})
+        _discard_inference_samples(fresh)
+        return db['inference_requests'].find_one({"request_id": req["request_id"]})
+    if job.get("status") != "complete":
+        return req
+
+    result = job.get("result") or {}
+
+    if status == "collecting":
+        samples = result.get("samples")
+        if samples is None:
+            db['inference_requests'].update_one(
+                {"request_id": req["request_id"], "status": "collecting"},
+                {"$set": {"status": "failed", "completed_at": datetime.utcnow(),
+                          "error": "Your agent returned no samples to classify."}})
+            return db['inference_requests'].find_one({"request_id": req["request_id"]})
+        resolved = _resolve_uploaded_matrix(samples)
+        # Hand off to the model owner's agent. Claim the transition first so two
+        # concurrent readers can't both enqueue a classification job. job_id is
+        # cleared as part of the claim: until the classify job exists, a reader
+        # that arrives mid-handoff must not reconcile "classifying" against the
+        # finished EXPORT job and wrongly conclude there are no predictions.
+        claimed = db['inference_requests'].update_one(
+            {"request_id": req["request_id"], "status": "collecting"},
+            {"$set": {"status": "classifying", "samples": samples,
+                      "n_samples": len(resolved) if isinstance(resolved, dict) else None},
+             "$unset": {"job_id": ""}})
+        if claimed.modified_count != 1:
+            return db['inference_requests'].find_one({"request_id": req["request_id"]})
+        job_id = enqueue_job(
+            collaboration_uuid=None,
+            user_id=str(req["owner_id"]),
+            action="classify_samples",
+            params={
+                "model_id": req.get("model_id"),
+                "request_id": req["request_id"],
+                "samples_path": f"/api/agent/inference/{req['request_id']}/samples",
+            })
+        db['inference_requests'].update_one(
+            {"request_id": req["request_id"]}, {"$set": {"job_id": job_id}})
+        return db['inference_requests'].find_one({"request_id": req["request_id"]})
+
+    # status == "classifying"
+    predictions = result.get("predictions")
+    if predictions is None:
+        db['inference_requests'].update_one(
+            {"request_id": req["request_id"], "status": "classifying"},
+            {"$set": {"status": "failed", "completed_at": datetime.utcnow(),
+                      "error": "The model owner's agent returned no predictions."}})
+    else:
+        db['inference_requests'].update_one(
+            {"request_id": req["request_id"], "status": "classifying"},
+            {"$set": {"status": "complete", "completed_at": datetime.utcnow(),
+                      "predictions": _resolve_uploaded_matrix(predictions)}})
+    fresh = db['inference_requests'].find_one({"request_id": req["request_id"]})
+    _discard_inference_samples(fresh)
+    return db['inference_requests'].find_one({"request_id": req["request_id"]})
+
+
+@app.route('/api/inference-requests', methods=['GET'])
+def list_inference_requests():
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    incoming, outgoing = [], []
+    for req in db['inference_requests'].find({"$or": [{"owner_id": uid}, {"requester_id": uid}]}).sort("created_at", -1):
+        req = _reconcile_inference_request(req)
+        view = _inference_view(req, uid)
+        (incoming if view["is_owner"] else outgoing).append(view)
+    return jsonify({"incoming": incoming, "outgoing": outgoing}), 200
+
+
+@app.route('/api/inference-requests', methods=['POST'])
+def create_inference_request():
+    """Ask a model owner to classify samples from one of your datasets."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    data = request.get_json(silent=True) or {}
+    model_id = data.get('model_id')
+    dataset_id = data.get('dataset_id')
+    if not model_id or not dataset_id:
+        return jsonify({"error": "model_id and dataset_id are required"}), 400
+
+    model = _model_repo_collection().find_one({"model_id": model_id})
+    if not model or _model_visibility(model) != MODEL_VISIBILITY_PUBLIC:
+        return jsonify({"error": "Model not found"}), 404
+    if not model.get("allow_inference_requests"):
+        return jsonify({"error": "This model does not offer a classification service"}), 403
+    owner_id = str(model.get("owner_id") or model.get("created_by_id") or "")
+    if not owner_id:
+        return jsonify({"error": "This model has no owner on record and cannot serve requests"}), 409
+    if owner_id == uid:
+        return jsonify({"error": "That model is already yours — run it locally instead"}), 400
+
+    ds, error_response = _owned_dataset(dataset_id, uid)
+    if error_response:
+        return error_response
+
+    try:
+        max_samples = int(data.get('max_samples') or INFERENCE_MAX_SAMPLES)
+    except (TypeError, ValueError):
+        return jsonify({"error": "max_samples must be a whole number"}), 400
+    max_samples = max(1, min(max_samples, INFERENCE_MAX_SAMPLES))
+
+    existing = db['inference_requests'].find_one({
+        "model_id": model_id, "requester_id": uid, "status": {"$in": list(INFERENCE_ACTIVE)}})
+    if existing:
+        return jsonify({"error": "You already have an open request for this model",
+                        "request_id": existing["request_id"]}), 409
+
+    req = {
+        "request_id": "ireq_" + uuid.uuid4().hex[:16],
+        "model_id": model_id,
+        "owner_id": owner_id,
+        "requester_id": uid,
+        "dataset_id": str(dataset_id),
+        "phenotype": ds.get("phenotype"),
+        "note": str(data.get('note') or '').strip() or None,
+        "max_samples": max_samples,
+        "status": "pending",
+        "created_at": datetime.utcnow(),
+    }
+    db['inference_requests'].insert_one(dict(req))
+    try:
+        owner = db.users.find_one({"_id": ObjectId(owner_id)}, {"email": 1})
+        if owner and owner.get("email"):
+            email_utils.notify_inference_request(
+                owner["email"], (current_user.user_json or {}).get("name"), model.get("name"))
+    except Exception as e:
+        logging.warning("Inference request email skipped for %s: %s", req["request_id"], e)
+    return jsonify(_inference_view(req, uid)), 201
+
+
+@app.route('/api/inference-requests/<request_id>/respond', methods=['POST'])
+def respond_to_inference_request(request_id):
+    """Model owner approves or denies a classification request.
+
+    Approving starts the relay: the REQUESTER's agent exports the samples, then
+    the OWNER's agent classifies them with its local copy of the model.
+    """
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    decision = str((request.get_json(silent=True) or {}).get('decision') or '').strip().lower()
+    if decision not in ('approve', 'deny'):
+        return jsonify({"error": "decision must be 'approve' or 'deny'"}), 400
+
+    req = db['inference_requests'].find_one({"request_id": request_id})
+    if not req:
+        return jsonify({"error": "Request not found"}), 404
+    if str(req.get("owner_id")) != uid:
+        return jsonify({"error": "Only the model owner can respond to this request"}), 403
+    if req.get("status") != "pending":
+        return jsonify({"error": f"This request is already {req.get('status')}"}), 409
+
+    if decision == 'deny':
+        claimed = db['inference_requests'].update_one(
+            {"request_id": request_id, "status": "pending"},
+            {"$set": {"status": "denied", "responded_at": datetime.utcnow()}})
+        if claimed.modified_count != 1:
+            return jsonify({"error": "This request was already answered"}), 409
+        return jsonify({"message": "Request denied."}), 200
+
+    claimed = db['inference_requests'].update_one(
+        {"request_id": request_id, "status": "pending"},
+        {"$set": {"status": "collecting", "responded_at": datetime.utcnow()}})
+    if claimed.modified_count != 1:
+        return jsonify({"error": "This request was already answered"}), 409
+
+    job_id = enqueue_job(
+        collaboration_uuid=None,
+        user_id=str(req["requester_id"]),
+        action="export_samples",
+        params={
+            "phenotype": req.get("phenotype"),
+            "dataset_id": req.get("dataset_id"),
+            "max_samples": int(req.get("max_samples", INFERENCE_MAX_SAMPLES)),
+            "request_id": request_id,
+        })
+    db['inference_requests'].update_one({"request_id": request_id}, {"$set": {"job_id": job_id}})
+    return jsonify({
+        "message": "Approved. The requester's agent will send the samples, then your "
+                   "agent will classify them locally.",
+        "job_id": job_id,
+    }), 202
+
+
+@app.route('/api/inference-requests/<request_id>/results', methods=['GET'])
+def get_inference_results(request_id):
+    """Predictions for a completed request. Both parties may read them."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    req = db['inference_requests'].find_one({"request_id": request_id})
+    if not req:
+        return jsonify({"error": "Request not found"}), 404
+    if uid not in (str(req.get("owner_id")), str(req.get("requester_id"))):
+        return jsonify({"error": "You are not a party to this request"}), 403
+    req = _reconcile_inference_request(req)
+    if req.get("status") != "complete":
+        return jsonify({"error": f"No results yet (status: {req.get('status')})"}), 409
+
+    predictions = req.get("predictions") or {}
+    rows = sorted(predictions.keys())
+    header = "sample_id,predicted_class,confidence"
+    lines = [header]
+    for sid in rows:
+        p = predictions.get(sid) or {}
+        if not isinstance(p, dict):
+            p = {"predicted_class": p}
+        conf = p.get("confidence")
+        lines.append(f"{sid},{p.get('predicted_class', '')},{'' if conf is None else conf}")
+    view = _inference_view(req, uid)
+    view["predictions"] = predictions
+    view["csv"] = "\n".join(lines)
+    return jsonify(view), 200
 
 
 if __name__ == '__main__':

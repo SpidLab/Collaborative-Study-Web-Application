@@ -1,0 +1,14 @@
+{
+  "model_id": "mdl_934031bcedfb898b9279",
+  "collaboration_name": "Fed TEst",
+  "num_classes": 5,
+  "class_names": [
+    "EUR",
+    "AFR",
+    "EAS",
+    "SAS",
+    "AMR"
+  ],
+  "weights_format": "base64(npz with keys w0..wK = model.state_dict() values, in order)",
+  "saved_at": "2026-08-11T19:04:58.207137Z"
+}

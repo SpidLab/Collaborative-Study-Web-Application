@@ -14,6 +14,8 @@ import Profile from "./components/Profile/Profile";
 import StartCollaboration from "./components/Collabrations/StartCollaboration";
 import MyData from "./components/MyData/MyData";
 import ModelRepository from "./components/ModelRepository/ModelRepository";
+import DataRequests from "./components/Requests/DataRequests";
+import InferenceRequests from "./components/Requests/InferenceRequests";
 
 function App() {
 
@@ -107,6 +109,8 @@ function App() {
         <Route path="/collaboration" element={isLoggedIn ? <CollaborationsPage /> : <Navigate to="/login" />} />
         <Route path="/start-collaboration" element={isLoggedIn ? <StartCollaboration /> : <Navigate to="/login" />} />
         <Route path="/models" element={isLoggedIn ? <ModelRepository /> : <Navigate to="/login" />} />
+        <Route path="/data-requests" element={isLoggedIn ? <DataRequests /> : <Navigate to="/login" />} />
+        <Route path="/inference-requests" element={isLoggedIn ? <InferenceRequests /> : <Navigate to="/login" />} />
         <Route path="/collaboration/:uuid" element={isLoggedIn ? <CollaborationDetails /> : <Navigate to="/login" />} /> 
         <Route path="/forgot/username" element={<ForgotUsername />} />
         <Route path="/forgot/password" element={<ForgotPassword />} />

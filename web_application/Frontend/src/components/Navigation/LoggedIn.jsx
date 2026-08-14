@@ -7,10 +7,12 @@ import URL from '../../config';
 export default function LoggedIn({ onLogout }) {
   const [anchorEl, setAnchorEl] = useState(null);
   const [collabAnchorEl, setCollabAnchorEl] = useState(null);
+  const [requestsAnchorEl, setRequestsAnchorEl] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [userName, setUserName] = useState('');
   const open = Boolean(anchorEl);
   const collabOpen = Boolean(collabAnchorEl);
+  const requestsOpen = Boolean(requestsAnchorEl);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -58,6 +60,7 @@ export default function LoggedIn({ onLogout }) {
   const handleClose = () => {
     setAnchorEl(null);
     setCollabAnchorEl(null);
+    setRequestsAnchorEl(null);
   };
 
   const handleLogout = async () => {
@@ -86,7 +89,28 @@ export default function LoggedIn({ onLogout }) {
       <Button color="inherit" component={RouterLink} to="/upload">Metadata</Button>
       <Button color="inherit" component={RouterLink} to="/my-data">My Data</Button>
       <Button color="inherit" component={RouterLink} to="/models">Model Repository</Button>
-      
+
+      <Button
+        color="inherit"
+        onMouseEnter={(e) => setRequestsAnchorEl(e.currentTarget)}
+      >
+        Requests
+      </Button>
+
+      <Menu
+        anchorEl={requestsAnchorEl}
+        open={requestsOpen}
+        onClose={handleClose}
+        MenuListProps={{ onMouseLeave: handleClose }}
+      >
+        <MenuItem component={RouterLink} to="/data-requests" onClick={handleClose}>
+          Data Requests
+        </MenuItem>
+        <MenuItem component={RouterLink} to="/inference-requests" onClick={handleClose}>
+          Inference Requests
+        </MenuItem>
+      </Menu>
+
       <Badge badgeContent={pendingCount} color="error">
         <Button
           color="inherit"

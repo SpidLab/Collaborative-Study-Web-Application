@@ -121,6 +121,49 @@ def notify_invitation(to_email, inviter_name, collab_name, collab_uuid):
     return send_email(to_email, subject, text, html)
 
 
+def notify_data_request(to_email, requester_name, phenotype):
+    """Tell a dataset owner that someone has asked for a copy of their data."""
+    link = f"{app_base_url()}/data-requests"
+    who = requester_name or "A researcher"
+    label = phenotype or "one of your datasets"
+    subject = f"{who} has requested a copy of your dataset: {label}"
+    text = (
+        f"{who} has requested a privacy-protected copy of your dataset \"{label}\".\n\n"
+        f"Review and approve or deny the request:\n{link}\n\n"
+        f"If you approve, your own Site Agent produces the differentially-private copy "
+        f"on your machine at the privacy budget you advertised. Your raw data never leaves it.\n"
+    )
+    html = (
+        f"<p><b>{who}</b> has requested a privacy-protected copy of your dataset "
+        f"\"<b>{label}</b>\".</p>"
+        f"<p><a href=\"{link}\">Review and approve or deny the request</a>.</p>"
+        f"<p>If you approve, your own Site Agent produces the differentially-private copy "
+        f"on your machine at the privacy budget you advertised. Your raw data never leaves it.</p>"
+    )
+    return send_email(to_email, subject, text, html)
+
+
+def notify_inference_request(to_email, requester_name, model_name):
+    """Tell a model owner that someone has asked their model to classify samples."""
+    link = f"{app_base_url()}/inference-requests"
+    who = requester_name or "A researcher"
+    label = model_name or "your model"
+    subject = f"{who} has asked \"{label}\" to classify some samples"
+    text = (
+        f"{who} would like your model \"{label}\" to classify a set of samples.\n\n"
+        f"Review and approve or deny the request:\n{link}\n\n"
+        f"If you approve, your own Site Agent runs your local copy of the model and "
+        f"returns only the predictions. Your model is never uploaded or shared.\n"
+    )
+    html = (
+        f"<p><b>{who}</b> would like your model \"<b>{label}</b>\" to classify a set of samples.</p>"
+        f"<p><a href=\"{link}\">Review and approve or deny the request</a>.</p>"
+        f"<p>If you approve, your own Site Agent runs your local copy of the model and "
+        f"returns only the predictions. Your model is never uploaded or shared.</p>"
+    )
+    return send_email(to_email, subject, text, html)
+
+
 def notify_invitation_accepted(to_email, accepter_name, collab_name, collab_uuid):
     """Tell the initiator that a collaborator accepted."""
     link = f"{app_base_url()}/collaboration/{collab_uuid}"

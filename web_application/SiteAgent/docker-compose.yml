@@ -17,6 +17,11 @@ services:
       - "${HOST_DATA_DIR}:/data:ro"
       # Persistent store for the saved login token:
       - agent_config:/config
+      # Models this site owns. After federated training the server deletes its
+      # copy, so this volume may hold the ONLY copy of a model you own — it must
+      # outlive the container.
+      - agent_models:/models
 
 volumes:
   agent_config: {}
+  agent_models: {}

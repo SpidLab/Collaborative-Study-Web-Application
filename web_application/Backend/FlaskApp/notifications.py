@@ -68,6 +68,11 @@ def notify_progress(db, uuid):
         collab = db["collaborations"].find_one({"uuid": uuid})
         if not collab:
             return
+        # Data Sharing has no QC-threshold or stat-data workflow — the privacy
+        # transform is terminal — so the GWAS-style "your action is needed" /
+        # "generate stat data" nudges don't apply. Skip them entirely.
+        if "Data Sharing" in (collab.get("experiments") or []):
+            return
         obligated = _obligated(collab)
         if len(obligated) < 2:
             return

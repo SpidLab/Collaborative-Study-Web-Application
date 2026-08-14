@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Container, Divider,
-  Grid, LinearProgress, Slider, Snackbar, Stack, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, TextField, Typography, Tooltip
+  Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Container,
+  FormControlLabel, Grid, LinearProgress, Slider, Snackbar, Stack, Switch, Table, TableBody,
+  TableCell, TableContainer, TableHead, TableRow, TextField, Typography
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import PendingIcon from '@mui/icons-material/HourglassTop';
 import PublicIcon from '@mui/icons-material/Public';
-import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
+import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
+import ComputerIcon from '@mui/icons-material/Computer';
 import { Link as RouterLink } from 'react-router-dom';
 import axios from 'axios';
 import URL from '../../config';
@@ -54,7 +55,7 @@ const FLCollaborationView = ({ collaboration }) => {
   const [isStartingTraining, setIsStartingTraining] = useState(false);
   const [isKickingOff, setIsKickingOff] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [isSavingModel, setIsSavingModel] = useState(false);
   const [numRounds, setNumRounds] = useState(null);
   const [localEpochs, setLocalEpochs] = useState(null);
   const pollTimer = useRef(null);
@@ -71,23 +72,30 @@ const FLCollaborationView = ({ collaboration }) => {
         creator_id: resp?.data?.creator_id ?? null,
         current_user_id: resp?.data?.current_user_id ?? null,
         is_initiator: resp?.data?.is_initiator === true,
-        publish_model: resp?.data?.publish_model === true,
         published_model_id: resp?.data?.published_model_id ?? null,
-        has_weights: resp?.data?.has_weights === true,
+        model_visibility: resp?.data?.model_visibility ?? null,
+        allow_inference_requests: resp?.data?.allow_inference_requests === true,
+        model_delivered_to_me: resp?.data?.model_delivered_to_me === true,
+        model_delivery: resp?.data?.model_delivery ?? null,
       });
       setFetchError(null);
-      if (state?.config) {
-        if (pendingThreshold === null && typeof state.config.emd_threshold === 'number') {
-          setPendingThreshold(state.config.emd_threshold);
+      // Seed the editable controls from the server config exactly once (whatever
+      // the user has typed/dragged since then wins). These use functional updates
+      // so `fetchState` does not have to depend on that state — if it did, every
+      // slider drag would rebuild the poll and fire an extra request.
+      const cfg = state?.config;
+      if (cfg) {
+        if (typeof cfg.emd_threshold === 'number') {
+          setPendingThreshold(prev => (prev === null ? cfg.emd_threshold : prev));
         }
-        if (numRounds === null && state.config.num_rounds) setNumRounds(state.config.num_rounds);
-        if (localEpochs === null && state.config.local_epochs) setLocalEpochs(state.config.local_epochs);
+        if (cfg.num_rounds) setNumRounds(prev => (prev === null ? cfg.num_rounds : prev));
+        if (cfg.local_epochs) setLocalEpochs(prev => (prev === null ? cfg.local_epochs : prev));
       }
     } catch (err) {
       const msg = err?.response?.data?.error || err.message || 'Failed to load FL state';
       setFetchError(msg);
     }
-  }, [uuid, pendingThreshold, numRounds, localEpochs]);
+  }, [uuid]);
 
   useEffect(() => {
     fetchState();
@@ -108,9 +116,18 @@ const FLCollaborationView = ({ collaboration }) => {
     : (collaboration?.is_sender === true ||
         (!!collaboration?.creator_id && !!collaboration?.current_user_id &&
           String(collaboration.creator_id) === String(collaboration.current_user_id)));
-  const modelPublic = flIdentity?.publish_model === true || collaboration?.publish_model === true;
-  const modelPublished = !!flIdentity?.published_model_id; // backend breadcrumb — actually in the repo
-  const modelHasWeights = flIdentity?.has_weights === true; // downloadable weights exist
+  const publishedModelId = flIdentity?.published_model_id || null;
+  const modelListed = !!publishedModelId; // backend breadcrumb — the catalog entry exists
+  const modelIsPublic = flIdentity?.model_visibility === 'public';
+  const allowsInference = flIdentity?.allow_inference_requests === true;
+  const modelDeliveredToMe = flIdentity?.model_delivered_to_me === true;
+  const delivery = flIdentity?.model_delivery || null;
+  const deliveredCount = typeof delivery?.delivered === 'number' ? delivery.delivered : null;
+  const deliveryTargets = typeof delivery?.targets === 'number' ? delivery.targets : null;
+  const deliveryComplete =
+    deliveredCount !== null && deliveryTargets !== null && deliveryTargets > 0 && deliveredCount >= deliveryTargets;
+  // A private model is kept by the initiator alone; participating sites get no copy.
+  const initiatorOnlyDelivery = delivery?.scope === 'initiator';
 
   const stage = flState?.stage || 'idle';
   const stageInfo = STAGE_LABELS[stage] || { label: stage, color: 'default' };
@@ -195,32 +212,18 @@ const FLCollaborationView = ({ collaboration }) => {
     }
   };
 
-  const downloadModel = async () => {
-    const modelId = flIdentity?.published_model_id;
-    if (!modelId) {
-      setSnackbar({ open: true, message: 'This model has not been published yet.', severity: 'warning' });
-      return;
-    }
-    setIsDownloading(true);
+  const patchModel = async (patch, message) => {
+    if (!publishedModelId) return;
+    setIsSavingModel(true);
     try {
-      const resp = await axios.get(`${URL}/api/models/${modelId}/download`, { headers: authHeader() });
-      const blob = new Blob([JSON.stringify(resp.data, null, 2)], { type: 'application/json' });
-      const safe = (collaboration?.collab_name || collaboration?.name || 'model')
-        .replace(/[^a-z0-9-_]+/gi, '_').replace(/^_+|_+$/g, '') || 'model';
-      const link = document.createElement('a');
-      const objectUrl = window.URL.createObjectURL(blob);
-      link.href = objectUrl;
-      link.download = `${safe}.model.json`;
-      document.body.appendChild(link);
-      link.click();
-      window.URL.revokeObjectURL(objectUrl);
-      document.body.removeChild(link);
-      setSnackbar({ open: true, message: 'Model downloaded.', severity: 'success' });
+      await axios.patch(`${URL}/api/models/${publishedModelId}`, patch, { headers: authHeader() });
+      setSnackbar({ open: true, message, severity: 'success' });
+      fetchState();
     } catch (err) {
       const msg = err?.response?.data?.error || err.message;
-      setSnackbar({ open: true, message: `Download failed: ${msg}`, severity: 'error' });
+      setSnackbar({ open: true, message: `Update failed: ${msg}`, severity: 'error' });
     } finally {
-      setIsDownloading(false);
+      setIsSavingModel(false);
     }
   };
 
@@ -544,45 +547,139 @@ const FLCollaborationView = ({ collaboration }) => {
                   )}
                 </Stack>
 
-                {modelPublished ? (
-                  <Box sx={{ mt: 2, pt: 2, borderTop: '1px dashed #a5d6a7' }}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                      <Chip size="small" color="success" icon={<PublicIcon />} label="Published to Model Repository" />
-                      <Typography variant="caption" color="text.secondary">
-                        This global model is public — any user can view{modelHasWeights ? ' and download' : ''} it.
-                      </Typography>
-                    </Stack>
-                    <Stack direction="row" spacing={1.5} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
-                      <Button
-                        variant="contained" size="small"
-                        startIcon={isDownloading ? <CircularProgress size={16} color="inherit" /> : <DownloadRoundedIcon />}
-                        onClick={downloadModel} disabled={isDownloading || !modelHasWeights}
-                      >
-                        {isDownloading ? 'Preparing…' : 'Download model'}
-                      </Button>
-                      <Button variant="outlined" size="small" component={RouterLink} to="/models">
-                        View in Model Repository
-                      </Button>
-                    </Stack>
-                    {!modelHasWeights && (
-                      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                        Downloadable weights aren&apos;t available for this run (produced by the in-process
-                        simulation backend); metadata and metrics are still shared.
-                      </Typography>
-                    )}
-                  </Box>
-                ) : modelPublic ? (
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
-                    Publishing this global model to the Model Repository…
+                <Box sx={{ mt: 2, pt: 2, borderTop: '1px dashed #a5d6a7' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                    Model Repository listing
                   </Typography>
-                ) : (
-                  isInitiator && (
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
-                      This model is private to the collaboration. (Publishing to the Model Repository is
-                      opted in when the collaboration is created.)
+                  {modelListed ? (
+                    <>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                        <Chip
+                          size="small"
+                          color={modelIsPublic ? 'success' : 'default'}
+                          variant={modelIsPublic ? 'filled' : 'outlined'}
+                          icon={modelIsPublic ? <PublicIcon /> : <LockOutlinedIcon />}
+                          label={modelIsPublic ? 'Listed publicly' : 'Listed privately'}
+                        />
+                        {/* A private entry is only listed for its owner (the initiator),
+                            so don't send anyone else to a page that won't show it. */}
+                        {(modelIsPublic || isInitiator) && (
+                          <Button variant="outlined" size="small" component={RouterLink} to="/models">
+                            View in Model Repository
+                          </Button>
+                        )}
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                        {modelIsPublic
+                          ? 'Any user can see this entry — its description, architecture and measured metrics. The Model Repository is a catalog only: the trained weights are never distributed to anyone.'
+                          : isInitiator
+                            ? 'Only you can see this entry. The Model Repository is a catalog only: the trained weights are never distributed to anyone, public or private.'
+                            : 'The initiator has kept this entry unlisted, so it only shows in their Model Repository. The repository is a catalog only: the trained weights are never distributed to anyone, public or private.'}
+                      </Typography>
+                      {modelIsPublic && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                          {allowsInference
+                            ? 'Other users can send inference requests against this model. Their samples are classified by the Site Agent on the machine that holds the model; the model itself does not move.'
+                            : 'Inference requests are turned off, so the entry is view-only for other users.'}
+                        </Typography>
+                      )}
+                      {isInitiator && (
+                        <Box sx={{ mt: 1.5 }}>
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                size="small"
+                                checked={modelIsPublic}
+                                disabled={isSavingModel}
+                                onChange={(e) => patchModel(
+                                  { visibility: e.target.checked ? 'public' : 'private' },
+                                  e.target.checked ? 'Model is now listed publicly.' : 'Model is now listed privately.'
+                                )}
+                              />
+                            }
+                            label={<Typography variant="body2">List this model publicly</Typography>}
+                          />
+                          {modelIsPublic && (
+                            <Box>
+                              <FormControlLabel
+                                control={
+                                  <Switch
+                                    size="small"
+                                    checked={allowsInference}
+                                    disabled={isSavingModel}
+                                    onChange={(e) => patchModel(
+                                      { allow_inference_requests: e.target.checked },
+                                      e.target.checked ? 'Inference requests enabled.' : 'Inference requests disabled.'
+                                    )}
+                                  />
+                                }
+                                label={<Typography variant="body2">Accept inference requests</Typography>}
+                              />
+                            </Box>
+                          )}
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            You can change this at any time, including making a model public long after the
+                            collaboration finished.
+                          </Typography>
+                        </Box>
+                      )}
+                    </>
+                  ) : (
+                    <Typography variant="caption" color="text.secondary">
+                      Registering this global model in the Model Repository…
                     </Typography>
-                  )
-                )}
+                  )}
+                </Box>
+
+                <Box sx={{ mt: 2, pt: 2, borderTop: '1px dashed #a5d6a7' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                    Where the trained model is
+                  </Typography>
+                  {modelDeliveredToMe ? (
+                    <Stack direction="row" spacing={1} alignItems="flex-start">
+                      <ComputerIcon fontSize="small" sx={{ color: 'success.main', mt: 0.2 }} />
+                      <Typography variant="body2">
+                        The trained model was saved onto your own Site Agent machine. It stays there — nothing
+                        about it is served from this web application.
+                      </Typography>
+                    </Stack>
+                  ) : initiatorOnlyDelivery ? (
+                    // Private was chosen at creation, so by design only the
+                    // initiator's machine keeps the model. Say so, rather than
+                    // leaving a collaborator waiting for a copy that is not coming.
+                    <Typography variant="body2" color="text.secondary">
+                      The initiator kept this model private, so it was saved onto their Site Agent
+                      machine only. Participating sites do not receive a copy.
+                    </Typography>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      The trained model is written to each participating site&apos;s own Site Agent machine.
+                      It has not landed on yours yet.
+                    </Typography>
+                  )}
+                  {deliveryTargets > 0 && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <LinearProgress
+                        variant="determinate"
+                        value={Math.min(100, (deliveredCount / deliveryTargets) * 100)}
+                        sx={{ borderRadius: 1, height: 6 }}
+                      />
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                        {initiatorOnlyDelivery
+                          ? `Saved on ${deliveredCount} of ${deliveryTargets} machine (the initiator's — this model is private).`
+                          : `Delivered to ${deliveredCount} of ${deliveryTargets} participating site${deliveryTargets === 1 ? '' : 's'}.`}
+                        {!deliveryComplete && ' Sites whose Site Agent is offline will receive it when it reconnects.'}
+                      </Typography>
+                    </Box>
+                  )}
+                  {isInitiator && modelListed && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                      Changing visibility now changes who can see this entry in the Model Repository.
+                      It does not move the model between machines — that was settled when training
+                      finished.
+                    </Typography>
+                  )}
+                </Box>
               </Box>
             )}
           </CardContent>

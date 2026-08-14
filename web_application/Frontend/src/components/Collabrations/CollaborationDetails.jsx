@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link as RouterLink } from 'react-router-dom';
 import {
   Box, Typography, alpha, Divider, Button, Slider, TextField, MenuItem, Chip, Grid, Checkbox, Snackbar, Alert, CircularProgress, Container, Card, CardContent, List, ListItem, ListItemText, Tabs, Tab, Tooltip, TableContainer, Table, TableBody, TableCell, TableHead, TableRow, Stepper, Step, StepContent, StepLabel, Accordion, AccordionSummary, AccordionDetails,
 } from '@mui/material';
@@ -12,8 +12,10 @@ import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import statSampleImage from "../../assets/Stat Sample.png";
 import InfoIcon from '@mui/icons-material/Info';
 import FLCollaborationView from './FLCollaborationView';
+import DataSharingView from './DataSharingView';
 
 const EXPERIMENT_FL = 'Federated Learning';
+const EXPERIMENT_DATA_SHARING = 'Data Sharing';
 
 // QC Methods that skip threshold and show SNP list instead
 const SNP_FILTER_QC_METHODS = ['Minor Allele Frequency', 'MAF', 'Hardy-Weinberg Equilibrium', 'HWE', 'Missing Data QC', 'Missing'];
@@ -162,6 +164,15 @@ const CollaborationDetails = () => {
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uuid, gwasResultsAvailable]);
+
+  // Timers started by "Initiate GWAS" (see handleGwasCalculations). They live past
+  // the event handler, so they have to be torn down if the user navigates away —
+  // otherwise they keep polling and setState on an unmounted component.
+  const gwasPollTimers = useRef([]);
+  useEffect(() => () => {
+    gwasPollTimers.current.forEach((id) => { clearInterval(id); clearTimeout(id); });
+    gwasPollTimers.current = [];
+  }, []);
 
 
   // setting the current user id
@@ -678,10 +689,10 @@ const CollaborationDetails = () => {
       });
       
       // Check GWAS status after a delay to see if results are ready
-      setTimeout(async () => {
+      const firstCheck = setTimeout(async () => {
         await checkGwasStatus();
       }, 5000);
-      
+
       // Set up periodic checking for GWAS results
       const checkInterval = setInterval(async () => {
         const resultsAvailable = await checkGwasStatus();
@@ -691,12 +702,15 @@ const CollaborationDetails = () => {
           // and show the "Get GWAS Results" button
         }
       }, 10000); // Check every 10 seconds
-      
+
       // Clear interval after 5 minutes to avoid infinite checking
-      setTimeout(() => {
+      const stopChecking = setTimeout(() => {
         clearInterval(checkInterval);
       }, 300000);
-      
+
+      // Tracked so the unmount cleanup can kill them if the user leaves first.
+      gwasPollTimers.current.push(firstCheck, checkInterval, stopChecking);
+
     } catch (error) {
       console.error('Error initiating GWAS calculations:', error);
       setSnackbar({
@@ -1466,14 +1480,44 @@ const CollaborationDetails = () => {
   }
 
 
-  const isFLCollaboration = (experimentList || []).some(exp => {
-    if (typeof exp === 'string') return exp === EXPERIMENT_FL;
+  const experimentMatches = (target) => (experimentList || []).some(exp => {
+    if (typeof exp === 'string') return exp === target;
     if (exp && typeof exp === 'object') {
-      if (exp.name === EXPERIMENT_FL) return true;
-      if (Array.isArray(exp.experiment_types) && exp.experiment_types.includes(EXPERIMENT_FL)) return true;
+      if (exp.name === target) return true;
+      if (Array.isArray(exp.experiment_types) && exp.experiment_types.includes(target)) return true;
     }
     return false;
   });
+  const isFLCollaboration = experimentMatches(EXPERIMENT_FL);
+  const isDataSharingCollaboration = experimentMatches(EXPERIMENT_DATA_SHARING);
+
+  if (isDataSharingCollaboration && collaboration) {
+    return (
+      <>
+        <Container maxWidth="lg" sx={{ mt: 3 }}>
+          <Alert severity="info">
+            <Typography variant="body2">
+              This is a <b>legacy Data Sharing collaboration</b>. Data Sharing is no longer an experiment
+              type, so new ones can&apos;t be created — this one keeps working exactly as before.
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              To share data now, go to{' '}
+              <RouterLink to="/my-data">My Data</RouterLink> → Find Collaborators and send a request; both
+              sides track it under{' '}
+              <RouterLink to="/data-requests">Data Requests</RouterLink>.
+            </Typography>
+          </Alert>
+        </Container>
+        <DataSharingView
+          collaboration={{
+            ...collaboration,
+            uuid: collaborationUuid || uuid,
+            collab_name: collabName,
+          }}
+        />
+      </>
+    );
+  }
 
   if (isFLCollaboration && collaboration) {
     return (

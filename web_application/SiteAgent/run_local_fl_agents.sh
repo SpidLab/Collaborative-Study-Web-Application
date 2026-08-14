@@ -57,10 +57,15 @@ for CODE in "$@"; do
     exit 1
   fi
   echo "Agent $i → site_$i  (data: $DATA_DIR, phenotype: $PHENOTYPE)"
+  # Each simulated site needs its OWN model store. MODELS_DIR is the shared,
+  # read-only PCA panel; OWNED_MODELS_DIR is where a site keeps models it owns,
+  # and sharing that between agents would make one site's private model look as
+  # though every site had received a copy.
   ENROLL_CODE="$CODE" \
   DATA_DIR="$DATA_DIR" \
   CONFIG_DIR="$HERE/.cfg_fl_$i" \
   MODELS_DIR="$HERE/models" \
+  OWNED_MODELS_DIR="$HERE/.owned_models_fl_$i" \
   SERVER_URL="$SERVER_URL" \
   POLL_INTERVAL=3 POLL_TIMEOUT=20 \
     "$PYTHON" "$HERE/agent.py" > "$LOG_DIR/agent_$i.log" 2>&1 &
