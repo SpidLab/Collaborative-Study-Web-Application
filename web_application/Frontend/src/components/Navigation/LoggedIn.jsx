@@ -88,6 +88,7 @@ export default function LoggedIn({ onLogout }) {
       <Button color="inherit" component={RouterLink} to="/">Home</Button>
       <Button color="inherit" component={RouterLink} to="/upload">Metadata</Button>
       <Button color="inherit" component={RouterLink} to="/my-data">My Data</Button>
+      <Button color="inherit" component={RouterLink} to="/classification-data">Classification Data</Button>
       <Button color="inherit" component={RouterLink} to="/models">Model Repository</Button>
 
       <Button

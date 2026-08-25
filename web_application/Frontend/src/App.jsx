@@ -16,6 +16,7 @@ import MyData from "./components/MyData/MyData";
 import ModelRepository from "./components/ModelRepository/ModelRepository";
 import DataRequests from "./components/Requests/DataRequests";
 import InferenceRequests from "./components/Requests/InferenceRequests";
+import ClassificationData from "./components/Classification/ClassificationData";
 
 function App() {
 
@@ -108,6 +109,7 @@ function App() {
         <Route path="/session/viewresults" element={ <SessionsResults />} />
         <Route path="/collaboration" element={isLoggedIn ? <CollaborationsPage /> : <Navigate to="/login" />} />
         <Route path="/start-collaboration" element={isLoggedIn ? <StartCollaboration /> : <Navigate to="/login" />} />
+        <Route path="/classification-data" element={isLoggedIn ? <ClassificationData /> : <Navigate to="/login" />} />
         <Route path="/models" element={isLoggedIn ? <ModelRepository /> : <Navigate to="/login" />} />
         <Route path="/data-requests" element={isLoggedIn ? <DataRequests /> : <Navigate to="/login" />} />
         <Route path="/inference-requests" element={isLoggedIn ? <InferenceRequests /> : <Navigate to="/login" />} />

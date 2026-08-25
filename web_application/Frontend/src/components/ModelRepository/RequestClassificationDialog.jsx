@@ -10,17 +10,21 @@ import URL from '../../config';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
-const MAX_SAMPLES_CAP = 500;
-const DEFAULT_MAX_SAMPLES = 100;
 // The server's 409 body says exactly this, so don't repeat it under the alert title.
 const DUPLICATE_REQUEST_TITLE = 'You already have an open request for this model';
+
+// A count is always recorded at upload time, but never render a bare `null` at the
+// owner if a legacy row is missing one.
+const sizePhrase = (d) => {
+  const samples = d.n_samples != null ? `${d.n_samples} samples` : 'The samples in this batch';
+  return d.n_markers != null ? `${samples} × ${d.n_markers} markers` : samples;
+};
 
 const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
   const [datasets, setDatasets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [datasetId, setDatasetId] = useState('');
-  const [maxSamples, setMaxSamples] = useState(String(DEFAULT_MAX_SAMPLES));
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -30,12 +34,12 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
     setLoading(true);
     setLoadError('');
     try {
-      const resp = await axios.get(`${URL}/api/my-datasets`, { headers: authHeader() });
-      const rows = Array.isArray(resp.data) ? resp.data : [];
+      const resp = await axios.get(`${URL}/api/classification-data`, { headers: authHeader() });
+      const rows = Array.isArray(resp?.data?.datasets) ? resp.data.datasets : [];
       setDatasets(rows);
       setDatasetId(rows.length === 1 ? String(rows[0].id) : '');
     } catch (err) {
-      setLoadError(err?.response?.data?.error || err.message || 'Could not load your datasets');
+      setLoadError(err?.response?.data?.error || err.message || 'Could not load your classification data');
     } finally {
       setLoading(false);
     }
@@ -43,15 +47,13 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
 
   useEffect(() => {
     if (!open) return;
-    setMaxSamples(String(DEFAULT_MAX_SAMPLES));
     setNote('');
     setError('');
     setConflict('');
     loadDatasets();
   }, [open, loadDatasets]);
 
-  const sampleCount = Number(maxSamples);
-  const badSamples = !Number.isInteger(sampleCount) || sampleCount < 1 || sampleCount > MAX_SAMPLES_CAP;
+  const selected = datasets.find((d) => String(d.id) === datasetId);
 
   const close = () => {
     if (submitting) return;
@@ -65,8 +67,7 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
     try {
       const resp = await axios.post(`${URL}/api/inference-requests`, {
         model_id: model.model_id,
-        dataset_id: datasetId,
-        max_samples: sampleCount,
+        classification_dataset_id: datasetId,
         note: note.trim(),
       }, { headers: authHeader() });
       onSubmitted(resp.data);
@@ -96,10 +97,10 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
       <DialogContent dividers>
         <Alert severity="info" icon={<ScienceOutlinedIcon fontSize="inherit" />} sx={{ mb: 2.5 }}>
           <Typography variant="body2">
-            Your Site Agent exports the samples you choose and sends them to {model.owner_name || 'the owner'},
-            who has to approve the request. Their agent then runs the model on their own machine and returns
-            only the predicted class and confidence per sample. You never receive the model, and it never
-            leaves their machine.
+            Pick one of the batches you uploaded under Classification Data. Those samples go
+            to {model.owner_name || 'the owner'}, who has to approve the request; their agent then runs
+            the model on their own machine and returns only the predicted class and confidence per
+            sample. You never receive the model, and it never leaves their machine.
           </Typography>
         </Alert>
 
@@ -121,7 +122,7 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
         {loading ? (
           <Stack alignItems="center" spacing={1.5} sx={{ py: 4 }}>
             <CircularProgress />
-            <Typography variant="body2" color="text.secondary">Loading your datasets…</Typography>
+            <Typography variant="body2" color="text.secondary">Loading your classification data…</Typography>
           </Stack>
         ) : loadError ? (
           <Alert severity="error" action={<Button size="small" onClick={loadDatasets}>Retry</Button>}>
@@ -129,40 +130,46 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
           </Alert>
         ) : datasets.length === 0 ? (
           <Alert severity="info"
-            action={<Button size="small" component={RouterLink} to="/my-data">My Data</Button>}>
-            You have no datasets registered yet. Register one and let your Site Agent sync it before
-            asking for classifications.
+            action={(
+              <Button size="small" component={RouterLink} to="/classification-data" onClick={close}>
+                Upload samples
+              </Button>
+            )}>
+            <AlertTitle>You have no classification data uploaded</AlertTitle>
+            Classification runs on samples you upload for that purpose — not on your My Data cohorts,
+            which stay on your own machine. Upload a CSV under Classification Data first.
           </Alert>
         ) : (
           <Box>
             <TextField
-              select fullWidth required label="Dataset to classify"
+              select fullWidth required label="Samples to classify"
               value={datasetId} onChange={(e) => setDatasetId(e.target.value)}
-              helperText="Samples are drawn from this dataset by your own Site Agent."
+              helperText={selected
+                ? `${sizePhrase(selected)} will be sent to ${model.owner_name || 'the owner'}.`
+                : 'From the batches you uploaded under Classification Data.'}
             >
               {datasets.map((d) => (
                 <MenuItem key={d.id} value={String(d.id)}>
-                  {d.phenotype || 'Unnamed dataset'}
-                  {d.number_of_samples != null ? ` · ${d.number_of_samples} samples` : ''}
+                  {d.name || 'Uploaded samples'}
+                  {d.n_samples != null ? ` · ${d.n_samples} samples` : ''}
+                  {d.n_markers != null ? ` · ${d.n_markers} markers` : ''}
                 </MenuItem>
               ))}
             </TextField>
-
-            <TextField
-              fullWidth type="number" label="Maximum samples to send" sx={{ mt: 2 }}
-              value={maxSamples} onChange={(e) => setMaxSamples(e.target.value)}
-              error={badSamples}
-              inputProps={{ min: 1, max: MAX_SAMPLES_CAP }}
-              helperText={badSamples
-                ? `Enter a whole number between 1 and ${MAX_SAMPLES_CAP}`
-                : `The server caps this at ${MAX_SAMPLES_CAP} per request.`}
-            />
 
             <TextField
               fullWidth multiline minRows={2} label="Note to the owner (optional)" sx={{ mt: 2 }}
               value={note} onChange={(e) => setNote(e.target.value)}
               placeholder="What you are trying to find out, and why this model."
             />
+
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+              Need a different batch? Manage your uploads under{' '}
+              <Box component={RouterLink} to="/classification-data" onClick={close}
+                sx={{ color: 'primary.main', textDecoration: 'underline' }}>
+                Classification Data
+              </Box>.
+            </Typography>
           </Box>
         )}
       </DialogContent>
@@ -171,7 +178,7 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
         <Button onClick={close} disabled={submitting}>Cancel</Button>
         <Button
           variant="contained" onClick={submit}
-          disabled={submitting || loading || !datasetId || badSamples}
+          disabled={submitting || loading || !datasetId}
           startIcon={submitting ? <CircularProgress size={16} color="inherit" /> : null}
         >
           {submitting ? 'Sending…' : 'Send request'}

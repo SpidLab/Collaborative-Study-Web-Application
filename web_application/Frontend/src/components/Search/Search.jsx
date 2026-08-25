@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Alert, Button, Card, CardActions, CardContent, Checkbox, Chip, CircularProgress,
-  Container, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Grid,
-  Snackbar, Stack, TextField, Typography,
+  Alert, Box, Button, Card, CardActions, CardContent, Checkbox, Chip, CircularProgress,
+  Container, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel,
+  Grid, Slider, Snackbar, Stack, TextField, Typography,
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import SearchIcon from '@mui/icons-material/Search';
@@ -12,15 +12,53 @@ import URL from '../../config';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
+const EPS_MIN = 0.1;
+const EPS_MAX = 20;
+const EPS_FALLBACK = 3;
+
+const epsilonMeaning = (eps) => {
+  if (eps <= 1) return { label: 'Very strong privacy', color: 'success', hint: 'heavy noise — coarse trends only' };
+  if (eps <= 3) return { label: 'Strong privacy', color: 'success', hint: 'noticeable noise, broad signals survive' };
+  if (eps <= 8) return { label: 'Moderate privacy', color: 'warning', hint: 'a balanced amount of noise' };
+  return { label: 'Weak privacy', color: 'error', hint: 'little noise — close to the real data' };
+};
+
+const trim = (n) => String(Number(n.toFixed(2)));
+const clampEps = (n) => Math.min(EPS_MAX, Math.max(EPS_MIN, n));
+
+// Label the owner's advertised ε on the track. A bound label sitting under the owner's
+// mark would overlap it, so drop the one that collides.
+const epsMarks = (advertised) => {
+  const bounds = [{ value: EPS_MIN, label: String(EPS_MIN) }, { value: EPS_MAX, label: String(EPS_MAX) }];
+  // A mark outside [min, max] is rendered off the end of the track, so an oddly
+  // advertised ε is left unlabelled rather than drawn past the bounds.
+  if (!Number.isFinite(advertised) || advertised < EPS_MIN || advertised > EPS_MAX) return bounds;
+  return [
+    ...bounds.filter((m) => Math.abs(m.value - advertised) > 1.2),
+    { value: advertised, label: `owner suggests ${trim(advertised)}` },
+  ].sort((a, b) => a.value - b.value);
+};
+
 const REQUEST_STATUS = {
   pending: { label: 'Requested — pending', color: 'warning' },
   approved: { label: 'Approved', color: 'info' },
   transforming: { label: 'Approved — preparing copy', color: 'info' },
   ready: { label: 'Ready to download', color: 'success' },
+  downloading: { label: 'Downloading', color: 'info' },
+  downloaded: { label: 'Collected — copy erased', color: 'success' },
   denied: { label: 'Denied', color: 'default' },
   failed: { label: 'Transform failed', color: 'error' },
   open: { label: 'Request already open', color: 'warning' },
 };
+
+// A collected request is closed business: the handover happened once and the server
+// erased its copy, so the backend allows a fresh request for the same dataset. The
+// card has to offer that, otherwise a lost file is unrecoverable from the UI.
+// `failed` belongs here for the same reason — the owner's transform blew up, there is
+// nothing to download and no retry anywhere else, so asking again is the only way out.
+// `denied` deliberately stays off the list: the owner said no, and the UI should not
+// hand out a one-click way to keep asking.
+const REREQUESTABLE = ['downloaded', 'failed'];
 
 function SearchPage({ onUserSelect, resetTrigger }) {
   const [phenotype, setPhenotype] = useState('');
@@ -34,9 +72,25 @@ function SearchPage({ onUserSelect, resetTrigger }) {
 
   const [requestTarget, setRequestTarget] = useState(null);
   const [purpose, setPurpose] = useState('');
+  const [epsText, setEpsText] = useState(String(EPS_FALLBACK));
   const [submitting, setSubmitting] = useState(false);
   const [dialogError, setDialogError] = useState('');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+
+  const advertisedEps = Number(requestTarget?.share_epsilon);
+  const epsNum = Number(epsText);
+  const epsValid = epsText.trim() !== '' && Number.isFinite(epsNum) && epsNum >= EPS_MIN && epsNum <= EPS_MAX;
+  // The slider needs an in-range number even while the typed field is mid-edit or out of
+  // bounds. A number that is merely out of range is clamped to the nearest bound, so typing
+  // 50 pins the handle at 20 instead of throwing it back to the owner's suggestion; only a
+  // blank or unparseable field falls back to the advertised ε.
+  const sliderEps = clampEps(
+    Number.isFinite(epsNum) && epsText.trim() !== ''
+      ? epsNum
+      : (Number.isFinite(advertisedEps) ? advertisedEps : EPS_FALLBACK),
+  );
+  const meaning = epsilonMeaning(sliderEps);
+  const weaker = epsValid && Number.isFinite(advertisedEps) && epsNum > advertisedEps;
 
   const handleSearch = async () => {
     if (!localStorage.getItem('token')) {
@@ -71,6 +125,11 @@ function SearchPage({ onUserSelect, resetTrigger }) {
   const openRequest = (result) => {
     setRequestTarget(result);
     setPurpose('');
+    // Seed from the owner's advertised ε, but clamp it: a legacy dataset can carry a
+    // share_epsilon outside 0.1–20, and seeding that verbatim would open the dialog
+    // already in an error state with Send disabled and nothing the user did wrong.
+    const seed = Number(result?.share_epsilon);
+    setEpsText(String(Number.isFinite(seed) && seed > 0 ? clampEps(seed) : EPS_FALLBACK));
     setDialogError('');
   };
 
@@ -82,12 +141,20 @@ function SearchPage({ onUserSelect, resetTrigger }) {
 
   const submitRequest = async () => {
     if (!requestTarget) return;
+    if (!epsValid) {
+      setDialogError(`ε must be between ${EPS_MIN} and ${EPS_MAX}.`);
+      return;
+    }
     setSubmitting(true);
     setDialogError('');
     try {
       const res = await axios.post(
         `${URL}/api/data-requests`,
-        { dataset_id: requestTarget.dataset_id, purpose },
+        {
+          dataset_id: requestTarget.dataset_id,
+          purpose,
+          requested_epsilon: Number(epsNum.toFixed(2)),
+        },
         { headers: authHeader() },
       );
       markRequested(requestTarget.dataset_id, {
@@ -95,7 +162,11 @@ function SearchPage({ onUserSelect, resetTrigger }) {
         request_id: res.data?.request_id,
       });
       setRequestTarget(null);
-      setSnackbar({ open: true, message: 'Request sent. The owner decides whether to approve it.', severity: 'success' });
+      setSnackbar({
+        open: true,
+        message: `Request sent asking for ε = ${trim(epsNum)}. The owner decides whether to approve it.`,
+        severity: 'success',
+      });
     } catch (error) {
       const msg = error?.response?.data?.error || error.message || 'Could not send the request.';
       if (error?.response?.status === 409) {
@@ -209,6 +280,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
               searchResults.map((result) => {
                 const myRequest = result.my_request;
                 const status = myRequest ? (REQUEST_STATUS[myRequest.status] || { label: myRequest.status, color: 'default' }) : null;
+                const canRequest = result.shareable && (!myRequest || REREQUESTABLE.includes(myRequest.status));
                 return (
                   <Grid item xs={12} sm={6} md={4} key={result.dataset_id}>
                     <Card variant="outlined" sx={{ borderRadius: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -257,21 +329,24 @@ function SearchPage({ onUserSelect, resetTrigger }) {
                             }
                             label="Select for Collaboration"
                           />
-                          {status ? (
-                            <Chip
-                              size="small"
-                              color={status.color}
-                              variant="outlined"
-                              clickable
-                              component={RouterLink}
-                              to="/data-requests"
-                              label={status.label}
-                            />
-                          ) : result.shareable ? (
-                            <Button size="small" variant="outlined" sx={{ borderRadius: 2 }} onClick={() => openRequest(result)}>
-                              Request data
-                            </Button>
-                          ) : null}
+                          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                            {status && (
+                              <Chip
+                                size="small"
+                                color={status.color}
+                                variant="outlined"
+                                clickable
+                                component={RouterLink}
+                                to="/data-requests"
+                                label={status.label}
+                              />
+                            )}
+                            {canRequest && (
+                              <Button size="small" variant="outlined" sx={{ borderRadius: 2 }} onClick={() => openRequest(result)}>
+                                {myRequest ? 'Request again' : 'Request data'}
+                              </Button>
+                            )}
+                          </Stack>
                         </Stack>
                       </CardActions>
                     </Card>
@@ -312,6 +387,65 @@ function SearchPage({ onUserSelect, resetTrigger }) {
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
             The owner sees this note when deciding.
           </Typography>
+
+          <Divider sx={{ my: 2.5 }} />
+
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+            Privacy budget you are asking for (ε)
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Lower ε means more noise — stronger privacy for the owner&apos;s participants. Higher ε
+            keeps the copy closer to their real data.
+          </Typography>
+
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={3}
+            alignItems={{ xs: 'stretch', sm: 'center' }}
+            sx={{ mt: 2 }}
+          >
+            <Box sx={{ flex: 1, px: 1 }}>
+              <Slider
+                value={sliderEps}
+                min={EPS_MIN}
+                max={EPS_MAX}
+                step={0.1}
+                valueLabelDisplay="auto"
+                marks={epsMarks(advertisedEps)}
+                onChange={(e, v) => setEpsText(String(v))}
+              />
+            </Box>
+            <TextField
+              label="ε"
+              size="small"
+              type="number"
+              sx={{ width: 150 }}
+              value={epsText}
+              onChange={(e) => setEpsText(e.target.value)}
+              inputProps={{ min: EPS_MIN, max: EPS_MAX, step: 0.1 }}
+              error={!epsValid}
+              helperText={epsValid ? `${EPS_MIN} – ${EPS_MAX}` : `Must be between ${EPS_MIN} and ${EPS_MAX}`}
+            />
+          </Stack>
+
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+            <Chip size="small" color={meaning.color} variant="outlined" label={meaning.label} />
+            <Typography variant="caption" color="text.secondary">{meaning.hint}</Typography>
+          </Stack>
+
+          {weaker ? (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              You are asking {requestTarget?.name || 'the owner'} to release this cohort with less
+              noise than they advertised — ε {trim(epsNum)} against their ε {trim(advertisedEps)}.
+              They see the number you ask for and can refuse the request on that basis.
+            </Alert>
+          ) : (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+              {requestTarget?.name || 'The owner'} sees the ε you ask for and can refuse it. If they
+              approve, the copy is built at this ε.
+            </Typography>
+          )}
+
           {dialogError && <Alert severity="error" sx={{ mt: 2 }}>{dialogError}</Alert>}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
@@ -320,7 +454,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
             variant="contained"
             sx={{ borderRadius: 2 }}
             onClick={submitRequest}
-            disabled={submitting || !purpose.trim()}
+            disabled={submitting || !purpose.trim() || !epsValid}
             startIcon={submitting ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {submitting ? 'Sending…' : 'Send request'}

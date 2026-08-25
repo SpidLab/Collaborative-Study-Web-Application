@@ -21,13 +21,15 @@ import axios from 'axios';
 import URL from '../../config';
 
 const POLL_INTERVAL_MS = 5000;
+// `collecting` no longer happens on new requests, but one raised before the flow
+// was simplified can still be sitting in it, so it stays pollable.
 const NON_TERMINAL = ['pending', 'collecting', 'classifying'];
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 const STATUS = {
   pending: { label: 'Pending', color: 'warning', icon: <HourglassTopIcon /> },
-  collecting: { label: 'Collecting samples', color: 'info', icon: <AutorenewIcon /> },
+  collecting: { label: 'In progress', color: 'info', icon: <AutorenewIcon /> },
   classifying: { label: 'Classifying', color: 'info', icon: <AutorenewIcon /> },
   complete: { label: 'Complete', color: 'success', icon: <CheckCircleOutlineIcon /> },
   failed: { label: 'Failed', color: 'error', icon: <ErrorOutlineIcon /> },
@@ -64,17 +66,13 @@ const pctConf = (c) => {
   return Number.isFinite(n) ? `${(n * 100).toFixed(1)}%` : '—';
 };
 
-// `n_samples` only exists once the requester's agent has actually exported the
-// batch. Before that, `max_samples` is a ceiling the requester asked for — not a
-// count — and the owner is approving on the strength of this number, so it must
-// never be rendered as if the samples were already counted.
-const samplePhrase = (r, whose) => {
-  if (r.n_samples != null) {
-    return r.max_samples != null && r.n_samples !== r.max_samples
-      ? `${r.n_samples} samples (${whose} capped it at ${r.max_samples})`
-      : `${r.n_samples} samples`;
-  }
-  return r.max_samples != null ? `up to ${r.max_samples} samples` : null;
+// The samples are uploaded before the request is raised, so both counts are real
+// from the moment it appears — the owner knows exactly how much they are being
+// asked to classify before they approve anything.
+const sizePhrase = (r) => {
+  if (r.n_samples == null && r.n_markers == null) return null;
+  const samples = r.n_samples != null ? `${r.n_samples} samples` : 'an unreported number of samples';
+  return r.n_markers != null ? `${samples} × ${r.n_markers} markers` : samples;
 };
 
 const MetaRow = ({ icon, children }) => (
@@ -124,7 +122,7 @@ const StageNote = ({ children }) => (
 
 const IncomingCard = ({ request, busy, onRespond }) => {
   const { status } = request;
-  const samples = samplePhrase(request, 'they');
+  const size = sizePhrase(request);
   return (
     <Card variant="outlined" sx={{ borderRadius: 2 }}>
       <CardContent>
@@ -152,8 +150,8 @@ const IncomingCard = ({ request, busy, onRespond }) => {
             Requester: {request.requester_name || '—'}
           </MetaRow>
           <MetaRow icon={<StorageOutlinedIcon fontSize="small" />}>
-            {samples || 'Sample count not reported yet'}
-            {request.phenotype ? ` from their ${request.phenotype} dataset` : ''}
+            They are asking you to classify {size || 'a batch of samples'}
+            {request.dataset_name ? ` — their uploaded “${request.dataset_name}”` : ''}.
           </MetaRow>
           <MetaRow icon={<LockOutlinedIcon fontSize="small" />}>
             Your model never leaves your machine. Your Site Agent loads your local copy, classifies
@@ -164,8 +162,10 @@ const IncomingCard = ({ request, busy, onRespond }) => {
         {status === 'pending' && (
           <>
             <Alert severity="info" sx={{ mt: 2 }}>
-              Approving starts a black-box run: no weights, architecture files, or training data are
-              sent anywhere. Your Site Agent has to be running for the classification to happen.
+              The samples are already uploaded and waiting, so the counts above are exactly what you
+              would be running. Approving starts a black-box run: no weights, architecture files, or
+              training data are sent anywhere. Your Site Agent has to be running for the
+              classification to happen.
             </Alert>
             <Stack direction="row" spacing={1.5} sx={{ mt: 2 }} justifyContent="flex-end">
               <Button
@@ -188,8 +188,7 @@ const IncomingCard = ({ request, busy, onRespond }) => {
 
         {status === 'collecting' && (
           <StageNote>
-            Approved. {request.requester_name || 'The requester'}&apos;s Site Agent is exporting the
-            samples to classify. Nothing runs on your machine until they arrive.
+            Approved. Waiting for your Site Agent to pick the run up — keep it running.
           </StageNote>
         )}
 
@@ -224,7 +223,7 @@ const IncomingCard = ({ request, busy, onRespond }) => {
 
 const OutgoingCard = ({ request, busy, onView }) => {
   const { status } = request;
-  const samples = samplePhrase(request, 'you');
+  const size = sizePhrase(request);
   return (
     <Card variant="outlined" sx={{ borderRadius: 2 }}>
       <CardContent>
@@ -252,20 +251,26 @@ const OutgoingCard = ({ request, busy, onView }) => {
             Model owner: {request.owner_name || '—'}
           </MetaRow>
           <MetaRow icon={<StorageOutlinedIcon fontSize="small" />}>
-            {samples || 'Sample count not reported yet'}
-            {request.phenotype ? ` from your ${request.phenotype} dataset` : ''}
+            {size || 'Sample count not reported'}
+            {request.dataset_name ? ` from your uploaded “${request.dataset_name}”` : ''}
+          </MetaRow>
+          <MetaRow icon={<LockOutlinedIcon fontSize="small" />}>
+            You get back predicted labels and confidences. The model itself stays on{' '}
+            {request.owner_name || 'the owner'}&apos;s machine and is never downloadable.
           </MetaRow>
         </Stack>
 
         {status === 'pending' && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            Waiting for {request.owner_name || 'the owner'} to approve or deny.
+            Waiting for {request.owner_name || 'the owner'} to approve or deny. They can see how many
+            samples and markers you are asking them to classify.
           </Typography>
         )}
 
         {status === 'collecting' && (
           <StageNote>
-            Your Site Agent is exporting the samples to be classified. Keep it running.
+            Approved. Waiting for {request.owner_name || 'the owner'}&apos;s Site Agent to pick the
+            run up.
           </StageNote>
         )}
 
@@ -356,7 +361,7 @@ const InferenceRequests = () => {
         open: true,
         severity: decision === 'approve' ? 'success' : 'info',
         message: decision === 'approve'
-          ? 'Approved. Your Site Agent will classify the samples locally once they arrive — keep it running.'
+          ? 'Approved. Your Site Agent will run the model on those samples on your machine — keep it running.'
           : 'Request denied. Your model was not run.',
       });
       await load(true);
@@ -433,7 +438,8 @@ const InferenceRequests = () => {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 780 }}>
             Black-box classification between sites. A model is always run by its owner&apos;s Site
             Agent on the owner&apos;s machine — the model is never transferred to anyone. Only the
-            samples to classify go in, and only predicted labels and confidences come out.
+            samples to classify go in, and only predicted labels and confidences come out. Those
+            samples are the ones the requester uploaded under Classification Data.
           </Typography>
         </Box>
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => load(false)} disabled={loading}>
@@ -482,8 +488,8 @@ const InferenceRequests = () => {
       ) : outgoing.length === 0 ? (
         <EmptyState
           title="You haven't requested any predictions yet."
-          body="Browse the Model Repository for a public model that accepts inference requests, and ask
-            its owner to classify samples from one of your datasets."
+          body="Upload the samples you want classified under Classification Data, then browse the Model
+            Repository for a public model that accepts inference requests and ask its owner to run it."
         />
       ) : (
         <Stack spacing={2}>

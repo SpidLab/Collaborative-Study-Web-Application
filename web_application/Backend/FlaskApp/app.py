@@ -76,6 +76,10 @@ LEGACY_EXPERIMENT_TYPES = [EXPERIMENT_DATA_SHARING]
 # sharing flow. The owner's Site Agent always runs it on its own machine.
 DS_QC_METHOD = "Privacy Transform (Data Sharing)"
 DS_DEFAULT_EPSILON = 5.0
+# Allowed privacy budget range, for both the owner's advertised value and the
+# value a requester asks for. Lower ε = more noise = stronger privacy.
+DS_MIN_EPSILON = 0.1
+DS_MAX_EPSILON = 20.0
 
 # Model Repository visibility. The repository is a METADATA CATALOG: model
 # weights live only on the owner's machine and are never downloadable through
@@ -4676,7 +4680,12 @@ def delete_model(model_id):
 # Strictly one-directional — the requester's data is not shared back.
 # ---------------------------------------------------------------------------
 
-DATA_REQUEST_ACTIVE = ("pending", "transforming")
+# Statuses that count as an open request, so a requester can't stack duplicates.
+# A copy that is ready but not yet collected is still open business; only once it
+# has been downloaded (and erased) may the same dataset be requested again.
+#   pending -> transforming -> ready -> downloading -> downloaded
+#   with failed / denied as terminal alternatives.
+DATA_REQUEST_ACTIVE = ("pending", "transforming", "ready", "downloading")
 
 
 def _dataset_share_settings(ds):
@@ -4731,9 +4740,10 @@ def update_my_dataset(dataset_id):
             eps = float(data.get('share_epsilon'))
         except (TypeError, ValueError):
             return jsonify({"error": "share_epsilon must be a number"}), 400
-        if not (0.1 <= eps <= 20.0):
+        if not (DS_MIN_EPSILON <= eps <= DS_MAX_EPSILON):
             return jsonify({
-                "error": "share_epsilon must be between 0.1 (very strong privacy) and 20 (very weak)."
+                "error": f"share_epsilon must be between {DS_MIN_EPSILON} "
+                         f"(very strong privacy) and {DS_MAX_EPSILON} (very weak)."
             }), 400
         update['share_epsilon'] = eps
     if not update:
@@ -4771,16 +4781,24 @@ def _request_doc(req, viewer_id):
         "requester_name": _user_name(req.get("requester_id")),
         "purpose": req.get("purpose"),
         "status": req.get("status"),
+        # The budget the copy is produced at, what the requester asked for, and
+        # what the owner had advertised. Requests created before requesters could
+        # choose only carry `epsilon`.
         "epsilon": req.get("epsilon"),
+        "requested_epsilon": req.get("requested_epsilon", req.get("epsilon")),
+        "advertised_epsilon": req.get("advertised_epsilon"),
         "mechanism": req.get("mechanism"),
         "error": req.get("error"),
         "created_at": _iso(req.get("created_at")),
         "responded_at": _iso(req.get("responded_at")),
         "completed_at": _iso(req.get("completed_at")),
+        "downloaded_at": _iso(req.get("downloaded_at")),
         "is_owner": str(req.get("owner_id")) == str(viewer_id),
         "is_requester": str(req.get("requester_id")) == str(viewer_id),
         "n_samples": req.get("n_samples"),
         "n_snps": req.get("n_snps"),
+        # False once the one-time download has happened and the copy was erased.
+        "data_available": bool(req.get("data")),
     }
 
 
@@ -4848,8 +4866,11 @@ def list_data_requests():
 def create_data_request():
     """Ask a dataset's owner for a differentially-private copy.
 
-    The epsilon is whatever the OWNER advertised — the requester does not get to
-    choose how much privacy the owner's data is released with.
+    The requester states the privacy budget they need (higher ε = less noise =
+    more analytically useful, but weaker privacy for the owner's participants).
+    The owner's advertised ε is only the suggested starting point; the owner sees
+    exactly what was asked for and approves or denies on that basis. If approved,
+    the copy is produced at the ε the REQUESTER asked for.
     """
     current_user, error_response = get_current_user()
     if error_response:
@@ -4878,6 +4899,20 @@ def create_data_request():
         return jsonify({"error": "You already have an open request for this dataset",
                         "request_id": existing["request_id"]}), 409
 
+    advertised = float(ds.get("share_epsilon", DS_DEFAULT_EPSILON))
+    requested_epsilon = data.get('requested_epsilon', data.get('epsilon'))
+    if requested_epsilon in (None, ''):
+        requested_epsilon = advertised
+    try:
+        requested_epsilon = float(requested_epsilon)
+    except (TypeError, ValueError):
+        return jsonify({"error": "requested_epsilon must be a number"}), 400
+    if not (DS_MIN_EPSILON <= requested_epsilon <= DS_MAX_EPSILON):
+        return jsonify({
+            "error": f"requested_epsilon must be between {DS_MIN_EPSILON} "
+                     f"(very strong privacy) and {DS_MAX_EPSILON} (very weak)."
+        }), 400
+
     req = {
         "request_id": "dreq_" + uuid.uuid4().hex[:16],
         "dataset_id": str(dataset_id),
@@ -4886,7 +4921,12 @@ def create_data_request():
         "requester_id": uid,
         "purpose": str(data.get('purpose') or '').strip() or None,
         "status": "pending",
-        "epsilon": float(ds.get("share_epsilon", DS_DEFAULT_EPSILON)),
+        # What the requester asked for, and what the owner had advertised, kept
+        # apart so the owner can see the gap when deciding. `epsilon` is the one
+        # the transform will actually run at.
+        "requested_epsilon": requested_epsilon,
+        "advertised_epsilon": advertised,
+        "epsilon": requested_epsilon,
         "mechanism": ds.get("share_mechanism") or "Randomized response (ε-DP) + row shuffle",
         "created_at": datetime.utcnow(),
     }
@@ -4957,12 +4997,37 @@ def respond_to_data_request(request_id):
                     "job_id": job_id}), 202
 
 
+def _erase_shared_copy(req):
+    """Delete every trace of a shared copy from this server, keeping the record.
+
+    The shared dataset is a one-time handover: once the requester has it, the
+    server must not still be holding a copy. That means the matrix on the request,
+    the qc_results document it may have overflowed into, AND the copy sitting in
+    the owner's agent job result. What survives is the audit trail — who asked,
+    at what ε, when it was approved and downloaded, and how big it was.
+    """
+    data = req.get("data")
+    if isinstance(data, dict) and "__ref__" in data:
+        db['qc_results'].delete_one({"ref": data["__ref__"]})
+    db['data_requests'].update_one(
+        {"request_id": req["request_id"]},
+        {"$set": {"status": "downloaded", "downloaded_at": datetime.utcnow()},
+         "$unset": {"data": ""}})
+    if req.get("job_id"):
+        db.jobs.update_one({"job_id": req["job_id"]}, {"$unset": {"result": ""}})
+    logging.info("Erased the shared copy for data request %s after download", req["request_id"])
+
+
 @app.route('/api/data-requests/<request_id>/download', methods=['GET'])
 def download_data_request(request_id):
-    """The requester downloads the approved, privacy-protected copy as CSV.
+    """The requester downloads the approved, privacy-protected copy as CSV — once.
 
     One-directional by construction: only the requester on this request can read
     it, and it only ever contains the owner's DP-noised matrix, never raw data.
+
+    This is a ONE-TIME handover. The copy is erased from the server as soon as it
+    has been served, so the collaboration server does not accumulate everyone's
+    shared datasets. Only the metadata/history of the request remains afterwards.
     """
     current_user, error_response = get_current_user()
     if error_response:
@@ -4974,40 +5039,271 @@ def download_data_request(request_id):
     if str(req.get("requester_id")) != uid:
         return jsonify({"error": "Only the requester can download this data"}), 403
     req = _reconcile_data_request(req)
+    if req.get("status") == "downloaded":
+        return jsonify({
+            "error": "This dataset has already been downloaded and has been erased from the server.",
+            "hint": "A shared copy is handed over once. Ask the owner for a new request if you need it again.",
+        }), 410
     if req.get("status") != "ready":
         return jsonify({"error": f"This data isn't ready yet (status: {req.get('status')})"}), 409
 
-    matrix = _resolve_uploaded_matrix(req.get("data"))
-    if not matrix:
-        return jsonify({"error": "No shared data available."}), 409
-    sample_ids = sorted(matrix.keys())
-    snp_ids = sorted({s for row in matrix.values() if isinstance(row, dict) for s in row.keys()})
-    lines = ["sample_id," + ",".join(snp_ids)]
-    for sid in sample_ids:
-        row = matrix.get(sid) or {}
-        lines.append(str(sid) + "," + ",".join("" if row.get(s) is None else str(row.get(s)) for s in snp_ids))
+    # Claim the download before serving, so two concurrent clicks can't both get a
+    # copy and so a crash mid-response can't leave the data sitting here.
+    claimed = db['data_requests'].update_one(
+        {"request_id": request_id, "status": "ready"},
+        {"$set": {"status": "downloading"}})
+    if claimed.modified_count != 1:
+        return jsonify({"error": "This dataset is already being downloaded, or was just erased."}), 409
 
-    owner = db.users.find_one({"_id": ObjectId(req["owner_id"])}, {"name": 1})
-    return jsonify({
-        "request_id": request_id,
-        "phenotype": req.get("phenotype"),
-        "owner_name": (owner or {}).get("name"),
-        "epsilon": req.get("epsilon"),
-        "mechanism": req.get("mechanism"),
-        "note": "Privacy-transformed (differentially-private) genotypes shared by the owner. Not raw data.",
-        "sample_count": len(sample_ids),
-        "snp_count": len(snp_ids),
-        "csv": "\n".join(lines),
-    }), 200
+    try:
+        matrix = _resolve_uploaded_matrix(req.get("data"))
+        if not matrix:
+            # Nothing to hand over — put it back so the state is honest.
+            db['data_requests'].update_one(
+                {"request_id": request_id, "status": "downloading"},
+                {"$set": {"status": "ready"}})
+            return jsonify({"error": "No shared data available."}), 409
+        sample_ids = sorted(matrix.keys())
+        snp_ids = sorted({s for row in matrix.values() if isinstance(row, dict) for s in row.keys()})
+        lines = ["sample_id," + ",".join(snp_ids)]
+        for sid in sample_ids:
+            row = matrix.get(sid) or {}
+            lines.append(str(sid) + "," + ",".join("" if row.get(s) is None else str(row.get(s)) for s in snp_ids))
+        payload = {
+            "request_id": request_id,
+            "phenotype": req.get("phenotype"),
+            "owner_name": _user_name(req.get("owner_id")),
+            "epsilon": req.get("epsilon"),
+            "mechanism": req.get("mechanism"),
+            "note": "Privacy-transformed (differentially-private) genotypes shared by the owner. "
+                    "Not raw data. This was a one-time handover — the server no longer holds a copy.",
+            "sample_count": len(sample_ids),
+            "snp_count": len(snp_ids),
+            "csv": "\n".join(lines),
+        }
+    except Exception:
+        db['data_requests'].update_one(
+            {"request_id": request_id, "status": "downloading"},
+            {"$set": {"status": "ready"}})
+        raise
+
+    # Record the sizes on the request before the matrix goes, so the history stays
+    # meaningful once the data itself is gone.
+    db['data_requests'].update_one(
+        {"request_id": request_id},
+        {"$set": {"n_samples": len(sample_ids), "n_snps": len(snp_ids)}})
+    _erase_shared_copy(req)
+    return jsonify(payload), 200
+
+
+# ---------------------------------------------------------------------------
+# Classification data — samples uploaded specifically to be classified.
+#
+# Deliberately separate from My Data. The datasets in My Data are a site's own
+# research cohorts: they stay on the collaborator's machine, are described by
+# metadata only, and are what GWAS/FL/data-sharing run against. Samples you send
+# to somebody else's model are a different thing entirely — you are choosing to
+# hand them over — so they live in their own place, are uploaded explicitly, and
+# can be deleted at any time. Nothing here is ever advertised or shareable.
+# ---------------------------------------------------------------------------
+
+CLASSIFICATION_DATA_COLLECTION = "classification_datasets"
+# Guard against a pasted whole-genome export: cells = samples x markers.
+CLASSIFICATION_MAX_CELLS = int(os.getenv("CLASSIFICATION_MAX_CELLS", "2000000"))
+
+
+def _classification_meta(doc):
+    """Metadata view — never the sample matrix itself."""
+    return {
+        "id": doc.get("dataset_id"),
+        "name": doc.get("name"),
+        "n_samples": doc.get("n_samples"),
+        "n_markers": doc.get("n_markers"),
+        "source_filename": doc.get("source_filename"),
+        "uploaded_at": _iso(doc.get("uploaded_at")),
+        "note": doc.get("note"),
+    }
+
+
+def _own_classification_dataset(dataset_id, uid):
+    """(doc, error_response) for a classification dataset the caller uploaded."""
+    doc = db[CLASSIFICATION_DATA_COLLECTION].find_one({"dataset_id": str(dataset_id)})
+    if not doc:
+        return None, (jsonify({"error": "Classification dataset not found"}), 404)
+    if str(doc.get("owner_id")) != str(uid):
+        return None, (jsonify({"error": "That dataset does not belong to you"}), 403)
+    return doc, None
+
+
+def _classification_samples(doc):
+    """The sample matrix, dereferencing the overflow document if there is one."""
+    return _resolve_uploaded_matrix(doc.get("samples"))
+
+
+def _parse_classification_csv(text):
+    """Parse an uploaded CSV into {sample_id: {marker: value}}.
+
+    First column is the sample id, remaining columns are markers. Label columns
+    are dropped — the label is what the model is being asked to predict.
+    """
+    try:
+        df = pd.read_csv(io.StringIO(text), index_col=0)
+    except Exception as exc:
+        raise ValueError(f"Could not read that CSV: {exc}")
+    if df.empty or df.shape[1] == 0:
+        raise ValueError("That CSV has no data rows or no marker columns.")
+    label_cols = [c for c in df.columns if str(c).strip().lower() in
+                  {"phenotype", "case_control", "status", "group", "sex", "label"}]
+    if label_cols:
+        df = df.drop(columns=label_cols)
+    if df.shape[1] == 0:
+        raise ValueError("That CSV only contains label columns — no markers to classify on.")
+    if len(df) > INFERENCE_MAX_SAMPLES:
+        raise ValueError(
+            f"That file has {len(df)} samples; the limit for a classification request is "
+            f"{INFERENCE_MAX_SAMPLES}. Upload a subset instead."
+        )
+    if len(df) * df.shape[1] > CLASSIFICATION_MAX_CELLS:
+        raise ValueError(
+            f"That file is too large ({len(df)} samples x {df.shape[1]} markers). "
+            f"Please reduce it to under {CLASSIFICATION_MAX_CELLS:,} values."
+        )
+
+    # Genotypes have to be numeric to be classified. A file with nothing numeric in
+    # it is the wrong file (or not a genotype matrix at all) — catching that here
+    # beats handing the model a grid of blanks and returning meaningless labels.
+    numeric = df.apply(lambda s: pd.to_numeric(s, errors="coerce"))
+    usable = int(numeric.notna().sum().sum())
+    if usable == 0:
+        raise ValueError(
+            "None of the values in that file are numeric. Genotype values should be "
+            "0, 1 or 2, with the sample id in the first column — check you uploaded "
+            "the right file."
+        )
+
+    matrix = {}
+    for sample_id, row in df.iterrows():
+        matrix[str(sample_id)] = {str(k): (None if pd.isna(v) else v) for k, v in row.items()}
+    return matrix, len(df), int(df.shape[1])
+
+
+@app.route('/api/classification-data', methods=['GET'])
+def list_classification_data():
+    """The caller's uploaded classification datasets (metadata only)."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    docs = db[CLASSIFICATION_DATA_COLLECTION].find(
+        {"owner_id": uid}, {"samples": 0}).sort("uploaded_at", -1)
+    out = [_classification_meta(d) for d in docs]
+    return jsonify({"datasets": out, "count": len(out),
+                    "max_samples": INFERENCE_MAX_SAMPLES}), 200
+
+
+@app.route('/api/classification-data', methods=['POST'])
+def upload_classification_data():
+    """Upload a CSV of samples you want a model owner to classify.
+
+    Unlike My Data — which is metadata-only because that data never leaves your
+    machine — this really does upload the values, because sending them is the
+    whole point of a classification request. Keep it to the samples you actually
+    want classified.
+    """
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+
+    text = None
+    filename = None
+    upload = request.files.get('file')
+    if upload is not None and upload.filename:
+        filename = secure_filename(upload.filename)
+        if not filename.lower().endswith(('.csv', '.txt', '.tsv')):
+            return jsonify({"error": "Please upload a .csv file"}), 400
+        try:
+            text = upload.read().decode('utf-8-sig')
+        except UnicodeDecodeError:
+            return jsonify({"error": "That file isn't UTF-8 text — is it really a CSV?"}), 400
+        name = (request.form.get('name') or '').strip()
+        note = (request.form.get('note') or '').strip()
+    else:
+        body = request.get_json(silent=True) or {}
+        text = body.get('csv')
+        name = str(body.get('name') or '').strip()
+        note = str(body.get('note') or '').strip()
+    if not text or not text.strip():
+        return jsonify({"error": "No CSV content received. Attach a file as 'file'."}), 400
+
+    try:
+        matrix, n_samples, n_markers = _parse_classification_csv(text)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    dataset_id = "cds_" + uuid.uuid4().hex[:16]
+    doc = {
+        "dataset_id": dataset_id,
+        "owner_id": uid,
+        "name": name or (filename or "Uploaded samples"),
+        "source_filename": filename,
+        "note": note or None,
+        "n_samples": n_samples,
+        "n_markers": n_markers,
+        "uploaded_at": datetime.utcnow(),
+    }
+    # Reuse the same overflow convention as agent results for wide matrices.
+    is_oversize = app.config.get("AGENT_IS_OVERSIZE")
+    if callable(is_oversize) and is_oversize(matrix):
+        ref = f"classification:{dataset_id}:{uuid.uuid4().hex}"
+        db['qc_results'].update_one({"ref": ref}, {"$set": {"ref": ref, "value": matrix}}, upsert=True)
+        doc["samples"] = {"__ref__": ref}
+    else:
+        doc["samples"] = matrix
+    db[CLASSIFICATION_DATA_COLLECTION].insert_one(dict(doc))
+    logging.info("Classification dataset %s uploaded by %s (%d x %d)",
+                 dataset_id, uid, n_samples, n_markers)
+    return jsonify(_classification_meta(doc)), 201
+
+
+@app.route('/api/classification-data/<dataset_id>', methods=['DELETE'])
+def delete_classification_data(dataset_id):
+    """Remove an uploaded classification dataset and its samples."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    doc, error_response = _own_classification_dataset(dataset_id, uid)
+    if error_response:
+        return error_response
+    in_flight = db['inference_requests'].find_one({
+        "classification_dataset_id": str(dataset_id),
+        "status": {"$in": list(INFERENCE_ACTIVE)}})
+    if in_flight:
+        return jsonify({
+            "error": "This dataset is in use by an open classification request.",
+            "hint": "Wait for it to finish, or cancel that request first.",
+            "request_id": in_flight["request_id"],
+        }), 409
+    samples = doc.get("samples")
+    if isinstance(samples, dict) and "__ref__" in samples:
+        db['qc_results'].delete_one({"ref": samples["__ref__"]})
+    db[CLASSIFICATION_DATA_COLLECTION].delete_one({"dataset_id": str(dataset_id)})
+    return jsonify({"message": "Classification dataset deleted."}), 200
 
 
 # ---------------------------------------------------------------------------
 # Black-box inference — machine learning as a service, model stays local.
 #
-# A model owner can offer classification without ever handing over the model.
-# The requester's agent exports the samples, the server relays them, the OWNER's
-# agent loads its own local copy of the model, classifies, and returns only the
-# predictions. The samples are deleted from this server as soon as they are.
+# A model owner can offer classification without ever handing over the model. The
+# requester uploads the samples they want classified (see Classification Data
+# above), the OWNER's agent fetches them, loads its own local copy of the model,
+# and returns only the predictions. The model never moves.
+#
+#   pending -> classifying -> complete, with denied / failed as terminal.
+# ("collecting" existed when the requester's agent had to export samples from a
+# My Data cohort first; samples are uploaded up front now, so that stage is gone.
+# It stays in INFERENCE_ACTIVE so any request still mid-flight is handled.)
 # ---------------------------------------------------------------------------
 
 INFERENCE_ACTIVE = ("pending", "collecting", "classifying")
@@ -5023,12 +5319,15 @@ def _inference_view(req, viewer_id):
         "owner_name": _user_name(req.get("owner_id")),
         "requester_id": str(req.get("requester_id")),
         "requester_name": _user_name(req.get("requester_id")),
-        "phenotype": req.get("phenotype"),
+        # What is being classified: an uploaded classification dataset. `phenotype`
+        # only appears on requests made before uploads replaced My Data cohorts.
+        "dataset_name": req.get("dataset_name") or req.get("phenotype"),
+        "classification_dataset_id": req.get("classification_dataset_id"),
         "note": req.get("note"),
         "status": req.get("status"),
         "error": req.get("error"),
         "n_samples": req.get("n_samples"),
-        "max_samples": req.get("max_samples"),
+        "n_markers": req.get("n_markers"),
         "created_at": _iso(req.get("created_at")),
         "responded_at": _iso(req.get("responded_at")),
         "completed_at": _iso(req.get("completed_at")),
@@ -5083,6 +5382,9 @@ def _reconcile_inference_request(req):
     result = job.get("result") or {}
 
     if status == "collecting":
+        # Legacy path: requests raised before samples were uploaded up front had
+        # to pull them off the requester's agent first. No new request enters this
+        # state; it exists so anything mid-flight during the switch still finishes.
         samples = result.get("samples")
         if samples is None:
             db['inference_requests'].update_one(
@@ -5149,16 +5451,30 @@ def list_inference_requests():
 
 @app.route('/api/inference-requests', methods=['POST'])
 def create_inference_request():
-    """Ask a model owner to classify samples from one of your datasets."""
+    """Ask a model owner to classify samples you uploaded for that purpose.
+
+    Points at a classification dataset (uploaded under Classification Data), never
+    at a My Data research cohort — those stay on their own machine and are not
+    yours to hand to somebody else's model.
+    """
     current_user, error_response = get_current_user()
     if error_response:
         return error_response
     uid = str(current_user.id)
     data = request.get_json(silent=True) or {}
     model_id = data.get('model_id')
-    dataset_id = data.get('dataset_id')
-    if not model_id or not dataset_id:
-        return jsonify({"error": "model_id and dataset_id are required"}), 400
+    classification_dataset_id = data.get('classification_dataset_id')
+    if not model_id:
+        return jsonify({"error": "model_id is required"}), 400
+    if not classification_dataset_id:
+        if data.get('dataset_id'):
+            return jsonify({
+                "error": "Classification requests use an uploaded classification dataset, "
+                         "not a My Data dataset.",
+                "hint": "Upload the samples under Classification Data, then pass "
+                        "classification_dataset_id.",
+            }), 400
+        return jsonify({"error": "classification_dataset_id is required"}), 400
 
     model = _model_repo_collection().find_one({"model_id": model_id})
     if not model or _model_visibility(model) != MODEL_VISIBILITY_PUBLIC:
@@ -5171,15 +5487,9 @@ def create_inference_request():
     if owner_id == uid:
         return jsonify({"error": "That model is already yours — run it locally instead"}), 400
 
-    ds, error_response = _owned_dataset(dataset_id, uid)
+    ds, error_response = _own_classification_dataset(classification_dataset_id, uid)
     if error_response:
         return error_response
-
-    try:
-        max_samples = int(data.get('max_samples') or INFERENCE_MAX_SAMPLES)
-    except (TypeError, ValueError):
-        return jsonify({"error": "max_samples must be a whole number"}), 400
-    max_samples = max(1, min(max_samples, INFERENCE_MAX_SAMPLES))
 
     existing = db['inference_requests'].find_one({
         "model_id": model_id, "requester_id": uid, "status": {"$in": list(INFERENCE_ACTIVE)}})
@@ -5192,10 +5502,13 @@ def create_inference_request():
         "model_id": model_id,
         "owner_id": owner_id,
         "requester_id": uid,
-        "dataset_id": str(dataset_id),
-        "phenotype": ds.get("phenotype"),
+        "classification_dataset_id": str(classification_dataset_id),
+        "dataset_name": ds.get("name"),
         "note": str(data.get('note') or '').strip() or None,
-        "max_samples": max_samples,
+        # Already known at request time, because the samples are uploaded up front —
+        # so the owner can see exactly how much they are being asked to classify.
+        "n_samples": ds.get("n_samples"),
+        "n_markers": ds.get("n_markers"),
         "status": "pending",
         "created_at": datetime.utcnow(),
     }
@@ -5214,8 +5527,8 @@ def create_inference_request():
 def respond_to_inference_request(request_id):
     """Model owner approves or denies a classification request.
 
-    Approving starts the relay: the REQUESTER's agent exports the samples, then
-    the OWNER's agent classifies them with its local copy of the model.
+    The samples were uploaded up front, so approving goes straight to the OWNER's
+    agent, which classifies them with its own local copy of the model.
     """
     current_user, error_response = get_current_user()
     if error_response:
@@ -5241,26 +5554,27 @@ def respond_to_inference_request(request_id):
             return jsonify({"error": "This request was already answered"}), 409
         return jsonify({"message": "Request denied."}), 200
 
+    # The samples are already here, so there is nothing to collect — go straight
+    # to classification on the owner's own machine.
     claimed = db['inference_requests'].update_one(
         {"request_id": request_id, "status": "pending"},
-        {"$set": {"status": "collecting", "responded_at": datetime.utcnow()}})
+        {"$set": {"status": "classifying", "responded_at": datetime.utcnow()}})
     if claimed.modified_count != 1:
         return jsonify({"error": "This request was already answered"}), 409
 
     job_id = enqueue_job(
         collaboration_uuid=None,
-        user_id=str(req["requester_id"]),
-        action="export_samples",
+        user_id=uid,
+        action="classify_samples",
         params={
-            "phenotype": req.get("phenotype"),
-            "dataset_id": req.get("dataset_id"),
-            "max_samples": int(req.get("max_samples", INFERENCE_MAX_SAMPLES)),
+            "model_id": req.get("model_id"),
             "request_id": request_id,
+            "samples_path": f"/api/agent/inference/{request_id}/samples",
         })
     db['inference_requests'].update_one({"request_id": request_id}, {"$set": {"job_id": job_id}})
     return jsonify({
-        "message": "Approved. The requester's agent will send the samples, then your "
-                   "agent will classify them locally.",
+        "message": "Approved. Your Site Agent will classify these samples locally with "
+                   "your own copy of the model — keep it running.",
         "job_id": job_id,
     }), 202
 

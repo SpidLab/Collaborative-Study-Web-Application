@@ -432,7 +432,14 @@ def register_agent_api(app, db, signing_key=None):
             return jsonify({"error": "This request is not addressed to you"}), 403
         if req.get("status") != "classifying":
             return jsonify({"error": f"Request is not awaiting classification (status={req.get('status')})"}), 409
+        # Normally the samples live on the requester's uploaded classification
+        # dataset; `samples` on the request itself is the older relay path, kept so
+        # a request made before the switch still resolves.
         samples = req.get("samples")
+        if not samples and req.get("classification_dataset_id"):
+            cds = db["classification_datasets"].find_one(
+                {"dataset_id": str(req["classification_dataset_id"])}) or {}
+            samples = cds.get("samples")
         if isinstance(samples, dict) and "__ref__" in samples:
             doc = qc_results.find_one({"ref": samples["__ref__"]}) or {}
             samples = doc.get("value")
