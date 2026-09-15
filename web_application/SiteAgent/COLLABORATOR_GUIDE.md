@@ -414,7 +414,16 @@ Then double-click **Start Agent** again (or use the Docker method below).
 
 **Mac: run the helper directly with Docker (bypasses Gatekeeper)**
 Terminal and Docker are trusted by macOS, so this always works no matter what
-Gatekeeper does:
+Gatekeeper does.
+
+> **You do not need Docker's website or Docker's documentation for any of this.**
+> Every command you need is printed below. Docker Desktop is only an engine: you
+> install it once, leave it running in the background, and never have to open or
+> configure it again. It has **no built-in command window**, so there is nothing to
+> find inside it — you type these commands in your computer's own terminal program
+> (**Terminal**), which is part of macOS and completely separate from Docker Desktop.
+
+Steps:
 
 1. Open **Docker Desktop**; wait until the whale says *running*.
 2. Open **Terminal**: press **⌘ + Space**, type `Terminal`, press **Return**.
@@ -454,14 +463,21 @@ Control off** (it's a one-way switch you can't turn back on). Two options:
 **Unblock** → **OK**, then re-extract and double-click **Start Agent** again.
 
 *Reliable fix — start the same helper directly with Docker* (Windows already trusts
-Docker, so Smart App Control won't block it):
+Docker, so Smart App Control won't block it).
+
+> **You do not need Docker's website or Docker's documentation for any of this.**
+> Every command you need is printed below. Docker Desktop is only an engine: you
+> install it once, leave it running in the background, and never have to open or
+> configure it again. It has **no built-in command window**, so there is nothing to
+> find inside it — you type these commands in your computer's own terminal program
+> (**PowerShell**), which is part of Windows and completely separate from Docker Desktop.
+
+Steps:
 
 1. Open **Docker Desktop**; wait until it says *running*.
 2. Open **PowerShell**: click **Start**, type `PowerShell`, press **Enter**.
-   > **PowerShell is part of Windows — it is not inside Docker Desktop.** Don't look
-   > for it in the Docker window or on Docker's website. Docker Desktop only has to be
-   > *running* in the background; you type these commands in the separate blue/black
-   > PowerShell window.
+   (A blue or black PowerShell window opens. This is where every command below
+   goes — not into Docker Desktop.)
 3. Go to the unzipped kit folder (adjust the path to where you saved it):
    ```
    cd "$HOME\Downloads\collabstudy-agent-kit"
