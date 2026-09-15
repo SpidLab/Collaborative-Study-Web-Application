@@ -1,33 +1,10 @@
 # Collaborator Guide — Connecting Your Computer to the Study
 
-Welcome! This guide takes you from zero to done. **Neither coding nor typing of
+Welcome! This guide takes you from zero to done. **No coding and no typing of
 commands is required** — you'll install one free app, put your data in a folder,
 copy a code from the website, and **double-click one file**. That's it.
 
 Total time: about **10–15 minutes**, once.
-
----
-
-### Two things to know before you read on
-
-**1. Your study address is:**
-
->     https://YOUR-STUDY-SERVER
-
-You will use this **exact same address in two places** — nowhere else:
-- in your **browser**, to log in to the study website, and
-- **once**, if the helper asks for the "server address" (it is already filled in as
-  the default — just press **Enter**).
-
-It looks like numbers instead of a normal name. That is expected and correct.
-
-**2. This guide covers both Mac and Windows.** Each step is labelled. Please read only
-your own platform's lines:
-
-| If you are on... | Read the lines marked | **Ignore entirely** |
-|---|---|---|
-| **Mac** | **[MAC]** | SmartScreen, Smart App Control, PowerShell, `.bat` — all Windows-only |
-| **Windows** | **[WINDOWS]** | Gatekeeper, "unidentified developer", Terminal, `.command` — all Mac-only |
 
 ---
 
@@ -71,9 +48,10 @@ handles the rest by itself.
 
 - [ ] A Windows or Mac computer you can leave on sometimes.
 - [ ] Your genotype data saved as a **CSV** file.
-- [x] The **study link** — already known: **https://YOUR-STUDY-SERVER**
+- [ ] The **study link** (your coordinator gives you this — e.g. `https://3-21-x-x.sslip.io`).
       This one link is **both** the website you log into **and** the "server address"
-      the helper asks for. You do not need to find it anywhere or ask for it.
+      you'll paste into the helper. (It may look like a string of numbers + `.sslip.io`
+      instead of a normal name — that's expected and fine.)
 - [ ] The **SiteAgent kit** from your coordinator — usually a **`.zip`**. Save it
       somewhere easy and **unzip it**; inside is the "Start Agent" file you'll
       double-click and this guide. You don't open or edit anything inside it.
@@ -93,15 +71,14 @@ Docker Desktop is the engine that runs the helper safely in the background.
 4. Wait until the whale icon in the top menu bar is steady and says **"running"**.
 
 **Windows**
-1. Go to <https://www.docker.com/products/docker-desktop/>. **Hover over the "Download
-   Docker Desktop" button and choose "Download for Windows."**
+1. Go to <https://www.docker.com/products/docker-desktop/> → download for Windows.
 2. Run the installer → **Next → Next → Finish** (accept defaults). Restart if asked.
 3. Open **Docker Desktop** from the Start menu. Wait until the bottom-left corner is
    **green / "running"**.
 
 > **Windows — two first-time prompts you may see (both are normal):**
 > - **"WSL update required"** / a window mentioning `wsl.exe --update`. Docker needs
->   the Windows Subsystem for Linux. Open **PowerShell** and run `wsl.exe --update`, then
+>   the Windows Subsystem for Linux. Open **PowerShell** and run `wsl --update`, then
 >   reopen Docker Desktop. (More info: <https://aka.ms/wslinstall>.)
 > - **A Docker subscription / service-agreement "Accept" screen.** Docker Desktop is
 >   **free for personal and small-business use** — click **Accept** to continue;
@@ -237,41 +214,15 @@ The code is now on your clipboard — go straight to Step 4 and paste it when as
 
 Open the **SiteAgent folder** your coordinator gave you.
 
-**[MAC]** — double-click **`Start Agent.command`**.
+**Mac** — double-click **`Start Agent.command`**.
+- First time only, macOS may warn it's from an unidentified developer. If so:
+  **right-click** the file → **Open** → **Open**. (You only do this once.)
 
-**Expect macOS to block it on the first double-click.** This is normal and happens to
-everyone: the file arrived from the internet, so macOS quarantines it until you approve
-it once. **The first attempt is supposed to fail — that is not a mistake on your part.**
-Here is the 30-second unblock, done once and never again:
-
-1. Double-click **`Start Agent.command`**. macOS refuses to open it. Dismiss the message.
-2. Open **System Settings → Privacy & Security** and scroll to the bottom. There is a
-   line saying *"Start Agent.command" was blocked*, with an **"Open Anyway"** button
-   next to it. Click **Open Anyway** and confirm with your password or Touch ID.
-3. Double-click **`Start Agent.command`** again. It runs this time.
-
-*Note:* on macOS 14 (Sonoma) and older there is a shortcut — right-click the file →
-**Open** → **Open**. Apple removed that shortcut in macOS 15 (Sequoia), so on a current
-Mac use the Privacy & Security route above.
-
-**Prefer to skip the security prompt entirely?** Terminal is always trusted by macOS, so
-this one line works on every version. Open Terminal (**⌘ + Space**, type `Terminal`) and
-paste:
-
-```
-cd ~/Downloads/collabstudy-agent-kit && xattr -c *.command *.sh && ./collab-agent.sh
-```
-
-**[WINDOWS]** — double-click **`Start Agent.bat`**.
-- If Windows **SmartScreen** warns, click **More info → Run anyway** (one time).
-- If Windows **Smart App Control** blocks it entirely (a stricter, newer protection
-  with no "Run anyway" button), don't try to turn Smart App Control off — it's a
-  one-way switch. Use the simple Docker method in **Troubleshooting → "Windows: Smart
-  App Control blocked Start Agent."**
+**Windows** — double-click **`Start Agent.bat`**.
+- If Windows SmartScreen warns, click **More info → Run anyway** (one time).
 
 A window opens and asks **three short questions**:
-1. **Study server address** — it is already filled in as `https://YOUR-STUDY-SERVER`.
-   Just press **Enter**. (Nothing to look up, nothing to paste.)
+1. **Study server address** — paste the website address from your coordinator.
 2. **Your top data folder** — the folder from Step 2 (e.g. `collab-data`).
 3. **Your connection code** — paste the code you copied in Step 3.
 
@@ -398,107 +349,10 @@ Open **Docker Desktop** and wait until it says *running* (steady whale / green),
 double-click "Start Agent" again.
 
 **Mac: "Start Agent" won't open (unidentified developer)**
-Right-click the file → **Open** → **Open** (first time only). On **macOS Sequoia (15)
-or newer**, if there's no "Open" button: double-click once (it's blocked), then open
-**System Settings → Privacy & Security**, scroll down, and click **"Open Anyway,"** then
-double-click again. Unlike Windows' Smart App Control, macOS always lets you allow
-it — you never get permanently stuck.
-
-**Mac: "Start Agent" opens as text, or nothing happens**
-The file lost its "executable" flag while unzipping. Fix it once in **Terminal**:
-```
-cd ~/Downloads/collabstudy-agent-kit
-chmod +x "Start Agent.command" collab-agent.sh
-```
-Then double-click **Start Agent** again (or use the Docker method below).
-
-**Mac: run the helper directly with Docker (bypasses Gatekeeper)**
-Terminal and Docker are trusted by macOS, so this always works no matter what
-Gatekeeper does.
-
-> **You do not need Docker's website or Docker's documentation for any of this.**
-> Every command you need is printed below. Docker Desktop is only an engine: you
-> install it once, leave it running in the background, and never have to open or
-> configure it again. It has **no built-in command window**, so there is nothing to
-> find inside it — you type these commands in your computer's own terminal program
-> (**Terminal**), which is part of macOS and completely separate from Docker Desktop.
-
-Steps:
-
-1. Open **Docker Desktop**; wait until the whale says *running*.
-2. Open **Terminal**: press **⌘ + Space**, type `Terminal`, press **Return**.
-   (Like PowerShell on Windows, Terminal is part of macOS — not something inside
-   Docker Desktop. Docker Desktop only needs to be *running*.) Then go to the kit
-   folder:
-   ```
-   cd ~/Downloads/collabstudy-agent-kit
-   ```
-3. Build the helper (first time only, a few minutes):
-   ```
-   docker build -t collabstudy-agent .
-   ```
-4. Start it — copy the whole line below, then change just two things: your connection
-   code (Step 3) and your data-folder path (Step 2). Keep the quotes and the
-   `:/data:ro` at the end:
-   ```
-   docker run -d --name collab-agent --restart unless-stopped -e SERVER_URL=https://YOUR-STUDY-SERVER -e ENROLL_CODE=PASTE_YOUR_CODE_HERE -v "$HOME/collab-data:/data:ro" -v collab_agent_config:/config collabstudy-agent
-   ```
-5. Confirm it connected (Ctrl+C to stop watching; the helper keeps running):
-   ```
-   docker logs -f collab-agent
-   ```
-
-Later: `docker stop collab-agent` / `docker start collab-agent`. Same helper — it just
-skips the launcher file.
+Right-click the file → **Open** → **Open**. You only need to do this the first time.
 
 **Windows: SmartScreen blocked it**
 Click **More info → Run anyway** (one time).
-
-**Windows: Smart App Control blocked "Start Agent"**
-Windows 11's **Smart App Control** can block our launcher because it isn't
-code-signed — and unlike SmartScreen it gives no "Run anyway." **Don't turn Smart App
-Control off** (it's a one-way switch you can't turn back on). Two options:
-
-*Quick thing to try first:* right-click the **downloaded ZIP** → **Properties** → tick
-**Unblock** → **OK**, then re-extract and double-click **Start Agent** again.
-
-*Reliable fix — start the same helper directly with Docker* (Windows already trusts
-Docker, so Smart App Control won't block it).
-
-> **You do not need Docker's website or Docker's documentation for any of this.**
-> Every command you need is printed below. Docker Desktop is only an engine: you
-> install it once, leave it running in the background, and never have to open or
-> configure it again. It has **no built-in command window**, so there is nothing to
-> find inside it — you type these commands in your computer's own terminal program
-> (**PowerShell**), which is part of Windows and completely separate from Docker Desktop.
-
-Steps:
-
-1. Open **Docker Desktop**; wait until it says *running*.
-2. Open **PowerShell**: click **Start**, type `PowerShell`, press **Enter**.
-   (A blue or black PowerShell window opens. This is where every command below
-   goes — not into Docker Desktop.)
-3. Go to the unzipped kit folder (adjust the path to where you saved it):
-   ```
-   cd "$HOME\Downloads\collabstudy-agent-kit"
-   ```
-4. Build the helper (first time only, a few minutes):
-   ```
-   docker build -t collabstudy-agent .
-   ```
-5. Start it — copy the whole line below, then change just two things: your connection
-   code (Step 3) and your data-folder path (Step 2). Keep the quotes and the
-   `:/data:ro` at the end:
-   ```
-   docker run -d --name collab-agent --restart unless-stopped -e SERVER_URL=https://YOUR-STUDY-SERVER -e ENROLL_CODE=PASTE_YOUR_CODE_HERE -v "C:\Users\<you>\collab-data:/data:ro" -v collab_agent_config:/config collabstudy-agent
-   ```
-6. Confirm it connected (Ctrl+C to stop watching; the helper keeps running):
-   ```
-   docker logs -f collab-agent
-   ```
-
-Later: `docker stop collab-agent` / `docker start collab-agent`. It's the same helper —
-it just skips the launcher file, which is all Smart App Control objects to.
 
 **"No dataset for phenotype 'xxx'"**
 The task needs a dataset you don't have locally. Check your top data folder has a

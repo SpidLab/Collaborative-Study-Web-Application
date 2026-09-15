@@ -57,7 +57,7 @@ setup_wizard() {
   say ""
 
   # 1) Server URL
-  local default_url="https://YOUR-STUDY-SERVER"
+  local default_url="https://collab.example.org"
   read -r -p "1) Paste the study server address (from your coordinator) [${default_url}]: " SERVER_URL
   SERVER_URL="${SERVER_URL:-$default_url}"
 
