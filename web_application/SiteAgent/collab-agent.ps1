@@ -59,7 +59,7 @@ function Start-Setup {
   Say "This takes about 2 minutes. Your raw data never leaves this machine."
   Say ""
 
-  $defaultUrl = "https://collab.example.org"
+  $defaultUrl = "https://YOUR-STUDY-SERVER"
   $serverUrl = Read-Host "1) Paste the study server address (from your coordinator) [$defaultUrl]"
   if ([string]::IsNullOrWhiteSpace($serverUrl)) { $serverUrl = $defaultUrl }
 
