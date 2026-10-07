@@ -41,10 +41,14 @@ const ModelRepository = () => {
   // models (or clears `loading` while a newer fetch is still running).
   const fetchSeq = useRef(0);
 
-  const fetchModels = useCallback(async () => {
+  // `silent` keeps the grid mounted while refreshing. Toggling `loading` swaps the whole
+  // grid for a spinner, which unmounts every ModelCard — and with it any dialog a card is
+  // hosting. A background refresh (a finished privacy audit, publishing its rating from
+  // inside the dialog) must not close the dialog the user is still reading.
+  const fetchModels = useCallback(async ({ silent = false } = {}) => {
     const seq = fetchSeq.current + 1;
     fetchSeq.current = seq;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const resp = await axios.get(`${URL}/api/models`, {
         headers: authHeader(),
@@ -62,6 +66,8 @@ const ModelRepository = () => {
   }, [tab]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
+
+  const refreshModelsQuietly = useCallback(() => fetchModels({ silent: true }), [fetchModels]);
 
   const replaceModel = (fresh) => setModels((list) => list.map(
     (m) => (m.model_id === fresh.model_id ? { ...m, ...fresh } : m),
@@ -154,7 +160,7 @@ const ModelRepository = () => {
             startIcon={<ScienceOutlinedIcon />}>
             Classification requests
           </Button>
-          <Button size="small" startIcon={<RefreshIcon />} onClick={fetchModels} disabled={loading}>
+          <Button size="small" startIcon={<RefreshIcon />} onClick={() => fetchModels()} disabled={loading}>
             Refresh
           </Button>
           <Button size="small" variant="contained" startIcon={<AddIcon />}
@@ -185,7 +191,7 @@ const ModelRepository = () => {
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}
-          action={<Button size="small" onClick={fetchModels}>Retry</Button>}>
+          action={<Button size="small" onClick={() => fetchModels()}>Retry</Button>}>
           {error}
         </Alert>
       )}
@@ -205,6 +211,7 @@ const ModelRepository = () => {
                 onEdit={setEditTarget}
                 onDelete={setDeleteTarget}
                 onRequestClassification={setInferenceTarget}
+                onAuditChange={refreshModelsQuietly}
               />
             </Grid>
           ))}

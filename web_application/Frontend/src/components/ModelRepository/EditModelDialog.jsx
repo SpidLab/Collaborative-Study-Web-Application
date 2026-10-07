@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Alert, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
-  Grid, TextField, Typography,
+  Grid, MenuItem, TextField, Typography,
 } from '@mui/material';
 import axios from 'axios';
 import URL from '../../config';
@@ -9,6 +9,16 @@ import URL from '../../config';
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 const asText = (v) => (v == null ? '' : String(v));
+
+// The model object carries `local_file` back to its owner but deliberately not
+// `local_format`, so there is nothing to prefill the select with. Defaulting it to the
+// blank option and always sending it would PATCH `local_format: ''`, which the server
+// stores as null — quietly erasing a format the owner declared at registration, after
+// which their agent falls back to guessing from the extension (and an unrecognised
+// extension is guessed as scikit-learn). So the blank slot means "leave the recorded
+// format alone" and is omitted from the body; going back to extension detection is its
+// own explicit choice.
+const KEEP_FORMAT = '__keep__';
 
 const EditModelDialog = ({ open, model, onClose, onSaved }) => {
   const [form, setForm] = useState({});
@@ -29,6 +39,8 @@ const EditModelDialog = ({ open, model, onClose, onSaved }) => {
       num_classes: asText(model.num_classes),
       num_rounds: asText(model.num_rounds),
       num_participants: asText(model.num_participants),
+      local_file: asText(model.local_file),
+      local_format: model.local_format != null ? String(model.local_format) : KEEP_FORMAT,
     });
     setError('');
   }, [open, model]);
@@ -57,6 +69,8 @@ const EditModelDialog = ({ open, model, onClose, onSaved }) => {
       body.num_classes = form.num_classes;
       body.num_rounds = form.num_rounds;
       body.num_participants = form.num_participants;
+      body.local_file = trimmed('local_file');
+      if (form.local_format !== KEEP_FORMAT) body.local_format = form.local_format || '';
     }
     try {
       const resp = await axios.patch(`${URL}/api/models/${model.model_id}`, body, { headers: authHeader() });
@@ -122,6 +136,34 @@ const EditModelDialog = ({ open, model, onClose, onSaved }) => {
               <Grid item xs={12} md={4}>
                 <TextField label="Contributing sites" type="number" fullWidth
                   value={form.num_participants || ''} onChange={set('num_participants')} />
+              </Grid>
+
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Where the file sits on your machine</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  <b>The file is not uploaded — only its name is recorded</b>, so your own Site Agent
+                  knows which file to open for a classification request or a privacy audit. Correct it
+                  here if you have renamed or moved the file within your agent&apos;s model folder
+                  (<code>/models</code> in Docker). Supported: scikit-learn <code>.joblib</code> /{' '}
+                  <code>.pkl</code>, TorchScript <code>.pt</code>, and this sandbox&apos;s own format.
+                </Typography>
+              </Grid>
+              <Grid item xs={12} md={7}>
+                <TextField label="Model file name" fullWidth
+                  value={form.local_file || ''} onChange={set('local_file')}
+                  placeholder="my_model.joblib"
+                  helperText="The file name only — not a path, and not an upload." />
+              </Grid>
+              <Grid item xs={12} md={5}>
+                <TextField select label="File format" fullWidth
+                  value={form.local_format ?? KEEP_FORMAT} onChange={set('local_format')}
+                  helperText="Left as recorded unless you change it here.">
+                  <MenuItem value={KEEP_FORMAT}>Leave the recorded format as it is</MenuItem>
+                  <MenuItem value="">Detect from the extension</MenuItem>
+                  <MenuItem value="sklearn">scikit-learn (.joblib, .pkl)</MenuItem>
+                  <MenuItem value="torchscript">TorchScript (.pt)</MenuItem>
+                  <MenuItem value="native">This sandbox&apos;s own format</MenuItem>
+                </TextField>
               </Grid>
             </>
           )}

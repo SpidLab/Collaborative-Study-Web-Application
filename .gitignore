@@ -70,3 +70,14 @@ web_application/SiteAgent/fl-data/
 # ===== Logs & temp =====
 *.log
 *.tmp
+
+# Site Agent local state — must never be committed.
+# .cfg*/token holds a live JWT the agent authenticates with; committing one would
+# publish a working credential for that collaborator's account.
+web_application/SiteAgent/.cfg*/
+web_application/SiteAgent/.agentconfig*/
+web_application/SiteAgent/.owned*/
+web_application/SiteAgent/.fl_logs/
+# Generated per-site demo genotypes (recreate with fl/export_agent_assets.py).
+web_application/SiteAgent/fl-data/
+web_application/SiteAgent/raw-data/

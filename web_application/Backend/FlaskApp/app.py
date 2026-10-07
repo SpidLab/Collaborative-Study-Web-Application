@@ -4451,6 +4451,17 @@ def _model_meta(doc, viewer_id=None, include_history=False):
         "visibility": visibility,
         "allow_inference_requests": bool(doc.get("allow_inference_requests")) and visibility == MODEL_VISIBILITY_PUBLIC,
         "is_owner": bool(viewer_id) and owner_id == str(viewer_id),
+        # Owner-only: where the file sits on their machine. Nobody else's business, and
+        # of no use to them either. The format is returned alongside the name so the
+        # owner can see what they declared — without it the edit form cannot show the
+        # current value, and a blind re-save would wipe it.
+        "local_file": doc.get("local_file") if (bool(viewer_id) and owner_id == str(viewer_id)) else None,
+        "local_format": doc.get("local_format") if (bool(viewer_id) and owner_id == str(viewer_id)) else None,
+        # Membership-inference rating, so privacy risk sits beside accuracy rather
+        # than in a separate report. Owners always see their own; everyone else only
+        # sees a rating the owner chose to publish.
+        "privacy_audit": _audit_view(doc, bool(viewer_id) and owner_id == str(viewer_id),
+                                     include_report=include_history),
     }
     if include_history:
         meta["training_history"] = doc.get("training_history") or []
@@ -4593,6 +4604,11 @@ def register_model():
         "metrics": metrics,
         "visibility": visibility,
         "allow_inference_requests": allow_inference,
+        # Where the owner keeps the model on their OWN machine. Just a file name — the
+        # file itself is never uploaded. Their agent needs it to find and load the model
+        # for a classification request or a privacy audit.
+        "local_file": str(data.get('local_file') or '').strip() or None,
+        "local_format": (str(data.get('local_format') or '').strip().lower() or None),
     }
     _model_repo_collection().insert_one(dict(entry))
     logging.info("Registered external model %s for user %s (visibility=%s)", model_id, uid, visibility)
@@ -4620,7 +4636,8 @@ def update_model(model_id):
     # actually computed.
     editable = ['name', 'description', 'task', 'framework', 'architecture', 'dataset']
     if (doc.get('source') or MODEL_SOURCE_FEDERATED) == MODEL_SOURCE_EXTERNAL:
-        editable += ['num_classes', 'num_rounds', 'num_participants']
+        editable += ['num_classes', 'num_rounds', 'num_participants',
+                     'local_file', 'local_format']
     for key in editable:
         if key in data:
             value = data[key]
@@ -5097,6 +5114,267 @@ def download_data_request(request_id):
 
 
 # ---------------------------------------------------------------------------
+# Privacy risk analysis — membership inference against a model in the repository.
+#
+# The question a membership-inference attack answers is: given this trained model,
+# can someone tell whether a particular person's genotype was in its training
+# cohort? For genomics that is a disclosure in itself — cohorts are usually defined
+# by having a condition — so it is the number that decides whether a model is safe
+# to list, and it belongs next to the model's accuracy, not in a separate report.
+#
+# The audit runs on the OWNER's Site Agent, because that is the only place both the
+# model and its training data exist. Only aggregate metrics come back.
+# ---------------------------------------------------------------------------
+
+MIA_ACTION = "membership_inference"
+MIA_ACTIVE = ("queued", "running")
+# After this long with no result, a queued audit is treated as abandoned so the owner
+# can start another. Generous: agents are often started hours after the request.
+MIA_STALE_SECONDS = int(os.getenv("MIA_STALE_SECONDS", "7200"))
+
+
+def _audit_view(model_doc, viewer_is_owner, include_report=True):
+    """Audit state for a model, trimmed to what the viewer is allowed to see.
+
+    A published audit shows non-owners the rating and headline numbers, so a
+    researcher can judge a model before relying on it. The detailed breakdown —
+    per-class leakage, the ROC curve, cohort sizes — stays with the owner: it maps
+    out exactly where the model is weakest, which is a roadmap for an attacker.
+    """
+    audit = (model_doc or {}).get("privacy_audit") or {}
+    if not audit:
+        return None
+    status = audit.get("status")
+    published = bool(audit.get("published"))
+    report = audit.get("report") or {}
+    # A queued/running re-run still carries the previous completed report, so others
+    # keep seeing the published rating instead of it vanishing mid-refresh.
+    showable = status == "complete" or (report and status in ("queued", "running"))
+    if not viewer_is_owner and not (published and showable):
+        return None
+
+    risk = report.get("risk") or {}
+    view = {
+        "status": status,
+        "published": published,
+        "requested_at": _iso(audit.get("requested_at")),
+        "completed_at": _iso(audit.get("completed_at")),
+        "error": audit.get("error"),
+    }
+    if report:
+        view["risk_level"] = risk.get("level")
+        view["summary"] = risk.get("summary")
+        view["attack_accuracy"] = (report.get("black_box") or {}).get("attack_accuracy")
+        view["auc"] = (report.get("black_box") or {}).get("auc")
+        view["audited_at"] = report.get("audited_at")
+        # The full breakdown is only worth carrying on a single-model read; a
+        # listing of many audited models would otherwise haul a ROC curve each.
+        if viewer_is_owner and include_report:
+            view["report"] = report
+    return view
+
+
+def _reconcile_privacy_audit(model_doc):
+    """Fold a finished agent job into the model's stored audit.
+
+    Same lazy pattern as the request flows: there is no background worker, so a
+    read reconciles the audit against its job, guarded by status.
+    """
+    audit = (model_doc or {}).get("privacy_audit") or {}
+    if audit.get("status") not in MIA_ACTIVE or not audit.get("job_id"):
+        return model_doc
+    job = db.jobs.find_one({"job_id": audit["job_id"]})
+    if not job:
+        return model_doc
+    model_id = model_doc.get("model_id")
+
+    if job.get("status") == "failed":
+        _model_repo_collection().update_one(
+            {"model_id": model_id, "privacy_audit.status": {"$in": list(MIA_ACTIVE)}},
+            {"$set": {"privacy_audit.status": "failed",
+                      "privacy_audit.completed_at": datetime.utcnow(),
+                      "privacy_audit.error": (job.get("error") or "The audit could not be completed.")[:500]}})
+        return _model_repo_collection().find_one({"model_id": model_id})
+    if job.get("status") != "complete":
+        if job.get("status") == "in_progress" and audit.get("status") == "queued":
+            _model_repo_collection().update_one(
+                {"model_id": model_id, "privacy_audit.status": "queued"},
+                {"$set": {"privacy_audit.status": "running"}})
+            return _model_repo_collection().find_one({"model_id": model_id})
+        return model_doc
+
+    report = (job.get("result") or {}).get("privacy_audit")
+    report = _resolve_uploaded_matrix(report) if isinstance(report, dict) and "__ref__" in report else report
+    if not report:
+        _model_repo_collection().update_one(
+            {"model_id": model_id, "privacy_audit.status": {"$in": list(MIA_ACTIVE)}},
+            {"$set": {"privacy_audit.status": "failed",
+                      "privacy_audit.completed_at": datetime.utcnow(),
+                      "privacy_audit.error": "The agent returned no audit report."}})
+    else:
+        _model_repo_collection().update_one(
+            {"model_id": model_id, "privacy_audit.status": {"$in": list(MIA_ACTIVE)}},
+            {"$set": {"privacy_audit.status": "complete",
+                      "privacy_audit.completed_at": datetime.utcnow(),
+                      "privacy_audit.report": report,
+                      "privacy_audit.error": None}})
+    return _model_repo_collection().find_one({"model_id": model_id})
+
+
+@app.route('/api/models/<model_id>/privacy-audit', methods=['POST'])
+def start_privacy_audit(model_id):
+    """Owner asks their own Site Agent to measure this model's membership leakage."""
+    doc, uid, error_response = _require_model_owner(model_id)
+    if error_response:
+        return error_response
+
+    audit = doc.get('privacy_audit') or {}
+    if audit.get('status') in MIA_ACTIVE:
+        # An audit queued while the owner's agent was offline would otherwise wedge
+        # this model forever: the job never gets claimed, so the status never moves,
+        # and every later attempt 409s. After the job queue has given up on it, let
+        # the owner start a fresh one.
+        job = db.jobs.find_one({"job_id": audit.get('job_id')}) if audit.get('job_id') else None
+        stale = (job or {}).get('status') == 'failed'
+        requested = audit.get('requested_at')
+        if not stale and requested and isinstance(requested, datetime):
+            stale = (datetime.utcnow() - requested).total_seconds() > MIA_STALE_SECONDS
+        if not stale:
+            return jsonify({
+                "error": "An audit is already running for this model",
+                "status": audit.get('status'),
+                "hint": "If your Site Agent was offline, start it — the queued job will "
+                        "be picked up. You can start a fresh audit once this one times out.",
+            }), 409
+
+    data = request.get_json(silent=True) or {}
+    is_federated = (doc.get('source') or MODEL_SOURCE_FEDERATED) == MODEL_SOURCE_FEDERATED
+    cohort = {}
+
+    if is_federated:
+        # We know exactly how this model's data was split, so the agent reproduces it.
+        collab = db['collaborations'].find_one({"uuid": doc.get('collaboration_uuid')}) or {}
+        state = collab.get('fl_state') or {}
+        participant = next((p for p in (state.get('participants') or [])
+                            if str(p.get('uid')) == uid), {})
+        if not participant.get('phenotype'):
+            return jsonify({
+                "error": "Your training dataset for this collaboration can't be identified, "
+                         "so the audit has nothing to measure membership against.",
+            }), 409
+        cohort = {"phenotype": participant.get('phenotype'),
+                  "dataset_id": participant.get('dataset_id')}
+    else:
+        # A model the owner brought with them: we have no idea how they split their
+        # data, and guessing would produce numbers that look authoritative and mean
+        # nothing. They tell us which cohort was trained on and which was held out.
+        members = str(data.get('members_phenotype') or '').strip()
+        non_members = str(data.get('non_members_phenotype') or '').strip()
+        if not members or not non_members:
+            return jsonify({
+                "error": "Auditing a model you registered yourself needs you to say which "
+                         "of your datasets it was trained on, and which was held out.",
+                "hint": "Membership leakage is measured by comparing the two, and only you "
+                        "know how this model was split. Pass members_phenotype and "
+                        "non_members_phenotype (the dataset folder names on your machine).",
+                "needs": ["members_phenotype", "non_members_phenotype"],
+            }), 400
+        if members == non_members:
+            return jsonify({
+                "error": "The held-out dataset must be different from the training one — "
+                         "comparing a cohort with itself measures nothing.",
+            }), 400
+        cohort = {"members_phenotype": members, "non_members_phenotype": non_members,
+                  "label_col": str(data.get('label_col') or '').strip() or None}
+
+    try:
+        targeted_fpr = float(data.get('targeted_fpr', 0.01))
+    except (TypeError, ValueError):
+        return jsonify({"error": "targeted_fpr must be a number"}), 400
+    if not (0.0001 <= targeted_fpr <= 0.5):
+        return jsonify({"error": "targeted_fpr must be between 0.0001 and 0.5"}), 400
+
+    job_id = enqueue_job(
+        collaboration_uuid=None,
+        user_id=uid,
+        action=MIA_ACTION,
+        params={
+            "model_id": model_id,
+            "num_classes": doc.get('num_classes'),
+            "class_names": doc.get('class_names') or [],
+            "targeted_fpr": targeted_fpr,
+            "attack_train_ratio": 0.5,
+            "local_file": doc.get('local_file'),
+            "local_format": doc.get('local_format'),
+            **cohort,
+        })
+    # Re-running keeps the previous report in place until the new one lands. Blanking
+    # it would strip a published rating from everyone else's view of the model for as
+    # long as the re-run takes — a model would appear to lose its audit because its
+    # owner asked for a fresher one.
+    _model_repo_collection().update_one({"model_id": model_id}, {"$set": {
+        "privacy_audit.status": "queued",
+        "privacy_audit.job_id": job_id,
+        "privacy_audit.requested_at": datetime.utcnow(),
+        "privacy_audit.published": bool(audit.get('published')),
+        "privacy_audit.report": audit.get('report'),
+        "privacy_audit.error": None,
+    }})
+    logging.info("Privacy audit queued for model %s (job %s)", model_id, job_id)
+    return jsonify({
+        "message": "Audit queued. Your Site Agent will run it locally against your own "
+                   "copy of the model and its training data — keep the agent running.",
+        "job_id": job_id,
+        "status": "queued",
+    }), 202
+
+
+@app.route('/api/models/<model_id>/privacy-audit', methods=['GET'])
+def get_privacy_audit(model_id):
+    """Audit status/results. Owners see everything; others only a published summary."""
+    current_user, error_response = get_current_user()
+    if error_response:
+        return error_response
+    uid = str(current_user.id)
+    doc = _model_repo_collection().find_one({"model_id": model_id})
+    if not doc:
+        return jsonify({"error": "Model not found"}), 404
+    owner_id = str(doc.get("owner_id") or doc.get("created_by_id") or "")
+    is_owner = owner_id == uid
+    if not is_owner and _model_visibility(doc) != MODEL_VISIBILITY_PUBLIC:
+        return jsonify({"error": "Model not found"}), 404
+
+    if is_owner:
+        doc = _reconcile_privacy_audit(doc) or doc
+    view = _audit_view(doc, is_owner)
+    if view is None:
+        return jsonify({"status": "none",
+                        "available": bool(is_owner)}), 200
+    return jsonify(view), 200
+
+
+@app.route('/api/models/<model_id>/privacy-audit/publish', methods=['POST'])
+def publish_privacy_audit(model_id):
+    """Owner chooses whether the audit's rating is shown alongside the model.
+
+    Publishing a good result is how a model earns trust; publishing a bad one is
+    the owner's call, so it is opt-in either way and never automatic.
+    """
+    doc, uid, error_response = _require_model_owner(model_id)
+    if error_response:
+        return error_response
+    audit = doc.get('privacy_audit') or {}
+    if audit.get('status') != 'complete':
+        return jsonify({"error": "There is no completed audit to publish"}), 409
+    published = bool((request.get_json(silent=True) or {}).get('published', True))
+    _model_repo_collection().update_one(
+        {"model_id": model_id}, {"$set": {"privacy_audit.published": published}})
+    return jsonify({"message": "Audit summary is now visible to others."
+                    if published else "Audit summary is now private to you.",
+                    "published": published}), 200
+
+
+# ---------------------------------------------------------------------------
 # Classification data — samples uploaded specifically to be classified.
 #
 # Deliberately separate from My Data. The datasets in My Data are a site's own
@@ -5309,6 +5587,17 @@ def delete_classification_data(dataset_id):
 INFERENCE_ACTIVE = ("pending", "collecting", "classifying")
 
 
+def _model_local_file(model_id):
+    """The file name the owner keeps a model under on their own machine.
+
+    Needed by the agent to load a model this sandbox did not train — the model id is an
+    opaque handle, so nobody should have to rename their file to match it.
+    """
+    doc = _model_repo_collection().find_one(
+        {"model_id": model_id}, {"local_file": 1, "local_format": 1}) or {}
+    return {"local_file": doc.get("local_file"), "local_format": doc.get("local_format")}
+
+
 def _inference_view(req, viewer_id):
     model = _model_repo_collection().find_one({"model_id": req.get("model_id")}, {"name": 1, "dataset": 1})
     return {
@@ -5413,6 +5702,7 @@ def _reconcile_inference_request(req):
                 "model_id": req.get("model_id"),
                 "request_id": req["request_id"],
                 "samples_path": f"/api/agent/inference/{req['request_id']}/samples",
+                **_model_local_file(req.get("model_id")),
             })
         db['inference_requests'].update_one(
             {"request_id": req["request_id"]}, {"$set": {"job_id": job_id}})
@@ -5570,6 +5860,8 @@ def respond_to_inference_request(request_id):
             "model_id": req.get("model_id"),
             "request_id": request_id,
             "samples_path": f"/api/agent/inference/{request_id}/samples",
+            # Where the owner keeps the file, for a model they registered themselves.
+            **_model_local_file(req.get("model_id")),
         })
     db['inference_requests'].update_one({"request_id": request_id}, {"$set": {"job_id": job_id}})
     return jsonify({

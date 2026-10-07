@@ -37,11 +37,14 @@ ALLOWED_RESULT_KEYS = {"surviving_samples", "surviving_snps", "pca_coords", "tra
                        "model_saved",
                        # Black-box inference: the requester's agent exports the samples to
                        # be classified, the model owner's agent returns predictions only.
-                       "samples", "predictions"}
+                       "samples", "predictions",
+                       # Membership-inference risk report — aggregate metrics only.
+                       "privacy_audit"}
 
 # Results that belong to a single request rather than a collaboration are kept on
 # the job document (see _store_job_payload) instead of on a collaboration doc.
-JOB_SCOPED_ACTIONS = {"fl_save_model", "export_samples", "classify_samples"}
+JOB_SCOPED_ACTIONS = {"fl_save_model", "export_samples", "classify_samples",
+                      "membership_inference"}
 
 # Arrays/objects larger than this many entries are offloaded to the qc_results
 # collection to stay under MongoDB's 16 MB document limit (existing pattern).

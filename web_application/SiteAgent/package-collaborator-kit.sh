@@ -33,6 +33,8 @@ INCLUDE=(
   "agent.py"
   "actions.py"
   "fl_local.py"
+  "mia_local.py"
+  "local_models.py"
   "jobs_client.py"
   "data_loader.py"
 )

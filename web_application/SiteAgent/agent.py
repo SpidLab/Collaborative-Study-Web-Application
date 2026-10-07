@@ -37,11 +37,14 @@ ALLOWED_RESULT_KEYS = {
     # deliberately sends out — only for a classification THEY requested — and
     # "predictions" is all a model owner ever returns.
     "samples", "predictions",
+    # Membership-inference risk report: aggregate metrics about how much the model
+    # leaks about its own training cohort. Never per-sample membership calls.
+    "privacy_audit",
 }
 
 # Jobs that operate on a model or a supplied payload rather than on a local
 # dataset. These must not try to resolve a phenotype folder.
-DATASET_FREE_ACTIONS = {"fl_save_model", "classify_samples"}
+DATASET_FREE_ACTIONS = {"fl_save_model", "classify_samples", "membership_inference"}
 
 
 def egress_guard(result):
@@ -113,6 +116,10 @@ def handle_job(job, client):
     if action in DATASET_FREE_ACTIONS:
         if action == "fl_save_model":
             result = actions.run_save_model(params, Config.OWNED_MODELS_DIR, client.fetch)
+        elif action == "membership_inference":
+            # Resolves its own dataset(s): one for a model trained here, or the two the
+            # owner nominated for a model they registered themselves.
+            result = actions.run_membership_inference(params, Config.OWNED_MODELS_DIR, Config.DATA_DIR)
         else:  # classify_samples
             result = actions.run_classify_samples(params, Config.OWNED_MODELS_DIR, client.fetch)
         egress_guard(result)

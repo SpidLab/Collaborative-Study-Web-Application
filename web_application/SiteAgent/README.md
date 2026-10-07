@@ -84,8 +84,41 @@ See `.env.example`. Key variables: `SERVER_URL`, `AGENT_TOKEN`/`ENROLL_CODE`,
 | Job action        | Local work                                   | Uploaded output |
 |-------------------|----------------------------------------------|-----------------|
 | `chained_qc`      | Missing → MAF → HWE → PCA filter chain        | surviving SNP/sample IDs, PCA coordinates |
-| `privacy_transform` | Privacy transform (noise/synthetic)        | privacy-transformed matrix (for relatedness) |
+| `privacy_transform` | Privacy transform (noise/synthetic)        | privacy-transformed matrix (relatedness QC, and shared-data requests) |
 | `gwas_summary`    | Per-SNP case/control counts on QC'd samples   | `stats` counts |
+| `fl_project`      | PCA projection + Laplace DP noise             | `pca_coords` |
+| `fl_train_round`  | One local training round on this site's data  | `model_update` (weights + local metrics) |
+| `fl_save_model`   | Saves the finished global model to this machine | `model_saved` confirmation only |
+| `export_samples`  | Exports samples the collaborator asked a third party to classify | `samples` |
+| `classify_samples`| Runs this site's own model on samples sent to it | `predictions` only |
+| `membership_inference` | Membership-inference privacy audit of a local model | aggregate risk metrics only — never per-sample membership |
 
 An **egress guard** (`agent.py`) refuses to upload anything other than these
 known derived outputs, and rejects oversized payloads.
+
+## Bringing your own model
+
+A model you trained elsewhere can offer classification and be privacy-audited, without
+ever uploading it. Put the file in the agent's model folder (`OWNED_MODELS_DIR`,
+`/models` in Docker) and tell the website its file name when you register the model.
+
+Supported formats: **scikit-learn** (`.joblib`, `.pkl`), **TorchScript** (`.pt`), and the
+sandbox's own federated models (saved there automatically).
+
+Alongside it you can drop a sidecar `<model_id>.json`:
+
+```json
+{
+  "file": "my_model.joblib",
+  "format": "sklearn",
+  "num_classes": 2,
+  "class_names": ["control", "case"],
+  "features": ["rs12345", "rs67890", "..."]
+}
+```
+
+`features` matters more than it looks. A model is a function of its input columns in a
+fixed order, and samples arrive as a mapping with no inherent order — so without it the
+markers are used alphabetically, and if that is not how the model was trained every
+prediction will be confidently wrong. Declaring the order lets the agent align by name
+and refuse outright when the markers do not match.

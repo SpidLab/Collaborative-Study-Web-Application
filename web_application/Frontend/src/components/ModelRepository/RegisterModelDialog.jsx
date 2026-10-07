@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import {
   Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
-  Divider, FormControlLabel, Grid, MenuItem, Switch, TextField, Typography,
+  Divider, FormControlLabel, Grid, MenuItem, Stack, Switch, TextField, Typography,
 } from '@mui/material';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
+import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
 import axios from 'axios';
 import URL from '../../config';
 
@@ -13,6 +14,7 @@ const EMPTY = {
   name: '', description: '', dataset: '', task: '', framework: '', architecture: '',
   num_classes: '', class_names: '', num_rounds: '', num_participants: '',
   accuracy: '', f1_macro: '', loss: '',
+  local_file: '', local_format: '',
   visibility: 'private', allow_inference_requests: false,
 };
 
@@ -70,6 +72,8 @@ const RegisterModelDialog = ({ open, onClose, onRegistered }) => {
         num_rounds: form.num_rounds,
         num_participants: form.num_participants,
         metrics,
+        local_file: form.local_file.trim(),
+        local_format: form.local_format,
         visibility: form.visibility,
         allow_inference_requests: form.allow_inference_requests,
       }, { headers: authHeader() });
@@ -93,9 +97,12 @@ const RegisterModelDialog = ({ open, onClose, onRegistered }) => {
           </Typography>
           <Typography variant="body2" sx={{ mt: 0.5 }}>
             Your model file stays on your own machine. What gets listed here is the description
-            below: what the model does, what it was trained on, and how it scored. If you switch on
-            classification requests, your Site Agent runs the model locally and returns predictions —
-            the weights still never move.
+            below: what the model does, what it was trained on, and how it scored. Further down you
+            can also record the file&apos;s <b>name</b> — the name only, never the file — so your own
+            Site Agent can find it. With that one fact a model you trained elsewhere does everything
+            a model trained here does: it can answer classification requests and it can be
+            privacy-audited, both entirely on your machine, returning predictions and aggregate
+            numbers and nothing else.
           </Typography>
         </Alert>
 
@@ -177,6 +184,43 @@ const RegisterModelDialog = ({ open, onClose, onRegistered }) => {
             <TextField label="Loss" fullWidth value={form.loss} onChange={set('loss')}
               error={badLoss}
               helperText={badLoss ? 'Enter a number, or leave it blank' : 'Validation loss, if you have one.'} />
+          </Grid>
+
+          <Grid item xs={12}>
+            <Divider />
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 2 }}>
+              <FolderOutlinedIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+              <Typography variant="subtitle2">Where the file sits on your machine</Typography>
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              Optional, but it is what makes the entry do something. <b>The file is not uploaded and
+              never will be — only its name is recorded here</b>, so your own Site Agent knows which
+              file to open when a classification request or a privacy audit arrives. Put the file in
+              your agent&apos;s model folder (<code>/models</code> in Docker) and give the name below.
+              Supported: scikit-learn <code>.joblib</code> / <code>.pkl</code>, TorchScript{' '}
+              <code>.pt</code>, and this sandbox&apos;s own format. If the file is already named after
+              the model id (<code>&lt;model_id&gt;.joblib</code>) the agent finds it without this
+              field, and an optional <code>&lt;model_id&gt;.json</code> beside it can declare the
+              column order, class count and class names.
+            </Typography>
+          </Grid>
+          <Grid item xs={12} md={7}>
+            <TextField
+              label="Model file name" fullWidth
+              value={form.local_file} onChange={set('local_file')}
+              placeholder="my_model.joblib"
+              helperText="The file name only — not a path, and not an upload. Leave blank to add it later."
+            />
+          </Grid>
+          <Grid item xs={12} md={5}>
+            <TextField select label="File format" fullWidth
+              value={form.local_format} onChange={set('local_format')}
+              helperText="Detected from the extension unless you say otherwise.">
+              <MenuItem value="">Detect from the extension</MenuItem>
+              <MenuItem value="sklearn">scikit-learn (.joblib, .pkl)</MenuItem>
+              <MenuItem value="torchscript">TorchScript (.pt)</MenuItem>
+              <MenuItem value="native">This sandbox&apos;s own format</MenuItem>
+            </TextField>
           </Grid>
 
           <Grid item xs={12}>

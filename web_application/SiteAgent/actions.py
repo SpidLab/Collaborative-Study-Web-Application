@@ -13,6 +13,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+import data_loader
+
 # Make the bundled QC modules importable. The Dockerfile copies the QC modules and
 # gwas_summary.py into ./qc_modules — these are the authoritative, version-matched
 # copies, so they take priority on sys.path. The repo's Collaborator_Server is only
@@ -49,6 +51,10 @@ NAME_TO_ID = {
 }
 
 _pca_model_cache = {}
+
+# Mirrors fl.pipeline.TRAINING_SEED. Only reached for a model saved before the seed was
+# recorded alongside it; a mismatch would make the audit's "members" the wrong samples.
+DEFAULT_TRAINING_SEED = 42
 
 
 def _load_pca_model(models_dir, model_name):
@@ -367,6 +373,13 @@ def run_save_model(params, owned_dir, fetch):
         "weights_format": payload.get("weights_format"),
         "saved_at": datetime.utcnow().isoformat() + "Z",
     }
+    # Recorded so a later privacy audit can reproduce the exact train/held-out split
+    # this model was trained with — otherwise "members" would be a guess. Only keys
+    # the server actually sent are written: storing an explicit null would defeat the
+    # reader's fallback, since dict.get(key, default) returns the null, not default.
+    for key in ("seed", "label_col", "phenotype", "dataset_id"):
+        if params.get(key) is not None:
+            meta[key] = params[key]
     with open(meta_path, "w") as f:
         _json.dump(meta, f, indent=2)
     logger.info("Saved global model %s to %s", model_id, weights_path)
@@ -397,25 +410,78 @@ def run_export_samples(df, params):
 def run_classify_samples(params, owned_dir, fetch):
     """Run this site's own local model over samples someone sent for classification.
 
-    The model file never leaves this machine — only per-sample predictions go back.
+    Works for any model this site owns — one this sandbox trained, or one the
+    researcher registered themselves (scikit-learn, TorchScript). The model file never
+    leaves this machine; only per-sample predictions go back.
     """
-    import json as _json
-
-    import fl_local
+    import local_models
 
     model_id = params.get("model_id")
     if not model_id:
         raise ValueError("classify_samples job is missing model_id")
-    weights_path, meta_path = model_paths(owned_dir, model_id)
-    if not os.path.isfile(weights_path):
+    model = local_models.load_local_model(owned_dir, model_id, declared={
+        "file": params.get("local_file"), "format": params.get("local_format")})
+
+    payload = fetch(params.get("samples_path") or f"/api/agent/inference/{params.get('request_id')}/samples")
+    samples = payload.get("samples") or {}
+    if not samples:
+        raise ValueError("No samples were provided to classify.")
+
+    X, sample_ids, alignment = model.align(samples)
+    if alignment.get("declared_features") and alignment["n_missing"] >= alignment["n_features"]:
         raise ValueError(
-            f"Model {model_id} is not on this machine ({weights_path}). It is saved "
-            "automatically when federated training finishes — if this site has not run "
-            "that collaboration, it cannot serve this model."
-        )
-    with open(weights_path) as f:
-        weights_b64 = f.read().strip()
+            "None of this model's expected features are present in the submitted samples "
+            f"(expected {alignment['n_features']}, e.g. {alignment.get('missing_examples')}). "
+            "Refusing to classify rather than return meaningless labels.")
+    if alignment.get("n_missing"):
+        logger.warning("%d of %d expected features were absent; filled with 0.",
+                       alignment["n_missing"], alignment["n_features"])
+
+    proba = model.predict_proba(X)
+    names = model.class_names or params.get("class_names") or []
+    idx = proba.argmax(axis=1)
+    conf = proba.max(axis=1)
+    predictions = {}
+    for i, sid in enumerate(sample_ids):
+        label = names[int(idx[i])] if int(idx[i]) < len(names) else int(idx[i])
+        predictions[str(sid)] = {"predicted_class": label,
+                                 "confidence": round(float(conf[i]), 4)}
+    logger.info("Classified %d sample(s) with local %s model %s.",
+                len(predictions), model.format, model_id)
+    return {"predictions": predictions}
+
+
+def run_membership_inference(params, owned_dir, data_dir):
+    """Measure how much a model this site owns reveals about its training cohort.
+
+    Runs where the model and the data both are, and returns only aggregate metrics.
+
+    Getting the cohort right matters more than anything else here — "members" has to be
+    exactly the samples the model trained on, or the numbers look like a risk assessment
+    while measuring nothing. There are two ways to know that:
+
+      * a model this sandbox trained: federated training split each site's data with
+        train_test_split(test_size=0.2, random_state=seed, stratify=y), so the same call
+        with the recorded seed reproduces it exactly;
+      * a model the researcher registered themselves: we have no idea how they split
+        their data, so we do not guess — the owner names the dataset they trained on and
+        the one they held out, and those are used verbatim.
+    """
+    import json as _json
+
+    import fl_local
+    import local_models
+    import mia_local
+    from sklearn.model_selection import train_test_split
+
+    model_id = params.get("model_id")
+    if not model_id:
+        raise ValueError("membership_inference job is missing model_id")
+    model = local_models.load_local_model(owned_dir, model_id, declared={
+        "file": params.get("local_file"), "format": params.get("local_format")})
+
     meta = {}
+    _, meta_path = model_paths(owned_dir, model_id)
     if os.path.isfile(meta_path):
         try:
             with open(meta_path) as f:
@@ -423,13 +489,69 @@ def run_classify_samples(params, owned_dir, fetch):
         except Exception:
             meta = {}
 
-    payload = fetch(params.get("samples_path") or f"/api/agent/inference/{params.get('request_id')}/samples")
-    samples = payload.get("samples") or {}
-    if not samples:
-        raise ValueError("No samples were provided to classify.")
+    class_names = model.class_names or meta.get("class_names") or params.get("class_names") or None
+    label_col = params.get("label_col") or meta.get("label_col")
 
-    class_names = meta.get("class_names") or params.get("class_names") or []
-    num_classes = int(meta.get("num_classes") or params.get("num_classes") or max(len(class_names), 2))
-    predictions = fl_local.run_classify(samples, weights_b64, num_classes, class_names)
-    logger.info("Classified %d sample(s) with local model %s.", len(predictions), model_id)
-    return {"predictions": predictions}
+    members_pheno = params.get("members_phenotype")
+    non_members_pheno = params.get("non_members_phenotype")
+
+    if members_pheno and non_members_pheno:
+        # Owner-declared cohort: two datasets they nominated on their own machine.
+        m_path, _ = data_loader.resolve_dataset(data_dir, members_pheno)
+        n_path, _ = data_loader.resolve_dataset(data_dir, non_members_pheno)
+        X_m, y_m, class_names = fl_local._split_features_labels(
+            data_loader.load_dataframe(m_path), label_col, class_names)
+        X_n, y_n, _ = fl_local._split_features_labels(
+            data_loader.load_dataframe(n_path), label_col, class_names)
+        cohort_source = (f"owner-declared: members from '{members_pheno}', "
+                         f"non-members from '{non_members_pheno}'")
+        # Not "exactly what it trained on" — that is the owner's assertion, not
+        # something we verified, and the report must not claim otherwise.
+        cohort_note = (
+            "Members and non-members are the two datasets this model's owner nominated; "
+            "the sandbox did not train this model and cannot verify the split. Only "
+            "aggregate metrics leave this machine — never per-sample membership "
+            "predictions.")
+    else:
+        # Reproduce the split federated training used on this site's own data.
+        phenotype = params.get("phenotype") or meta.get("phenotype")
+        if not phenotype:
+            raise ValueError(
+                "This audit has no cohort to measure against. For a model you registered "
+                "yourself, nominate which local dataset you trained on and which you held "
+                "out — they cannot be inferred from the model file.")
+        csv_path, _ = data_loader.resolve_dataset(data_dir, phenotype)
+        X, y, class_names = fl_local._split_features_labels(
+            data_loader.load_dataframe(csv_path), label_col, class_names)
+        # `or` rather than a get() default: a model saved by an agent paired with an older
+        # server can carry an explicit null here, and that must fall through to the training
+        # default rather than raise part-way through the audit.
+        seed = int(meta.get("seed") or params.get("seed") or DEFAULT_TRAINING_SEED)
+        try:
+            X_m, X_n, y_m, y_n = train_test_split(
+                X, y, test_size=0.2, random_state=seed, stratify=y)
+        except ValueError:
+            X_m, X_n, y_m, y_n = train_test_split(X, y, test_size=0.2, random_state=seed)
+        cohort_source = (f"reproduced the training split of '{phenotype}' "
+                         f"(80/20, seed {seed})")
+        cohort_note = None  # the default note is accurate for a model trained here
+
+    num_classes = int(model.num_classes or meta.get("num_classes")
+                      or params.get("num_classes") or len(class_names or []) or 2)
+
+    report = mia_local.run_audit(
+        model, X_m, y_m, X_n, y_n,
+        num_classes=num_classes, class_names=class_names,
+        attack_train_ratio=float(params.get("attack_train_ratio", 0.5)),
+        targeted_fpr=float(params.get("targeted_fpr", 0.01)),
+        seed=int(params.get("seed") or DEFAULT_TRAINING_SEED),
+        cohort_note=cohort_note,
+    )
+    report["model_id"] = model_id
+    report["model_format"] = model.format
+    report["cohort"]["source"] = cohort_source
+    report["audited_at"] = datetime.utcnow().isoformat() + "Z"
+    logger.info("Privacy audit for %s (%s): risk=%s attack_accuracy=%.3f",
+                model_id, model.format, report["risk"]["level"],
+                report["black_box"]["attack_accuracy"])
+    return {"privacy_audit": report}

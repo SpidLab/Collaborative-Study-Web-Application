@@ -12,7 +12,7 @@ ENV PYTHONUNBUFFERED=1 \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY config.py jobs_client.py data_loader.py actions.py agent.py fl_local.py ./
+COPY config.py jobs_client.py data_loader.py actions.py agent.py fl_local.py mia_local.py local_models.py ./
 COPY qc_modules/ ./qc_modules/
 COPY models/ ./models/
 

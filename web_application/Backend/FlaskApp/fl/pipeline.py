@@ -394,6 +394,10 @@ def run_training(
 
 FL_PROJECT_ACTION = "fl_project"
 FL_TRAIN_ACTION = "fl_train_round"
+# Seed for the local train/held-out split every site makes. It is recorded with the
+# delivered model so a membership-inference audit can reproduce the exact split —
+# these two uses must never drift apart, hence one constant.
+TRAINING_SEED = 42
 # How long to wait for every agent to finish a stage before giving up. Generous,
 # because agents may be started by collaborators minutes after jobs are enqueued.
 AGENT_STAGE_TIMEOUT = int(os.getenv("FL_AGENT_STAGE_TIMEOUT", "3600"))
@@ -639,7 +643,7 @@ def run_training_agents(
                     "local_epochs": local_epochs,
                     "batch_size": batch_size,
                     "learning_rate": learning_rate,
-                    "seed": 42,
+                    "seed": TRAINING_SEED,
                     "global_weights": global_weights,
                 }
                 job_id_by_uid[uid] = enqueue_job(uuid, uid, FL_TRAIN_ACTION, params)
@@ -876,13 +880,24 @@ def deliver_model_to_sites(collaborations: Collection, enqueue_job, uuid: str) -
     visibility, _ = _collaboration_visibility(doc)
 
     cfg = state.get("config") or {}
+    # Which dataset each site trained on, so the saved model records it.
+    by_uid = {str(p.get("uid")): p for p in (state.get("participants") or [])}
     job_ids = {}
     for uid in targets:
+        participant = by_uid.get(str(uid), {})
         job_ids[uid] = enqueue_job(uuid, uid, FL_SAVE_MODEL_ACTION, {
             "model_id": model_id,
             "collaboration_name": doc.get("name"),
             "num_classes": int(cfg.get("num_classes", len(SUPER_POPULATIONS))),
             "class_names": cfg.get("label_names") or list(SUPER_POPULATIONS),
+            # Recorded alongside the weights so a later membership-inference audit
+            # can reproduce the exact train/held-out split used during training.
+            # Without the same seed, "members" would not be the samples the model
+            # actually saw, and the resulting risk numbers would be meaningless.
+            "seed": int(cfg.get("seed", TRAINING_SEED)),
+            "label_col": cfg.get("label_col"),
+            "phenotype": participant.get("phenotype"),
+            "dataset_id": participant.get("dataset_id"),
             # The agent fetches the weights itself rather than carrying them in
             # the job params, so the queue never holds a second copy.
             "weights_path": f"/api/agent/models/{model_id}/weights",
