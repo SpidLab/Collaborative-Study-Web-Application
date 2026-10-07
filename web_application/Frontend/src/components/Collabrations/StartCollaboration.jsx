@@ -20,6 +20,21 @@ const QC_METHOD_DEFAULTS = {
   'Missing Data QC': { threshold: 0.10, min: 0.01, max: 1.0, step: 0.01, label: 'Missing Rate Threshold', description: 'Samples/attributes above this missing rate are removed' },
 };
 
+// The demo pre-selects the two filter steps, which run on any dataset. The
+// Stratification Check only works on data that matches the reference PCA panel.
+const DEMO_DEFAULT_QC = ['Minor Allele Frequency (MAF)', 'Missing Data QC'];
+
+const defaultQcSelection = (schemes) => {
+  const filters = schemes.filter((scheme) => DEMO_DEFAULT_QC.includes(scheme));
+  return filters.length > 0 ? filters : schemes.slice(0, 1);
+};
+
+const defaultQcParams = (selected) => Object.fromEntries(
+  selected
+    .filter((scheme) => QC_METHOD_DEFAULTS[scheme])
+    .map((scheme) => [scheme, { threshold: QC_METHOD_DEFAULTS[scheme].threshold }]),
+);
+
 const EXPERIMENT_FL = 'Federated Learning';
 const FL_QC_METHOD = 'Public PCA + DP Projection';
 const FL_EPSILON_DEFAULT = 3.0;
@@ -74,11 +89,11 @@ const StartCollaboration = () => {
         setQcSchemes(fetchedQcSchemes);
         setExperimentOptions(response.data?.experiments?.[0]?.experiment_types || []);
         setDatasets(Array.isArray(response.data?.datasets) ? response.data.datasets : []);
-        // Ensure the first QC scheme is selected by default
+        // Pre-select the default QC steps
         if (fetchedQcSchemes.length > 0) {
-          setSelectedQcSchemes([fetchedQcSchemes[0]]);
-          const defaults = QC_METHOD_DEFAULTS[fetchedQcSchemes[0]];
-          if (defaults) setQcMethodParams({ [fetchedQcSchemes[0]]: { threshold: defaults.threshold } });
+          const initial = defaultQcSelection(fetchedQcSchemes);
+          setSelectedQcSchemes(initial);
+          setQcMethodParams(defaultQcParams(initial));
         }
 
         setLoadError(null);
@@ -254,14 +269,14 @@ const StartCollaboration = () => {
       setSelectedDataset('');
       setModelVisibility(VISIBILITY_PRIVATE);
       setAllowInferenceRequests(false);
-      // Re-seed the default QC scheme (the mount effect won't re-run) so the form
+      // Re-seed the default QC steps (the mount effect won't re-run) so the form
       // is immediately valid again for starting another collaboration. (Note: we do
       // NOT clear experimentOptions — those are fetched once on mount and clearing
       // them would permanently empty the Experiment Type list.)
       if (qcScheme.length > 0) {
-        setSelectedQcSchemes([qcScheme[0]]);
-        const defaults = QC_METHOD_DEFAULTS[qcScheme[0]];
-        setQcMethodParams(defaults ? { [qcScheme[0]]: { threshold: defaults.threshold } } : {});
+        const initial = defaultQcSelection(qcScheme);
+        setSelectedQcSchemes(initial);
+        setQcMethodParams(defaultQcParams(initial));
       } else {
         setSelectedQcSchemes([]);
         setQcMethodParams({});

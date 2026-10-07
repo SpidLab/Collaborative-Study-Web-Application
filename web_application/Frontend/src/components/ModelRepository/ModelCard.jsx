@@ -20,7 +20,7 @@ import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import axios from 'axios';
 import URL from '../../config';
 import PrivacyAuditDialog, { riskMeta } from './PrivacyAuditDialog';
-import { relabel } from '../Utils/demoTerms';
+import { relabel, classLabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -464,7 +464,7 @@ const ModelCard = ({ model, onPatch, onEdit, onDelete, onRequestClassification, 
             <Typography variant="caption" color="text.secondary">Classes</Typography>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
               {shownClasses.map((c) => (
-                <Chip key={c} size="small" label={c} sx={{ bgcolor: '#eef3f8' }} />
+                <Chip key={c} size="small" label={classLabel(c)} sx={{ bgcolor: '#eef3f8' }} />
               ))}
               {classNames.length > shownClasses.length && (
                 <Chip size="small" variant="outlined" label={`+${classNames.length - shownClasses.length}`} />

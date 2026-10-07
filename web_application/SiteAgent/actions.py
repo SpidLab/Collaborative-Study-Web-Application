@@ -517,7 +517,7 @@ def run_membership_inference(params, owned_dir, data_dir):
         phenotype = params.get("phenotype") or meta.get("phenotype")
         if not phenotype:
             raise ValueError(
-                "This audit has no cohort to measure against. For a model you registered "
+                "This audit has no training data to measure against. For a model you registered "
                 "yourself, nominate which local dataset you trained on and which you held "
                 "out — they cannot be inferred from the model file.")
         csv_path, _ = data_loader.resolve_dataset(data_dir, phenotype)

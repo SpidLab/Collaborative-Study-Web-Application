@@ -175,7 +175,7 @@ def _roc_summary(scores, labels, targeted_fpr=0.01):
             "n_non_members": n_neg,
             "reason": (
                 f"No operating point reaches a {targeted_fpr:.1%} false-positive rate on "
-                f"{n_neg} non-members — the finest rate this cohort can express is "
+                f"{n_neg} non-members — the finest rate this held-out set can express is "
                 f"{resolution:.1%}. Audit a larger held-out set, or raise the target, "
                 "to measure this."
                 if targeted_fpr < resolution else
@@ -234,16 +234,16 @@ def assess_risk(attack_accuracy, worst_case_tpr, generalization_gap):
 
     if advantage >= 0.15 or tpr >= 0.20:
         level, summary = "high", (
-            "Membership in this model's training cohort can be inferred well above "
-            "chance. Publishing it as-is may reveal who took part.")
+            "Membership in this model's training data can be inferred well above "
+            "chance. Publishing it as-is may reveal which records were used.")
     elif advantage >= 0.05 or tpr >= 0.05:
         level, summary = "moderate", (
             "There is measurable membership leakage. It is not severe, but the model "
-            "does carry some signal about who was in the training cohort.")
+            "does carry some signal about which records were in the training data.")
     else:
         level, summary = "low", (
             "Membership inference performs at or near chance. On this evidence the "
-            "model does not obviously reveal who was in the training cohort.")
+            "model does not obviously reveal which records were in the training data.")
 
     advice = []
     if generalization_gap is not None and generalization_gap >= 0.10:

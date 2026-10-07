@@ -19,7 +19,7 @@ import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import axios from 'axios';
 import URL from '../../config';
-import { relabel } from '../Utils/demoTerms';
+import { relabel, classLabel } from '../Utils/demoTerms';
 
 const POLL_INTERVAL_MS = 5000;
 // `collecting` no longer happens on new requests, but one raised before the flow
@@ -413,11 +413,11 @@ const InferenceRequests = () => {
 
   const downloadResults = () => {
     if (!results) return;
-    // The server ships a formatted CSV; fall back to the prediction map if it is absent.
-    const csv = results.csv
-      || ['sample_id,predicted_class,confidence']
-        .concat(results.rows.map((r) => `${r.sampleId},${r.predictedClass ?? ''},${r.confidence ?? ''}`))
-        .join('\n');
+    // Built from the prediction map (same columns as the server's CSV) so the file uses
+    // the class names shown on screen.
+    const csv = ['sample_id,predicted_class,confidence']
+      .concat(results.rows.map((r) => `${r.sampleId},${r.predictedClass != null ? classLabel(r.predictedClass) : ''},${r.confidence ?? ''}`))
+      .join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const objectUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -530,7 +530,7 @@ const InferenceRequests = () => {
                   {(results?.rows || []).map((row) => (
                     <TableRow key={row.sampleId} hover>
                       <TableCell><code>{row.sampleId}</code></TableCell>
-                      <TableCell>{row.predictedClass ?? '—'}</TableCell>
+                      <TableCell>{row.predictedClass != null ? classLabel(row.predictedClass) : '—'}</TableCell>
                       <TableCell align="right">{pctConf(row.confidence)}</TableCell>
                     </TableRow>
                   ))}

@@ -13,6 +13,18 @@ const EXPERIMENT_LABELS = {
 
 export const experimentLabel = (type) => EXPERIMENT_LABELS[type] || type;
 
+// The federated-learning demo data labels samples with five group codes. They are
+// shown as neutral region names; the stored labels and the models are unchanged.
+const CLASS_LABELS = {
+  EUR: 'Region A',
+  AFR: 'Region B',
+  EAS: 'Region C',
+  SAS: 'Region D',
+  AMR: 'Region E',
+};
+
+export const classLabel = (name) => CLASS_LABELS[String(name)] || name;
+
 // Internal QC method name -> name shown in the demo.
 const QC_LABELS = {
   'Sample Relatedness': 'Related Records Check',

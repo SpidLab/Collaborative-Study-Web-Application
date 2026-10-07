@@ -7,7 +7,7 @@ import {
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import axios from 'axios';
 import URL from '../../config';
-import { relabel } from '../Utils/demoTerms';
+import { relabel, classLabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -516,7 +516,7 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
                     <TableBody>
                       {perClass.map((row, i) => (
                         <TableRow key={`${row.class ?? 'class'}-${i}`}>
-                          <TableCell>{row.class != null ? String(row.class) : '—'}</TableCell>
+                          <TableCell>{row.class != null ? classLabel(String(row.class)) : '—'}</TableCell>
                           <TableCell align="right">{count(row.n)}</TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>{pct(row.tpr)}</TableCell>
                           <TableCell align="right">{pct(row.fpr, 2)}</TableCell>
