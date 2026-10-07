@@ -252,12 +252,12 @@ def notify_generate_stats(to_email, collab_name, collab_uuid):
     subject = f"Your turn: generate stat data for {collab_name}"
     text = (
         f"Quality control is complete for \"{collab_name}\" and the threshold is set.\n\n"
-        f"Open the collaboration and click \"Create GWAS dataset\" to generate your stat "
+        f"Open the collaboration and click \"Create Association Study Dataset\" to generate your stat "
         f"data — your Site Agent computes it locally and uploads only the counts.\n{link}\n"
     )
     html = (
         f"<p>Quality control is complete for \"<b>{collab_name}</b>\" and the threshold is set.</p>"
-        f"<p>Open the collaboration and click <b>Create GWAS dataset</b> to generate your stat "
+        f"<p>Open the collaboration and click <b>Create Association Study Dataset</b> to generate your stat "
         f"data — your Site Agent computes it locally and uploads only the counts.</p>"
         f"<p><a href=\"{link}\">Open the collaboration</a></p>"
     )

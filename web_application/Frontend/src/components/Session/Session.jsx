@@ -30,23 +30,23 @@ function CreateSession() {
           <FormGroup>
             <FormControlLabel
               control={<Checkbox checked={checked1} onChange={(e) => setChecked1(e.target.checked)} />}
-              label="Sample Relatedness"
+              label="Related Records Check"
             />
             <FormControlLabel
               control={<Checkbox checked={checked2} onChange={(e) => setChecked2(e.target.checked)} />}
-              label="Gene Expression"
+              label="Yield Analysis"
             />
             <FormControlLabel
               control={<Checkbox checked={checked3} onChange={(e) => setChecked3(e.target.checked)} />}
-              label="Rare Variants"
+              label="Rare Values"
             />
             <FormControlLabel
               control={<Checkbox checked={checked4} onChange={(e) => setChecked4(e.target.checked)} />}
-              label="Variant Annotation"
+              label="Attribute Annotation"
             />
             <FormControlLabel
               control={<Checkbox checked={checked5} onChange={(e) => setChecked5(e.target.checked)} />}
-              label="Population Genetics"
+              label="Regional Analysis"
             />
           </FormGroup>
           <Button

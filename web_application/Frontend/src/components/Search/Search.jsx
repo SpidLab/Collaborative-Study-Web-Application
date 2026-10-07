@@ -9,6 +9,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -230,7 +231,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
         <Grid item xs={12} sm={3}>
           <TextField
             fullWidth
-            label="Phenotype(s)"
+            label="Trait(s)"
             variant="outlined"
             value={phenotype}
             onChange={(e) => setPhenotype(e.target.value)}
@@ -358,7 +359,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
                 {searching
                   ? 'Searching…'
                   : searched && !searchError
-                    ? 'No datasets matched your search. Try a broader phenotype or a lower sample threshold.'
+                    ? 'No datasets matched your search. Try a broader trait or a lower sample threshold.'
                     : 'Discover collaborators to partner with on your new experiment.'}
               </Typography>
             )}
@@ -380,7 +381,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
             minRows={3}
             sx={{ mt: 2 }}
             label="Purpose / justification"
-            placeholder="What you plan to do with the data, and why this cohort."
+            placeholder="What you plan to do with the data, and why this dataset."
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
           />
@@ -435,7 +436,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
 
           {weaker ? (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              You are asking {requestTarget?.name || 'the owner'} to release this cohort with less
+              You are asking {requestTarget?.name || 'the owner'} to release this dataset with less
               noise than they advertised — ε {trim(epsNum)} against their ε {trim(advertisedEps)}.
               They see the number you ask for and can refuse the request on that basis.
             </Alert>
@@ -468,7 +469,7 @@ function SearchPage({ onUserSelect, resetTrigger }) {
         onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar((s) => ({ ...s, open: false }))}>
-          {snackbar.message}
+          {relabel(snackbar.message)}
         </Alert>
       </Snackbar>
     </Container>

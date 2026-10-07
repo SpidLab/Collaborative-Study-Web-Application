@@ -7,6 +7,7 @@ import {
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -131,7 +132,7 @@ const RocCurve = ({ roc, auc, worstCase, accent }) => {
         Solid line: the black-box attack. Dashed line: no skill — an attacker guessing at random.
         {marker ? ' The dot is the worst-case operating point described above.' : ''}
         {' '}The further the curve sits above the dashed line, the more the model tells an
-        attacker about who was in its training cohort.
+        attacker about which records were in its training data.
       </Typography>
     </Box>
   );
@@ -163,7 +164,7 @@ const ATTACK_ROWS = [
     // Kept for comparability with the published ART tutorial, which reports this
     // figure — but its cohort is balanced and ours is 4:1, so shown next to the
     // majority baseline rather than on its own, where it would read far too high.
-    hint: 'over the real 4:1 cohort — read against the baseline below',
+    hint: 'over the real 4:1 member/non-member split — read against the baseline below',
   },
   { key: 'majority_baseline', label: 'Always-say-member baseline', fmt: (v) => pct(v), hint: 'what a zero-signal attack scores on the raw measure' },
   { key: 'member_accuracy', label: 'Members spotted', fmt: (v) => pct(v), hint: 'true members called members' },
@@ -268,13 +269,13 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
           </Stack>
         ) : error ? (
           <Alert severity="error" action={<Button size="small" onClick={load}>Retry</Button>}>
-            {error}
+            {relabel(error)}
           </Alert>
         ) : !audit || audit.status === 'none' ? (
           <Alert severity="info">
             <AlertTitle>No audit has been run for this model</AlertTitle>
             Start one from the model card. It runs on your own Site Agent, where the model and its
-            training cohort both live.
+            training data both live.
           </Alert>
         ) : audit.status === 'queued' || audit.status === 'running' ? (
           <Stack alignItems="center" spacing={1.5} sx={{ py: 6 }}>
@@ -288,7 +289,7 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
         ) : audit.status === 'failed' ? (
           <Alert severity="error">
             <AlertTitle>The audit did not finish</AlertTitle>
-            {audit.error || 'Your Site Agent could not complete the analysis.'}
+            {relabel(audit.error) || 'Your Site Agent could not complete the analysis.'}
           </Alert>
         ) : !report ? (
           <Alert severity="warning">
@@ -313,14 +314,14 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
                 />
               </Stack>
               <Typography variant="body2" sx={{ mt: 1.25 }}>
-                {risk.summary || audit.summary
+                {relabel(risk.summary || audit.summary)
                   || 'The audit completed but returned no plain-language summary.'}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                An attacker who tries to tell members of the training cohort from outsiders gets it
+                An attacker who tries to tell training records from outside records gets it
                 right {pct(attackAccuracy)} of the time, using whichever of the two attacks below
                 did better. This is a <b>balanced</b> score — members and non-members weighted
-                equally — so 50% really is the guessing point even though the cohort itself is
+                equally — so 50% really is the guessing point even though the audited set itself is
                 four-fifths members. On that scale the attack is
                 {advantage != null
                   ? ` ${(Math.abs(advantage) * 100).toFixed(1)} points ${advantage >= 0 ? 'better' : 'worse'} than chance.`
@@ -336,7 +337,7 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
                   How members were determined
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 0.25, fontWeight: 600 }}>
-                  {cohort.source}
+                  {relabel(cohort.source)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                   {ownerDeclaredCohort
@@ -346,7 +347,7 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
                       + 'fact seen during training, the attack has nothing to separate and the risk '
                       + 'reads lower than it truly is.'
                     : 'This sandbox trained the model, so it reproduced that exact split instead of '
-                      + 'being told one. The comparison below is against the real training cohort.'}
+                      + 'being told one. The comparison below is against the real training data.'}
                 </Typography>
               </Box>
             )}
@@ -364,12 +365,12 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
                     </Typography>
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    A model can look harmless on average and still expose a subset of people
+                    A model can look harmless on average and still expose a subset of records
                     completely. This is that check: tuned so the attacker almost never accuses an
                     outsider (target {pct(worst.targeted_fpr, 2)}, achieved {pct(worst.fpr, 2)}),
-                    it still correctly picks out {pct(worst.tpr)} of the cohort. In a study where
-                    the cohort is defined by having a condition, being picked out is itself the
-                    disclosure.
+                    it still correctly picks out {pct(worst.tpr)} of the training records. When
+                    membership is itself sensitive, such as a dataset of farms that reported a crop
+                    disease, being picked out is itself the disclosure.
                   </Typography>
                   {Number.isFinite(Number(worst.threshold)) && (
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
@@ -380,10 +381,10 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
               ) : unavailable ? (
                 <>
                   <Typography variant="h6" sx={{ fontWeight: 700, mt: 0.5 }}>
-                    Not measurable on this cohort
+                    Not measurable on this dataset
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    {unavailable.reason}
+                    {relabel(unavailable.reason)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
                     This is a limit of the held-out set&apos;s size, not evidence that nobody can be
@@ -467,7 +468,7 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
               </Box>
               {(cohort.n_members != null || cohort.n_non_members != null) && (
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
-                  Cohort: {count(cohort.n_members)} members and {count(cohort.n_non_members)} non-members
+                  Audited set: {count(cohort.n_members)} members and {count(cohort.n_non_members)} non-members
                   across {count(cohort.num_classes)} classes
                   {typeof cohort.attack_train_ratio === 'number'
                     ? `; ${pct(cohort.attack_train_ratio, 0)} of them were used to train the attack classifier and the rest to score it.`
@@ -496,8 +497,8 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
                 <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Leakage by class</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                   Leakage is rarely uniform. A small class is memorised more readily than a large
-                  one, so the people in it are the most exposed — and an average across the whole
-                  cohort hides that. Read the smallest classes first. &ldquo;Samples scored&rdquo;
+                  one, so the records in it are the most exposed — and an average across the whole
+                  dataset hides that. Read the smallest classes first. &ldquo;Samples scored&rdquo;
                   counts every sample of that class the attack was scored on, members and
                   non-members together — it is the size of the slice, not a member count.
                 </Typography>
@@ -565,7 +566,7 @@ const PrivacyAuditDialog = ({ open, model, onClose, onAuditChange }) => {
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                 Publishing shows other researchers the risk rating and the plain-language summary
                 next to this model. The breakdown on this page — the
-                per-class table, the curve, the cohort counts — is never shared, and neither is
+                per-class table, the curve, the member counts — is never shared, and neither is
                 anything about individual samples. Publishing a good result is how a model earns
                 trust; publishing a bad one is entirely your call.
               </Typography>

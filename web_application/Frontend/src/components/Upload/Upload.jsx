@@ -89,7 +89,7 @@ const UploadForm = () => {
             <form onSubmit={handleSubmit}>
                 <TextField
                     fullWidth
-                    label="Phenotype(s)"
+                    label="Trait(s)"
                     id="field1"
                     name="field1"
                     value={field1}

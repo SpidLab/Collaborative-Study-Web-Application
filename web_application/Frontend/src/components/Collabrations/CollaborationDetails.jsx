@@ -13,6 +13,7 @@ import statSampleImage from "../../assets/Stat Sample.png";
 import InfoIcon from '@mui/icons-material/Info';
 import FLCollaborationView from './FLCollaborationView';
 import DataSharingView from './DataSharingView';
+import { experimentLabel, qcLabel, relabel } from '../Utils/demoTerms';
 
 const EXPERIMENT_FL = 'Federated Learning';
 const EXPERIMENT_DATA_SHARING = 'Data Sharing';
@@ -245,11 +246,11 @@ const CollaborationDetails = () => {
         { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
       );
       if (response.status >= 200 && response.status < 300) {
-        setSnackbar({ open: true, message: 'GWAS computation queued. Your local agent will compute the per-SNP counts shortly — refresh in a few seconds.', severity: 'success' });
+        setSnackbar({ open: true, message: 'Association study queued. Your local agent will compute the per-attribute counts shortly — refresh in a few seconds.', severity: 'success' });
         setTimeout(() => fetchCollaborationDetails(true), 4000);
       }
     } catch (error) {
-      const msg = error.response?.data?.error || error.message || 'Failed to create GWAS dataset';
+      const msg = error.response?.data?.error || error.message || 'Failed to create the association study dataset';
       setSnackbar({ open: true, message: msg, severity: 'error' });
     } finally {
       setIsCreatingGwasDataset(false);
@@ -663,7 +664,7 @@ const CollaborationDetails = () => {
       if (resultsAvailable) {
         setSnackbar({
           open: true,
-          message: 'GWAS calculations are already completed.',
+          message: 'The association study has already been calculated.',
           severity: 'info',
         });
         setIsGwasInitiateLoading(false);
@@ -684,7 +685,7 @@ const CollaborationDetails = () => {
       console.log('GWAS Results:', response);
       setSnackbar({
         open: true,
-        message: 'GWAS Calculations successfully initiated. Results will be checked automatically.',
+        message: 'Association study started. Results will be checked automatically.',
         severity: 'success',
       });
       
@@ -715,7 +716,7 @@ const CollaborationDetails = () => {
       console.error('Error initiating GWAS calculations:', error);
       setSnackbar({
         open: true,
-        message: 'Failed to initiate GWAS calculations. Please try again.',
+        message: 'Failed to start the association study. Please try again.',
         severity: 'error',
       });
     } finally {
@@ -855,9 +856,9 @@ const CollaborationDetails = () => {
         // for Population Stratification, or the transformed matrix for Sample
         // Relatedness) haven't been uploaded.
         message = serverMsg ||
-          'Pairwise QC results aren\'t available yet. For Population Stratification, each ' +
-          'site must upload PCA coordinates — which only works on datasets that share the ' +
-          'reference SNP panel (e.g. the eye_color panel), not small/unrelated SNP sets.';
+          'Pairwise QC results aren\'t available yet. For the Stratification Check, each ' +
+          'site must upload PCA coordinates, which only works on datasets that share the ' +
+          'reference attribute panel.';
         setSnackbar({ open: true, message, severity: 'warning' });
       } else {
         setSnackbar({
@@ -1284,8 +1285,8 @@ const CollaborationDetails = () => {
 
   // utility functions for Data Export
   const convertToCSV = (data, file_name) => {
-    const title = `${file_name} - GWAS Experiment Report`;
-    const headers = ['SNP ID,Chi-Square,P-Value'];
+    const title = `${file_name} - Association Study Report`;
+    const headers = ['Attribute ID,Chi-Square,P-Value'];
     const rows = data.map(snp =>
       `"${snp.snpKey}",${snp.chi},${snp.pValue}`
     );
@@ -1308,7 +1309,7 @@ const CollaborationDetails = () => {
       const link = document.createElement('a');
       const url = window.URL.createObjectURL(blob);
       link.href = url;
-      link.download = `${file_name}_GWAS_results.csv`;
+      link.download = `${file_name}_association_study_results.csv`;
       document.body.appendChild(link);
       link.click();
       window.URL.revokeObjectURL(url);
@@ -1469,7 +1470,7 @@ const CollaborationDetails = () => {
   }, [invitedUsers, qcResultsAvailable, thresholdDefined, gwasResultsAvailable, displayQcResults, allUsersResponded, allAcceptedUsersUploaded]);
 
   // Experiments Tabs:
-  const placeholderTabs = ['Chi-Square', 'Odd Ratio', 'GWAS Experiment 3', 'GWAS Experiment 4', 'GWAS Experiment 5'];
+  const placeholderTabs = ['Chi-Square', 'Odds Ratio', 'Association Study 3', 'Association Study 4', 'Association Study 5'];
 
   const handleExperimentChange = (index) => {
     if (index === 0) {
@@ -1623,7 +1624,7 @@ const CollaborationDetails = () => {
                                 {experimentList.map((experiment, index) => (
                                   <Chip
                                     key={index}
-                                    label={experiment}
+                                    label={experimentLabel(experiment)}
                                     onDelete={() => handleDeleteExperiment(index)}
                                     color="primary"
                                     variant="outlined"
@@ -1634,14 +1635,14 @@ const CollaborationDetails = () => {
                           ) : (
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                               {experimentList.map((experiment, index) => (
-                                <Chip key={index} label={experiment} color="primary" variant="outlined" />
+                                <Chip key={index} label={experimentLabel(experiment)} color="primary" variant="outlined" />
                               ))}
                             </Box>
                           )
                         ) : (
                           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                             {experimentList.map((experiment, index) => (
-                              <Chip key={index} label={experiment} color="primary" variant="outlined" />
+                              <Chip key={index} label={experimentLabel(experiment)} color="primary" variant="outlined" />
                             ))}
                           </Box>
                         )
@@ -1653,16 +1654,16 @@ const CollaborationDetails = () => {
                   <ListItem disableGutters>
                     <ListItemText
                       primary={
-                        <Tooltip arrow title="Phenotypes and Number of Samples from all users" placement="right">
-                          <strong>Phenotypes & Number of Samples</strong>
+                        <Tooltip arrow title="Traits and number of samples from all users" placement="right">
+                          <strong>Traits & Number of Samples</strong>
                         </Tooltip>
                       }
                       secondary={
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                           {/* Add the creator's phenotype and samples */}
-                          <Tooltip title={`Initiator: ${senderInfo.name}${creator?.n_snps ? ` · ${creator.n_snps} markers` : ''}`} arrow>
+                          <Tooltip title={`Initiator: ${senderInfo.name}${creator?.n_snps ? ` · ${creator.n_snps} attributes` : ''}`} arrow>
                             <Chip
-                              label={`${creator.phenotype} - ${creator.samples} samples${creator?.n_snps ? ` · ${creator.n_snps} markers` : ''}`}
+                              label={`${creator.phenotype} - ${creator.samples} samples${creator?.n_snps ? ` · ${creator.n_snps} attributes` : ''}`}
                               color="primary"
                               variant="contained"
                             />
@@ -1670,9 +1671,9 @@ const CollaborationDetails = () => {
 
                           {/* Add the invited users' phenotypes and samples */}
                           {invitedUsers.map((user, index) => (
-                            <Tooltip key={index} title={`Collaborator: ${user.name}${user?.n_snps ? ` · ${user.n_snps} markers` : ''}`} arrow>
+                            <Tooltip key={index} title={`Collaborator: ${user.name}${user?.n_snps ? ` · ${user.n_snps} attributes` : ''}`} arrow>
                               <Chip
-                                label={`${user.phenotype} - ${user.number_of_samples} samples${user?.n_snps ? ` · ${user.n_snps} markers` : ''}`}
+                                label={`${user.phenotype} - ${user.number_of_samples} samples${user?.n_snps ? ` · ${user.n_snps} attributes` : ''}`}
                                 color="secondary"
                                 variant="contained"
 
@@ -1726,7 +1727,7 @@ const CollaborationDetails = () => {
                       secondary={
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                           {qcScheme.map((scheme, index) => (
-                            <Chip key={index} label={scheme.method || scheme} color="primary" variant="contained" sx={{ backgroundColor: "#D1E3F6", color: '#0D3B69' }} />
+                            <Chip key={index} label={qcLabel(scheme.method || scheme)} color="primary" variant="contained" sx={{ backgroundColor: "#D1E3F6", color: '#0D3B69' }} />
                           ))}
                         </Box>
                       }
@@ -1752,7 +1753,7 @@ const CollaborationDetails = () => {
                             {isCreatingQcDataset ? 'Retrying…' : 'Retry QC'}
                           </Button>
                         }>
-                        Your quality-control step failed{mine.error ? `: ${mine.error}` : '.'}{' '}
+                        Your quality-control step failed{mine.error ? `: ${relabel(mine.error)}` : '.'}{' '}
                         Fix the issue, then retry.
                       </Alert>
                     )}
@@ -1783,7 +1784,7 @@ const CollaborationDetails = () => {
                           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                             QC datasets are created automatically when the collaboration starts. Selected filter methods:
                             {' '}
-                            {qcMethodNames.filter(m => !m.includes('Sample Relatedness') && !m.includes('Population Stratification')).join(' → ')}
+                            {qcMethodNames.filter(m => !m.includes('Sample Relatedness') && !m.includes('Population Stratification')).map(qcLabel).join(' → ')}
                           </Typography>
                         }
                       />
@@ -1831,11 +1832,11 @@ const CollaborationDetails = () => {
                       <Typography variant="h5" color="primary" fontWeight="bold">
                         {collaboration.surviving_snps?.[current_user_id]?.length || 0}
                       </Typography>
-                      <Typography variant="caption">Surviving SNPs</Typography>
+                      <Typography variant="caption">Surviving Attributes</Typography>
                     </Box>
                   </Box>
                   <Box sx={{ maxHeight: 300, overflowY: 'auto', border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
-                    <Typography variant="body2" fontWeight="bold" sx={{ mb: 1 }}>Samples included in GWAS:</Typography>
+                    <Typography variant="body2" fontWeight="bold" sx={{ mb: 1 }}>Samples included in the association study:</Typography>
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                       {(collaboration.surviving_samples[current_user_id] || []).map((sample, i) => (
                         <Chip key={i} label={sample} size="small" variant="outlined" />
@@ -1991,28 +1992,28 @@ const CollaborationDetails = () => {
                             {isFilterOnlyQc ? (
                               <ListItem disableGutters sx={{ mt: 2 }}>
                                 <ListItemText
-                                  primary={<strong>SNP Quality Control Results</strong>}
+                                  primary={<strong>Attribute Quality Control Results</strong>}
                                   secondary={
                                     <Box sx={{ mt: 1 }}>
                                       <Box sx={{ p: 2, bgcolor: '#e8f1fa', borderRadius: 2, mb: 2 }}>
                                         <Typography variant="body1" fontWeight={500} gutterBottom>
-                                          QC Method: {qcScheme.join(', ')}
+                                          QC Method: {qcMethodNames.map(qcLabel).join(', ')}
                                         </Typography>
                                         <Typography variant="body2" color="text.secondary">
-                                          SNP filtering has been applied automatically. Low-quality SNPs have been removed based on the selected QC criteria.
+                                          Attribute filtering has been applied automatically. Low-quality attributes have been removed based on the selected QC criteria.
                                         </Typography>
                                       </Box>
                                       
                                       {qcResults && (
                                         <Box sx={{ mb: 2 }}>
                                           <Typography variant="body2" gutterBottom>
-                                            <strong>SNPs Retained:</strong> The filtered dataset is ready for GWAS analysis.
+                                            <strong>Attributes Retained:</strong> The filtered dataset is ready for the association study.
                                           </Typography>
                                           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1, maxHeight: 200, overflow: 'auto', p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                                             {Array.isArray(qcResults) && qcResults.slice(0, 50).map((result, idx) => (
                                               <Chip 
                                                 key={idx} 
-                                                label={result.snp_id || result.sample1 || `SNP ${idx + 1}`} 
+                                                label={result.snp_id || result.sample1 || `Attribute ${idx + 1}`} 
                                                 size="small" 
                                                 variant="outlined"
                                                 color="primary"
@@ -2196,7 +2197,7 @@ const CollaborationDetails = () => {
                                     {/* Total Samples Typography Block */}
                                     <Box sx={{ mb: 2 }}>
                                       <Typography variant="body1" fontWeight={500} color="text.primary">
-                                        Total samples to be included in GWAS experiment:{" "}
+                                        Total samples to be included in the association study:{" "}
                                         <Box component="span" fontWeight={700} color="primary.main">
                                           {filteredResults?.selectedSamples || 0}
                                         </Box>{" "}
@@ -2526,7 +2527,7 @@ const CollaborationDetails = () => {
                                       onClick={handleCreateGwasDataset}
                                       sx={{ borderRadius: 2, textTransform: 'none' }}
                                     >
-                                      {isCreatingGwasDataset ? 'Creating...' : 'Create GWAS Dataset from QC Sample List'}
+                                      {isCreatingGwasDataset ? 'Creating...' : 'Create Association Study Dataset from QC Sample List'}
                                     </Button>
                                     {(filteredResults?.userSamplesList?.[current_user_id]?.length > 0 ||
                                       collaboration?.surviving_samples?.[current_user_id]?.length > 0) && (
@@ -2591,7 +2592,7 @@ const CollaborationDetails = () => {
                                             mt: 1,
                                             fontSize: '0.75rem'
                                           }}>
-                                            Python script for standardized SNP data formatting
+                                            Python script for standardized attribute data formatting
                                           </Typography>
                                         </Box>
                                       </Box>
@@ -2673,7 +2674,7 @@ const CollaborationDetails = () => {
                                             mt: 1,
                                             fontSize: '0.75rem'
                                           }}>
-                                            Required columns: snp_ids, case, controls
+                                            Required columns: ATTRIBUTE_ID, then Case_* and Control_* counts
                                           </Typography>
                                         </Box>
                                       </Box>
@@ -2790,8 +2791,8 @@ const CollaborationDetails = () => {
                                           )
                                         }
                                       >
-                                        {isGwasResultsEnabled ? "Get GWAS Results" : 
-                                         isGwasInitiateLoading ? "Initiating..." : "Initiate GWAS Calculation"}
+                                        {isGwasResultsEnabled ? "Get Association Study Results" : 
+                                         isGwasInitiateLoading ? "Initiating..." : "Initiate Association Study"}
                                       </Button>
                                     </span>
                                   </Tooltip>
@@ -2968,7 +2969,7 @@ const CollaborationDetails = () => {
                                       <Table stickyHeader>
                                         <TableHead>
                                           <TableRow>
-                                            <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>SNP</TableCell>
+                                            <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>Attribute</TableCell>
                                             <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>Chi-Square</TableCell>
                                             <TableCell align="center" sx={{ bgcolor: '#d1e4f6', color: '#0c3b69', fontWeight: 'bold' }}>P-Value</TableCell>
                                           </TableRow>
@@ -3193,7 +3194,7 @@ const CollaborationDetails = () => {
 
       <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={handleCloseSnackbar}>
         <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
-          {snackbar.message}
+          {relabel(snackbar.message)}
         </Alert>
       </Snackbar>
     </Container >
@@ -3353,7 +3354,7 @@ const GwasSummaryCard = ({
       <Box sx={{ p: 2.5 }}>
         {error && !loading && (
           <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
+            {relabel(error)}
           </Alert>
         )}
 
@@ -3364,7 +3365,7 @@ const GwasSummaryCard = ({
               including a recommendation on whether this collaboration is a good fit to continue.
             </Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-              Uses aggregated statistics only. No raw genotypes or sample IDs are used.
+              Uses aggregated statistics only. No raw data or sample IDs are used.
             </Typography>
           </Box>
         )}
@@ -3399,18 +3400,18 @@ const GwasSummaryCard = ({
                 </Box>
                 {recommendation.headline && (
                   <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5 }}>
-                    {recommendation.headline}
+                    {relabel(recommendation.headline)}
                   </Typography>
                 )}
                 {recommendation.rationale && (
-                  <Box sx={{ mb: 1 }}>{renderSimpleMarkdown(recommendation.rationale)}</Box>
+                  <Box sx={{ mb: 1 }}>{renderSimpleMarkdown(relabel(recommendation.rationale))}</Box>
                 )}
                 {recommendation.next_steps && (
                   <>
                     <Typography variant="body2" sx={{ fontWeight: 600, mt: 1.5, mb: 0.5 }}>
                       Recommended next steps
                     </Typography>
-                    {renderSimpleMarkdown(recommendation.next_steps)}
+                    {renderSimpleMarkdown(relabel(recommendation.next_steps))}
                   </>
                 )}
               </Box>
@@ -3421,16 +3422,16 @@ const GwasSummaryCard = ({
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1876D1', textTransform: 'uppercase', letterSpacing: 0.5, mb: 1 }}>
                   Overview
                 </Typography>
-                {renderSimpleMarkdown(content.overview)}
+                {renderSimpleMarkdown(relabel(content.overview))}
               </Box>
             )}
 
             {content.top_snps && (
               <Box sx={{ mb: 2.5 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1876D1', textTransform: 'uppercase', letterSpacing: 0.5, mb: 1 }}>
-                  Top SNPs driving the signal
+                  Top attributes driving the signal
                 </Typography>
-                {renderSimpleMarkdown(content.top_snps)}
+                {renderSimpleMarkdown(relabel(content.top_snps))}
               </Box>
             )}
 
@@ -3439,7 +3440,7 @@ const GwasSummaryCard = ({
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1876D1', textTransform: 'uppercase', letterSpacing: 0.5, mb: 1 }}>
                   Per-collaborator contribution
                 </Typography>
-                {renderSimpleMarkdown(content.per_collaborator)}
+                {renderSimpleMarkdown(relabel(content.per_collaborator))}
               </Box>
             )}
 
@@ -3471,7 +3472,7 @@ const GwasSummaryCard = ({
             <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary' }}>
               <ShieldIcon fontSize="small" />
               <Typography variant="caption">
-                Generated from aggregated chi-square statistics only. No raw genotypes or sample IDs were used.
+                Generated from aggregated chi-square statistics only. No raw data or sample IDs were used.
                 {summary?.model && ` · Engine: ${summary.model}`}
               </Typography>
             </Box>

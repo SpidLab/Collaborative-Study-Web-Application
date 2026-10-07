@@ -12,6 +12,7 @@ import MarkEmailUnreadOutlinedIcon from '@mui/icons-material/MarkEmailUnreadOutl
 import RefreshIcon from '@mui/icons-material/Refresh';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -176,11 +177,11 @@ const DatasetRow = ({ dataset, onSaved, onNotify }) => {
         <TableCell sx={{ py: 0, borderBottom: open ? undefined : 'none' }} colSpan={7}>
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ py: 2.5 }}>
-              {rowError && <Alert severity="error" sx={{ mb: 2 }}>{rowError}</Alert>}
+              {rowError && <Alert severity="error" sx={{ mb: 2 }}>{relabel(rowError)}</Alert>}
 
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Description</Typography>
               <Typography variant="caption" color="text.secondary">
-                What this cohort is — shown to anyone who finds this dataset in Find Collaborators.
+                What this dataset is — shown to anyone who finds it in Find Collaborators.
               </Typography>
               <TextField
                 fullWidth
@@ -190,7 +191,7 @@ const DatasetRow = ({ dataset, onSaved, onNotify }) => {
                 sx={{ mt: 1 }}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g. 412 adult cases and controls genotyped on the GSA v3 array, recruited 2021–2023."
+                placeholder="e.g. Soil and yield records from 412 fields across three counties, collected 2021–2023."
               />
 
               <Divider sx={{ my: 2.5 }} />
@@ -310,8 +311,8 @@ const MyData = () => {
         <Box>
           <Typography variant="h4" gutterBottom>My Data</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 820 }}>
-            Datasets you have registered. Sample counts and markers are reported by your local Site
-            Agent — your raw genotype files never leave your machine. Mark a dataset as available to
+            Datasets you have registered. Sample counts and attributes are reported by your local Site
+            Agent — your raw data files never leave your machine. Mark a dataset as available to
             share and set its privacy budget, and other researchers can find it and ask you for a copy.
           </Typography>
         </Box>
@@ -345,12 +346,12 @@ const MyData = () => {
           severity="error"
           action={<Button size="small" onClick={fetchData}>Retry</Button>}
         >
-          {error}
+          {relabel(error)}
         </Alert>
       ) : datasets.length === 0 ? (
         <Alert severity="info">
           No datasets yet. Register a dataset, then start your Site Agent so it can report the
-          sample count and markers here.
+          sample count and attributes here.
         </Alert>
       ) : (
         <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
@@ -358,9 +359,9 @@ const MyData = () => {
             <TableHead>
               <TableRow>
                 <TableCell />
-                <TableCell><strong>Phenotype</strong></TableCell>
+                <TableCell><strong>Trait</strong></TableCell>
                 <TableCell align="right"><strong>Samples</strong></TableCell>
-                <TableCell align="right"><strong>Markers</strong></TableCell>
+                <TableCell align="right"><strong>Attributes</strong></TableCell>
                 <TableCell><strong>Last synced</strong></TableCell>
                 <TableCell><strong>File fingerprint</strong></TableCell>
                 <TableCell><strong>Sharing</strong></TableCell>
@@ -383,7 +384,7 @@ const MyData = () => {
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}
-        message={snackbar.message}
+        message={relabel(snackbar.message)}
         onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
       />
     </Container>

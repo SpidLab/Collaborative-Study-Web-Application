@@ -122,13 +122,13 @@ def notify_progress(db, uuid):
                             continue
                         em = _email_for(db, u)
                         if em:
-                            email_utils.notify_action_needed(em, name, uuid, "its GWAS counts")
+                            email_utils.notify_action_needed(em, name, uuid, "its association study counts")
             elif stat_done == obligated:
                 if _claim(db, uuid, "stats_done"):
                     em = _email_for(db, creator)
                     if em:
                         email_utils.notify_stage_advanced(
-                            em, name, uuid, "all GWAS counts are in", "Run the GWAS calculation")
+                            em, name, uuid, "all association study counts are in", "Initiate the association study")
     except Exception as e:
         logger.warning("progress email skipped for %s: %s", uuid, e)
 

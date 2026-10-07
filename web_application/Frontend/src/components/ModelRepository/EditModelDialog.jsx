@@ -5,6 +5,7 @@ import {
 } from '@mui/material';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -89,7 +90,7 @@ const EditModelDialog = ({ open, model, onClose, onSaved }) => {
       PaperProps={{ sx: { borderRadius: 2 } }}>
       <DialogTitle sx={{ fontWeight: 700 }}>Edit model details</DialogTitle>
       <DialogContent dividers>
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{relabel(error)}</Alert>}
         {!isExternal && (
           <Alert severity="info" sx={{ mb: 2 }}>
             This model was trained here. Its measured results — accuracy, F1, loss, rounds and site

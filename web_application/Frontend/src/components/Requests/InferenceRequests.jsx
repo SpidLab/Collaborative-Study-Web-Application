@@ -19,6 +19,7 @@ import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const POLL_INTERVAL_MS = 5000;
 // `collecting` no longer happens on new requests, but one raised before the flow
@@ -72,7 +73,7 @@ const pctConf = (c) => {
 const sizePhrase = (r) => {
   if (r.n_samples == null && r.n_markers == null) return null;
   const samples = r.n_samples != null ? `${r.n_samples} samples` : 'an unreported number of samples';
-  return r.n_markers != null ? `${samples} × ${r.n_markers} markers` : samples;
+  return r.n_markers != null ? `${samples} × ${r.n_markers} attributes` : samples;
 };
 
 const MetaRow = ({ icon, children }) => (
@@ -263,7 +264,7 @@ const OutgoingCard = ({ request, busy, onView }) => {
         {status === 'pending' && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             Waiting for {request.owner_name || 'the owner'} to approve or deny. They can see how many
-            samples and markers you are asking them to classify.
+            samples and attributes you are asking them to classify.
           </Typography>
         )}
 
@@ -447,7 +448,7 @@ const InferenceRequests = () => {
         </Button>
       </Stack>
 
-      {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 3 }}>{relabel(error)}</Alert>}
 
       <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
         <Tab
@@ -557,7 +558,7 @@ const InferenceRequests = () => {
         onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar((s) => ({ ...s, open: false }))}>
-          {snackbar.message}
+          {relabel(snackbar.message)}
         </Alert>
       </Snackbar>
     </Container>

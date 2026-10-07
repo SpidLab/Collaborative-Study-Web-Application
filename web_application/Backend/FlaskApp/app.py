@@ -2692,7 +2692,7 @@ def qc_create_chained():
                     break
 
         if not phenotype:
-            return jsonify({"error": "Phenotype not found for this user"}), 400
+            return jsonify({"error": "Trait not found for this user"}), 400
 
         # Enqueue a chained_qc job for this user's local Site Agent. The agent
         # runs the filter chain on its local raw data and posts back surviving
@@ -2939,7 +2939,7 @@ def create_gwas_dataset():
                 phenotype = None
 
         if not phenotype:
-            return jsonify({"error": "Phenotype not found for this user in collaboration"}), 400
+            return jsonify({"error": "Trait not found for this user in collaboration"}), 400
 
         # Get surviving SNPs for this user (from chained QC)
         surviving_snps = collaboration.get('surviving_snps', {}).get(user_id, [])
@@ -2958,7 +2958,7 @@ def create_gwas_dataset():
         )
 
         return jsonify({
-            "message": "GWAS summary job queued for your local agent",
+            "message": "Association study job queued for your local agent",
             "status": "queued",
             "job_id": job_id,
         }), 202
@@ -3008,9 +3008,10 @@ def upload_csv_stats():
         try:
             df = pd.read_csv(file)
 
-            if df.columns[0].lower() != 'snp_id':
-                logging.error('First column must be SNP_ID')
-                return jsonify({'message': 'First column must be SNP_ID'}), 400
+            # The agriculture demo labels this column ATTRIBUTE_ID; SNP_ID still works.
+            if df.columns[0].lower() not in ('snp_id', 'attribute_id'):
+                logging.error('First column must be ATTRIBUTE_ID')
+                return jsonify({'message': 'First column must be ATTRIBUTE_ID'}), 400
 
             user_stats = {}
 
@@ -3515,7 +3516,7 @@ def initiate_qc(collab_uuid):
                 
             except Exception as e:
                 print(f"Error in Population Stratification QC: {str(e)}")
-                return jsonify({"error": f"Population Stratification QC failed: {str(e)}"}), 500
+                return jsonify({"error": f"Stratification Check failed: {str(e)}"}), 500
         
         # Return combined results
         if all_results:
@@ -3542,7 +3543,7 @@ def get_initial_qc_matrix(collab_uuid):
             threshold_value = collaboration_data.get("threshold", None)
 
             if not full_qc_results:
-                return jsonify({"message": "No Sample Relatedness QC results available for this collaboration."}), 201
+                return jsonify({"message": "No Related Records Check results available for this collaboration."}), 201
 
             return jsonify(full_qc_results=full_qc_results, threshold=threshold_value), 200
             
@@ -3551,7 +3552,7 @@ def get_initial_qc_matrix(collab_uuid):
             threshold_value = collaboration_data.get("threshold", None)
 
             if not pop_strat_results:
-                return jsonify({"message": "No Population Stratification QC results available for this collaboration."}), 201
+                return jsonify({"message": "No Stratification Check results available for this collaboration."}), 201
 
             # Check if results are stored separately due to size
             if isinstance(pop_strat_results, dict) and pop_strat_results.get("stored_separately"):
@@ -3561,7 +3562,7 @@ def get_initial_qc_matrix(collab_uuid):
                     all_results.extend(batch_doc.get("results", []))
                 
                 if not all_results:
-                    return jsonify({"message": "No Population Stratification QC results available."}), 201
+                    return jsonify({"message": "No Stratification Check results available."}), 201
                     
                 return jsonify(population_stratification=all_results, threshold=threshold_value), 200
 
@@ -3721,7 +3722,7 @@ def calculate_and_store_chi_square_results(collaboration_uuid):
 
         stats = collaboration.get('stats', {})
         if not stats:
-            return {"error": "No SNP data found in the stats field"}, 400
+            return {"error": "No attribute data found in the stats field"}, 400
         # Determine the list of valid participants (initiator + accepted users)
         obligated_user_ids = {str(collaboration['creator_id'])}
         for iu in collaboration.get('invited_users', []):
@@ -3878,13 +3879,13 @@ def generate_gwas_summary(uuid):
     if str(collaboration.get("creator_id")) != str(current_user.id):
         return jsonify({"error": "Only the collaboration initiator can generate the summary"}), 403
     if not collaboration.get("chi_square_results"):
-        return jsonify({"error": "GWAS results are not available yet"}), 409
+        return jsonify({"error": "Association study results are not available yet"}), 409
 
     try:
         digest = build_digest(collaboration)
     except Exception as e:
         logging.error(f"build_digest failed: {e}")
-        return jsonify({"error": f"Could not assemble GWAS digest: {str(e)}"}), 500
+        return jsonify({"error": f"Could not assemble the association study summary: {str(e)}"}), 500
 
     try:
         summary = generate_summary(digest)
@@ -5443,7 +5444,7 @@ def _parse_classification_csv(text):
         )
     if len(df) * df.shape[1] > CLASSIFICATION_MAX_CELLS:
         raise ValueError(
-            f"That file is too large ({len(df)} samples x {df.shape[1]} markers). "
+            f"That file is too large ({len(df)} samples x {df.shape[1]} attributes). "
             f"Please reduce it to under {CLASSIFICATION_MAX_CELLS:,} values."
         )
 

@@ -97,7 +97,7 @@ def sync_local_datasets(client):
             n_samples = data_loader.count_samples(csv_path)
             client.register_metadata(ds["id"], phenotype, n_samples,
                                      file_sha256(csv_path), snp_ids)
-            logger.info("Registered metadata for '%s': %d samples, %d markers.",
+            logger.info("Registered metadata for '%s': %d samples, %d attributes.",
                         phenotype, n_samples, len(snp_ids))
             ready.append((phenotype, n_samples, len(snp_ids)))
         except Exception as e:
@@ -145,7 +145,9 @@ def handle_job(job, client):
         )
 
     df = load_dataframe(csv_path)
-    logger.info("Job %s action=%s phenotype=%s shape=%s", job.get("id"), action, phenotype, df.shape)
+    # Demo wording in the console; the job name itself is unchanged.
+    shown_action = {"gwas_summary": "association_study"}.get(action, action)
+    logger.info("Job %s action=%s trait=%s shape=%s", job.get("id"), shown_action, phenotype, df.shape)
 
     if action == "fl_project":
         # Federated Learning stage 1: PCA-project local genotypes + DP noise.
@@ -170,7 +172,7 @@ def handle_job(job, client):
             case_path, control_path = data_loader.find_case_control_files(dataset_dir, phenotype)
             if case_path and control_path:
                 params = dict(params, case_ids_path=case_path, control_ids_path=control_path)
-                logger.info("Using case/control ID files from the data folder for GWAS.")
+                logger.info("Using case/control ID files from the data folder for the association study.")
         result = actions.run_gwas_summary(df, sample_ids, params)
     else:
         raise ValueError(f"Unknown job action: {action}")
@@ -251,11 +253,11 @@ def main():
     ready = sync_local_datasets(client)
     if ready:
         logger.info("Datasets ready on this machine: %s",
-                    ", ".join(f"{p} ({s} samples, {m} markers)" for p, s, m in ready))
+                    ", ".join(f"{p} ({s} samples, {m} attributes)" for p, s, m in ready))
     else:
-        logger.warning("No local datasets matched your registered phenotypes yet. Make sure each "
-                       "dataset folder under %s is named exactly like the phenotype you registered "
-                       "on the website (e.g. <folder>/eye_color/rawdata.csv).", Config.DATA_DIR)
+        logger.warning("No local datasets matched your registered traits yet. Make sure each "
+                       "dataset folder under %s is named exactly like the trait you registered "
+                       "on the website (e.g. <folder>/crop_yield/rawdata.csv).", Config.DATA_DIR)
 
     logger.info("Setup looks good — waiting for jobs. Polling every ~%ss. Data dir: %s",
                 Config.POLL_INTERVAL, Config.DATA_DIR)

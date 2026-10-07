@@ -20,6 +20,7 @@ import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import axios from 'axios';
 import URL from '../../config';
 import PrivacyAuditDialog, { riskMeta } from './PrivacyAuditDialog';
+import { relabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -131,7 +132,7 @@ const AuditCohortDialog = ({ open, model, busy, error, initial, onClose, onStart
           any other.
         </Alert>
 
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{relabel(error)}</Alert>}
 
         {!model?.local_file && (
           <Alert severity="warning" sx={{ mb: 2 }}>
@@ -149,7 +150,7 @@ const AuditCohortDialog = ({ open, model, busy, error, initial, onClose, onStart
         ) : loadError ? (
           <Alert severity="error"
             action={<Button size="small" onClick={() => setReloadKey((k) => k + 1)}>Retry</Button>}>
-            {loadError}
+            {relabel(loadError)}
           </Alert>
         ) : options.length < 2 ? (
           <Alert severity="warning">
@@ -177,7 +178,7 @@ const AuditCohortDialog = ({ open, model, busy, error, initial, onClose, onStart
               value={nonMembers} onChange={(e) => setNonMembers(e.target.value)}
               error={sameCohort}
               helperText={sameCohort
-                ? 'Pick a different dataset — comparing a cohort with itself measures nothing.'
+                ? 'Pick a different dataset — comparing a dataset with itself measures nothing.'
                 : 'A dataset this model never saw during training.'}
             >
               {options.map((o) => (
@@ -190,7 +191,7 @@ const AuditCohortDialog = ({ open, model, busy, error, initial, onClose, onStart
             <TextField
               fullWidth label="Label column (optional)"
               value={labelCol} onChange={(e) => setLabelCol(e.target.value)}
-              placeholder="phenotype"
+              placeholder="label"
               helperText="Only needed if the outcome column in those files is not the one your agent picks by default."
             />
 
@@ -405,8 +406,8 @@ const ModelCard = ({ model, onPatch, onEdit, onDelete, onRequestClassification, 
             </Tooltip>
           )}
           {showRiskChip && (
-            <Tooltip title={audit.summary
-              || 'Membership inference audit: how well an attacker could tell who was in the training cohort.'}>
+            <Tooltip title={relabel(audit.summary)
+              || 'Membership inference audit: how well an attacker could tell which records were in the training data.'}>
               <Chip
                 size="small"
                 icon={<ShieldOutlinedIcon />}
@@ -426,8 +427,8 @@ const ModelCard = ({ model, onPatch, onEdit, onDelete, onRequestClassification, 
         )}
 
         <Typography variant="body2" sx={{ mt: 1.5, fontWeight: 500 }}>
-          {model.task || 'Classification'}
-          {model.architecture ? ` · ${model.architecture}` : ''}
+          {relabel(model.task) || 'Classification'}
+          {model.architecture ? ` · ${relabel(model.architecture)}` : ''}
         </Typography>
 
         <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
@@ -556,7 +557,7 @@ const ModelCard = ({ model, onPatch, onEdit, onDelete, onRequestClassification, 
 
             {auditError && (
               <Alert severity="warning" sx={{ mt: 0.5, mb: 1 }} onClose={() => setAuditError('')}>
-                {auditError}
+                {relabel(auditError)}
               </Alert>
             )}
 
@@ -622,8 +623,8 @@ const ModelCard = ({ model, onPatch, onEdit, onDelete, onRequestClassification, 
                   {startLabel}
                 </Button>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
-                  Tests whether someone holding this model could tell that a particular person was in
-                  its training cohort. It runs on your own Site Agent — the only place the model and
+                  Tests whether someone holding this model could tell that a particular record was in
+                  its training data. It runs on your own Site Agent — the only place the model and
                   its training data both exist — so keep the agent running. Only aggregate numbers
                   come back here.
                   {!isFederated && ' Because this model was trained outside the sandbox, you name the '

@@ -7,6 +7,7 @@ import { Link as RouterLink } from 'react-router-dom';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -17,7 +18,7 @@ const DUPLICATE_REQUEST_TITLE = 'You already have an open request for this model
 // owner if a legacy row is missing one.
 const sizePhrase = (d) => {
   const samples = d.n_samples != null ? `${d.n_samples} samples` : 'The samples in this batch';
-  return d.n_markers != null ? `${samples} × ${d.n_markers} markers` : samples;
+  return d.n_markers != null ? `${samples} × ${d.n_markers} attributes` : samples;
 };
 
 const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
@@ -117,7 +118,7 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
           </Alert>
         )}
 
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{relabel(error)}</Alert>}
 
         {loading ? (
           <Stack alignItems="center" spacing={1.5} sx={{ py: 4 }}>
@@ -126,7 +127,7 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
           </Stack>
         ) : loadError ? (
           <Alert severity="error" action={<Button size="small" onClick={loadDatasets}>Retry</Button>}>
-            {loadError}
+            {relabel(loadError)}
           </Alert>
         ) : datasets.length === 0 ? (
           <Alert severity="info"
@@ -136,7 +137,7 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
               </Button>
             )}>
             <AlertTitle>You have no classification data uploaded</AlertTitle>
-            Classification runs on samples you upload for that purpose — not on your My Data cohorts,
+            Classification runs on samples you upload for that purpose — not on your My Data datasets,
             which stay on your own machine. Upload a CSV under Classification Data first.
           </Alert>
         ) : (
@@ -152,7 +153,7 @@ const RequestClassificationDialog = ({ open, model, onClose, onSubmitted }) => {
                 <MenuItem key={d.id} value={String(d.id)}>
                   {d.name || 'Uploaded samples'}
                   {d.n_samples != null ? ` · ${d.n_samples} samples` : ''}
-                  {d.n_markers != null ? ` · ${d.n_markers} markers` : ''}
+                  {d.n_markers != null ? ` · ${d.n_markers} attributes` : ''}
                 </MenuItem>
               ))}
             </TextField>

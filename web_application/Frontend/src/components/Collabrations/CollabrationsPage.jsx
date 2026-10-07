@@ -8,6 +8,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { Cancel as CancelIcon } from '@mui/icons-material';
 import Popover from '@mui/material/Popover';
 import { appColors, fonts } from '../Utils/utils';
+import { experimentLabel, qcLabel } from '../Utils/demoTerms';
 import PropTypes from 'prop-types';
 
 const getToken = () => localStorage.getItem('token');
@@ -238,7 +239,7 @@ const CollaborationCard = ({
                         return displayLabels.map((label, idx) => (
                             <Chip
                                 key={`${label}-${idx}`}
-                                label={label}
+                                label={experimentLabel(label)}
                                 size="small"
                                 sx={{ mr: 1, mb: 1, fontSize: fonts.chipsText, bgcolor: appColors.chipBg, color: appColors.chipTx }}
                             />
@@ -254,7 +255,7 @@ const CollaborationCard = ({
                         (collaboration.collabQcScheme || []).map((scheme, idx) => (
                             <Chip
                                 key={typeof scheme === 'object' && scheme?.method ? scheme.method + idx : (scheme || idx)}
-                                label={typeof scheme === 'string' ? scheme : (scheme.method || scheme.name || '')}
+                                label={qcLabel(typeof scheme === 'string' ? scheme : (scheme.method || scheme.name || ''))}
                                 size="small"
                                 sx={{ mr: 1, mb: 1, fontSize: fonts.chipsText, bgcolor: appColors.chipBg, color: appColors.chipTx }}
                             />
@@ -267,7 +268,7 @@ const CollaborationCard = ({
                                 Your Dataset
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                                Phenotype: {collaboration.my_dataset_info.phenotype || 'N/A'}
+                                Trait: {collaboration.my_dataset_info.phenotype || 'N/A'}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
                                 Samples: {collaboration.my_dataset_info.number_of_samples || '0'}

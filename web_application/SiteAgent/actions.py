@@ -159,7 +159,7 @@ def _run_pca(df, params, models_dir):
     pcs = (scaled - pca_mean) @ components.T
 
     if overlap < 1.0:
-        logger.info("PCA: aligned to panel using %d/%d SNPs (rest imputed to panel mean).",
+        logger.info("PCA: aligned to panel using %d/%d attributes (rest imputed to panel mean).",
                     len(present), len(feature_names))
 
     out = pd.DataFrame(pcs, columns=[f"PC_{i + 1}" for i in range(pcs.shape[1])])
@@ -264,9 +264,9 @@ def run_chained_qc(df, methods, models_dir):
             pca_df = _run_pca(base, pca_params, models_dir)
         except Exception as e:
             raise ValueError(
-                "Population Stratification (PCA) could not run for this dataset: "
-                f"{e}. Use data with the full marker panel, or remove Population "
-                "Stratification from the QC scheme, then retry."
+                "Stratification Check (PCA) could not run for this dataset: "
+                f"{e}. Use data with the full attribute panel, or remove the "
+                "Stratification Check from the QC scheme, then retry."
             )
         out["pca_coords"] = _matrix_dict(pca_df)
     return out

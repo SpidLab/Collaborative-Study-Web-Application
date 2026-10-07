@@ -18,6 +18,7 @@ import EventIcon from '@mui/icons-material/Event';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const POLL_INTERVAL_MS = 5000;
 // `downloaded` is settled — the handover happened and the copy is gone, nothing
@@ -65,7 +66,7 @@ const safeName = (s) => (s || 'dataset').replace(/[^a-z0-9-_]+/gi, '_').replace(
 const sizePhrase = (r) => {
   if (r.n_samples == null && r.n_snps == null) return null;
   const samples = r.n_samples != null ? `${r.n_samples} samples` : 'an unrecorded number of samples';
-  return r.n_snps != null ? `${samples} × ${r.n_snps} markers` : samples;
+  return r.n_snps != null ? `${samples} × ${r.n_snps} attributes` : samples;
 };
 
 const MetaRow = ({ icon, children }) => (
@@ -166,7 +167,7 @@ const IncomingCard = ({ request, busy, onRespond }) => {
           )}
           {weaker && (
             <Typography variant="body2" color="text.secondary">
-              A higher ε means less noise, so the copy would sit closer to your real genotypes than
+              A higher ε means less noise, so the copy would sit closer to your real data than
               the terms you published. Denying is a legitimate answer.
             </Typography>
           )}
@@ -201,7 +202,7 @@ const IncomingCard = ({ request, busy, onRespond }) => {
               If you approve, your own Site Agent produces the differentially-private copy on your
               machine at the requested ε = {fmtEps(requested)}
               {advertised != null && gap !== 0 ? `, not at the ε = ${fmtEps(advertised)} you advertised` : ''}
-              . Your raw genotypes never move. Make sure your agent is running, or the request will
+              . Your raw data never moves. Make sure your agent is running, or the request will
               sit at &quot;transforming&quot; until it is.
             </Alert>
             <Stack direction="row" spacing={1.5} sx={{ mt: 2 }} justifyContent="flex-end">
@@ -490,7 +491,7 @@ const DataRequests = () => {
         open: true,
         severity: 'success',
         message: n != null
-          ? `Downloaded ${n} samples${m != null ? ` × ${m} markers` : ''}. Keep the file — the server's copy is gone.`
+          ? `Downloaded ${n} samples${m != null ? ` × ${m} attributes` : ''}. Keep the file — the server's copy is gone.`
           : 'Download complete. Keep the file — the server’s copy is gone.',
       });
       // Flip the card to `downloaded`; the button must not be offered again.
@@ -522,7 +523,7 @@ const DataRequests = () => {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 780 }}>
             Requests to share datasets between sites. When a request is approved, the owner&apos;s
             Site Agent applies a differential-privacy transform locally and only that protected copy
-            is handed over — raw genotype files never leave the machine they live on.
+            is handed over — raw data files never leave the machine they live on.
           </Typography>
         </Box>
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => load(false)} disabled={loading}>
@@ -530,7 +531,7 @@ const DataRequests = () => {
         </Button>
       </Stack>
 
-      {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 3 }}>{relabel(error)}</Alert>}
 
       <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
         <Tab
@@ -594,7 +595,7 @@ const DataRequests = () => {
         onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar((s) => ({ ...s, open: false }))}>
-          {snackbar.message}
+          {relabel(snackbar.message)}
         </Alert>
       </Snackbar>
     </Container>

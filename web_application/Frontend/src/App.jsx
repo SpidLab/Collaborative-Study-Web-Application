@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AppBar, Toolbar, Typography } from "@mui/material";
 import { Home, Upload, Search, Session, NewUser, Login } from "./components";
-import BrightnessHighIcon from '@mui/icons-material/BrightnessHigh';
+import AgricultureIcon from '@mui/icons-material/Agriculture';
+import { APP_TITLE } from './components/Utils/demoTerms';
 import LoggedIn from './components/Navigation/LoggedIn';
 import LoggedOut from './components/Navigation/LoggedOut';
 import ForgotUsername from './components/Forgot/ForgotUsername'; 
@@ -85,9 +86,9 @@ function App() {
     <Router>
       <AppBar position="static">
         <Toolbar>
-          <BrightnessHighIcon sx={{ display: { xs: 'none', md: 'flex' }, mr: 1 }} />
+          <AgricultureIcon sx={{ display: { xs: 'none', md: 'flex' }, mr: 1 }} />
           <Typography variant="h6" style={{ flexGrow: 1 }}>
-            Collaborative Study Web Application
+            {APP_TITLE}
           </Typography>
           {isLoggedIn ? (
             <LoggedIn onLogout={handleLogout} />

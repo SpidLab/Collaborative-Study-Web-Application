@@ -7,6 +7,7 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -106,21 +107,21 @@ const RegisterModelDialog = ({ open, onClose, onRegistered }) => {
           </Typography>
         </Alert>
 
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{relabel(error)}</Alert>}
 
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
             <TextField
               label="Model name" required fullWidth autoFocus
               value={form.name} onChange={set('name')}
-              placeholder="Type-2 diabetes risk classifier"
+              placeholder="Crop disease risk classifier"
             />
           </Grid>
           <Grid item xs={12} md={6}>
             <TextField
               label="Dataset it was trained on" fullWidth
               value={form.dataset} onChange={set('dataset')}
-              placeholder="UK Biobank T2D cohort"
+              placeholder="Regional soil and yield records"
               helperText="Shown next to the metrics, so the numbers are always attributed."
             />
           </Grid>

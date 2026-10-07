@@ -13,6 +13,7 @@ import ComputerIcon from '@mui/icons-material/Computer';
 import { Link as RouterLink } from 'react-router-dom';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const STAGE_LABELS = {
   idle: { label: 'Waiting for invitees', color: 'default' },
@@ -256,13 +257,13 @@ const FLCollaborationView = ({ collaboration }) => {
             <Chip label={stageInfo.label} color={stageInfo.color} />
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Goal: train a shared 1D-CNN genotype → super-population classifier across the sites
+            Goal: train a shared 1D-CNN classifier across the sites
             whose data distributions (via public PCA + ε-LDP projections) survive the initiator&apos;s
             Earth Mover&apos;s Distance threshold. Powered by Flower FedAvg.
           </Typography>
           {fetchError && (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              {fetchError}
+              {relabel(fetchError)}
             </Alert>
           )}
         </CardContent>
@@ -326,7 +327,7 @@ const FLCollaborationView = ({ collaboration }) => {
             </Typography>
             <LinearProgress sx={{ mt: 2 }} />
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              Sites are projecting their local genotype matrices through the public PCA model and
+              Sites are projecting their local data matrices through the public PCA model and
               adding ε = {config.epsilon} Laplace noise. The server will then assemble the pairwise
               EMD matrix.
             </Typography>
@@ -337,7 +338,7 @@ const FLCollaborationView = ({ collaboration }) => {
       {stage === 'failed' && (
         <Alert severity="error" sx={{ mb: 3 }}>
           <Typography variant="subtitle2">FL pipeline failed</Typography>
-          <Typography variant="body2">{flState?.error || 'Unknown error'}</Typography>
+          <Typography variant="body2">{relabel(flState?.error) || 'Unknown error'}</Typography>
           {isInitiator && (
             <Button sx={{ mt: 1 }} size="small" variant="outlined" onClick={kickoff} disabled={isKickingOff}>
               Retry
@@ -692,7 +693,7 @@ const FLCollaborationView = ({ collaboration }) => {
         onClose={() => setSnackbar(s => ({ ...s, open: false }))}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar(s => ({ ...s, open: false }))}>
-          {snackbar.message}
+          {relabel(snackbar.message)}
         </Alert>
       </Snackbar>
     </Container>

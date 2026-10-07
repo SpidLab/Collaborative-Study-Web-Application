@@ -68,7 +68,7 @@ def resolve_dataset(data_dir, phenotype):
         return flat, data_dir
 
     raise FileNotFoundError(
-        f"No dataset for phenotype '{phenotype}'. Expected a folder '{folder}/' "
+        f"No dataset for trait '{phenotype}'. Expected a folder '{folder}/' "
         f"containing rawdata.csv, or a file '{flat}'."
     )
 

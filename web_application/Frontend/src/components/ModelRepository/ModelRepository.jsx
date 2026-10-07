@@ -13,6 +13,7 @@ import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 import ModelCard from './ModelCard';
 import RegisterModelDialog from './RegisterModelDialog';
 import EditModelDialog from './EditModelDialog';
@@ -192,7 +193,7 @@ const ModelRepository = () => {
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}
           action={<Button size="small" onClick={() => fetchModels()}>Retry</Button>}>
-          {error}
+          {relabel(error)}
         </Alert>
       )}
 
@@ -301,7 +302,7 @@ const ModelRepository = () => {
         onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar((s) => ({ ...s, open: false }))}>
-          {snackbar.message}
+          {relabel(snackbar.message)}
         </Alert>
       </Snackbar>
     </Container>

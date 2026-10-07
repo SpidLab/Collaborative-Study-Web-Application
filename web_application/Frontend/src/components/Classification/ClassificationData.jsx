@@ -12,6 +12,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -21,7 +22,7 @@ const fmtDate = (iso) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 };
 
-const CSV_EXAMPLE = `sample_id,rs1801133,rs4988235,rs429358
+const CSV_EXAMPLE = `sample_id,attr_1,attr_2,attr_3
 S001,0,2,1
 S002,1,1,0`;
 
@@ -78,8 +79,8 @@ const UploadPanel = ({ maxSamples, onUploaded }) => {
     <Paper variant="outlined" sx={{ borderRadius: 2, p: { xs: 2.5, md: 3 }, mb: 3 }}>
       <Typography variant="h6" sx={{ fontWeight: 600 }}>Upload samples to classify</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: 780 }}>
-        A CSV where the first column is the sample id and every remaining column is a marker.
-        Label columns (<code>phenotype</code>, <code>label</code>, <code>status</code>, and the like)
+        A CSV where the first column is the sample id and every remaining column is an attribute.
+        Label columns (<code>label</code>, <code>status</code>, and the like)
         are dropped automatically — the label is what you are asking the model to predict.
         {maxSamples != null && ` Up to ${maxSamples} samples per file.`}
       </Typography>
@@ -94,7 +95,7 @@ const UploadPanel = ({ maxSamples, onUploaded }) => {
         {CSV_EXAMPLE}
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{relabel(error)}</Alert>}
 
       <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
         <Button
@@ -119,7 +120,7 @@ const UploadPanel = ({ maxSamples, onUploaded }) => {
         <TextField
           size="small" fullWidth label="Name (optional)"
           value={name} onChange={(e) => setName(e.target.value)} disabled={uploading}
-          placeholder="e.g. Replication cohort batch 3"
+          placeholder="e.g. Spring field samples, batch 3"
           helperText="Defaults to the file name."
         />
         <TextField
@@ -219,8 +220,8 @@ const ClassificationData = () => {
           <Typography variant="h4" gutterBottom>Classification Data</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 820 }}>
             Batches of samples you have uploaded so that another site&apos;s model can classify them.
-            This is not the same thing as My Data: the cohorts in My Data are described by metadata
-            only and the genotype files stay on your machine. The files here really are uploaded,
+            This is not the same thing as My Data: the datasets in My Data are described by metadata
+            only and the data files stay on your machine. The files here really are uploaded,
             because handing the samples to the model owner is the entire point of a classification
             request. Upload only what you want that owner to see, and delete a batch when you are done
             with it.
@@ -242,7 +243,7 @@ const ClassificationData = () => {
         maxSamples={maxSamples}
         onUploaded={(dataset) => {
           setDatasets((prev) => [dataset, ...prev.filter((d) => d.id !== dataset.id)]);
-          notify(`"${dataset.name || 'Samples'}" uploaded — ${dataset.n_samples} samples, ${dataset.n_markers} markers.`);
+          notify(`"${dataset.name || 'Samples'}" uploaded — ${dataset.n_samples} samples, ${dataset.n_markers} attributes.`);
         }}
       />
 
@@ -252,7 +253,7 @@ const ClassificationData = () => {
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress /></Box>
       ) : error ? (
         <Alert severity="error" action={<Button size="small" onClick={load}>Retry</Button>}>
-          {error}
+          {relabel(error)}
         </Alert>
       ) : datasets.length === 0 ? (
         <Paper variant="outlined" sx={{ borderRadius: 2, borderStyle: 'dashed', textAlign: 'center', py: 6, px: 3 }}>
@@ -275,7 +276,7 @@ const ClassificationData = () => {
               <TableRow>
                 <TableCell><strong>Name</strong></TableCell>
                 <TableCell align="right"><strong>Samples</strong></TableCell>
-                <TableCell align="right"><strong>Markers</strong></TableCell>
+                <TableCell align="right"><strong>Attributes</strong></TableCell>
                 <TableCell><strong>Source file</strong></TableCell>
                 <TableCell><strong>Uploaded</strong></TableCell>
                 <TableCell align="right" />
@@ -368,7 +369,7 @@ const ClassificationData = () => {
         onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar((s) => ({ ...s, open: false }))}>
-          {snackbar.message}
+          {relabel(snackbar.message)}
         </Alert>
       </Snackbar>
     </Container>

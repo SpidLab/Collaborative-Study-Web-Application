@@ -4,17 +4,17 @@ import { Grid, Typography, Paper, Button, TableContainer, Table, TableHead, Tabl
 const ResultsPage = () => {
   const resultsData = [
     {
-      title: 'Sample Relatedness',
+      title: 'Related Records Check',
       tableData: [
-        { experiment: 'Dataset Relatedness Coefficient', result: '0.8' }
+        { experiment: 'Dataset Similarity Coefficient', result: '0.8' }
       ],
       downloadUrl: '/session/viewresults', // link for download button
     },
     {
-      title: 'GWAS Experiments',
+      title: 'Association Studies',
       tableData: [
-        { metric: 'χ² Test', result: 'Found 20 significant SNPs' },
-        { metric: 'Odds Ratio Test', result: 'Found 25 significant SNPs' }
+        { metric: 'χ² Test', result: 'Found 20 significant attributes' },
+        { metric: 'Odds Ratio Test', result: 'Found 25 significant attributes' }
       ],
       downloadUrl: '/session/viewresults', // link for download button
     },

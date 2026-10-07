@@ -10,6 +10,7 @@ import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
 import axios from 'axios';
 import URL from '../../config';
+import { relabel } from '../Utils/demoTerms';
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -127,12 +128,12 @@ const DataSharingView = ({ collaboration }) => {
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
             Each participant&apos;s local agent applies a differential-privacy transform
-            (randomized-response noise on genotypes + row shuffle{epsilon != null ? `, ε = ${epsilon}` : ''}) to its
-            own dataset. Only the privacy-protected copy is shared — raw genotypes never leave a site, and no
-            KING coefficients or pairwise analysis are computed. Every participant can download every
+            (randomized-response noise on each value + row shuffle{epsilon != null ? `, ε = ${epsilon}` : ''}) to its
+            own dataset. Only the privacy-protected copy is shared — raw data never leaves a site, and no
+            pairwise analysis is computed. Every participant can download every
             participant&apos;s shared copy below.
           </Typography>
-          {fetchError && <Alert severity="warning" sx={{ mt: 2 }}>{fetchError}</Alert>}
+          {fetchError && <Alert severity="warning" sx={{ mt: 2 }}>{relabel(fetchError)}</Alert>}
         </CardContent>
       </Card>
 
@@ -210,7 +211,7 @@ const DataSharingView = ({ collaboration }) => {
                       <Typography variant="caption" color="text.secondary">
                         {!accepted ? `status: ${p.status || 'pending'}`
                           : p.transformed
-                            ? `shared${p.n_samples != null ? ` · ${p.n_samples} samples${p.n_snps != null ? ` × ${p.n_snps} SNPs` : ''}` : ''}`
+                            ? `shared${p.n_samples != null ? ` · ${p.n_samples} samples${p.n_snps != null ? ` × ${p.n_snps} attributes` : ''}` : ''}`
                             : p.job === 'failed' ? 'transform failed' : 'transforming…'}
                       </Typography>
                     </Box>
@@ -244,7 +245,7 @@ const DataSharingView = ({ collaboration }) => {
         onClose={() => setSnackbar(s => ({ ...s, open: false }))}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar(s => ({ ...s, open: false }))}>
-          {snackbar.message}
+          {relabel(snackbar.message)}
         </Alert>
       </Snackbar>
     </Container>

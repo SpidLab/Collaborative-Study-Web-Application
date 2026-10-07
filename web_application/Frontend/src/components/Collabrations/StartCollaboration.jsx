@@ -12,11 +12,12 @@ import axios from 'axios';
 import URL from '../../config';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import { experimentLabel, qcLabel, isHiddenQcMethod, relabel, datasetLabel } from '../Utils/demoTerms';
 
 const QC_METHOD_DEFAULTS = {
-  'Minor Allele Frequency (MAF)': { threshold: 0.05, min: 0.001, max: 0.5, step: 0.001, label: 'MAF Threshold', description: 'SNPs below this frequency are removed' },
-  'Hardy-Weinberg Equilibrium (HWE)': { threshold: 0.000001, label: 'HWE p-value Threshold', description: 'SNPs with p-value below this are removed', isTextField: true },
-  'Missing Data QC': { threshold: 0.10, min: 0.01, max: 1.0, step: 0.01, label: 'Missing Rate Threshold', description: 'Samples/SNPs above this missing rate are removed' },
+  'Minor Allele Frequency (MAF)': { threshold: 0.05, min: 0.001, max: 0.5, step: 0.001, label: 'Frequency Threshold', description: 'Attributes with too little variation (below this frequency) are removed' },
+  'Hardy-Weinberg Equilibrium (HWE)': { threshold: 0.000001, label: 'Equilibrium p-value Threshold', description: 'Attributes with a p-value below this are removed', isTextField: true },
+  'Missing Data QC': { threshold: 0.10, min: 0.01, max: 1.0, step: 0.01, label: 'Missing Rate Threshold', description: 'Samples/attributes above this missing rate are removed' },
 };
 
 const EXPERIMENT_FL = 'Federated Learning';
@@ -67,7 +68,9 @@ const StartCollaboration = () => {
         });
         // Every one of these is optional on the wire — a partial payload must not
         // throw out of the mapping and leave the form permanently empty.
-        const fetchedQcSchemes = response.data?.qc_schemes?.[0]?.quality_control_scheme || [];
+        // Kinship (Sample Relatedness) and Hardy-Weinberg are not offered in the demo.
+        const fetchedQcSchemes = (response.data?.qc_schemes?.[0]?.quality_control_scheme || [])
+          .filter((scheme) => !isHiddenQcMethod(scheme));
         setQcSchemes(fetchedQcSchemes);
         setExperimentOptions(response.data?.experiments?.[0]?.experiment_types || []);
         setDatasets(Array.isArray(response.data?.datasets) ? response.data.datasets : []);
@@ -305,7 +308,7 @@ const StartCollaboration = () => {
       </Typography>
       {loadError && (
         <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
-          Could not load experiment types, QC schemes and datasets: {loadError}
+          Could not load experiment types, QC schemes and datasets: {relabel(loadError)}
         </Alert>
       )}
       <Card sx={{ height: '100%', marginBottom: '20px', border: '1px solid #ccc', borderRadius: 2, boxShadow: 'none' }}>
@@ -377,7 +380,7 @@ const StartCollaboration = () => {
                       key={option}
                       value={option}
                       control={<Radio />}
-                      label={<Typography variant="body2">{option}</Typography>}
+                      label={<Typography variant="body2">{experimentLabel(option)}</Typography>}
                     />
                   ))}
                 </RadioGroup>
@@ -511,10 +514,10 @@ const StartCollaboration = () => {
                     Federated Learning Preprocessing
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    FL uses a single shared preprocessing step: each site projects its genotype
+                    FL uses a single shared preprocessing step: each site projects its data
                     matrix through a public PCA model and adds Laplace noise calibrated to the
                     local DP budget ε. The noisy projections are what the server sees for
-                    Earth Mover&apos;s Distance compatibility assessment — never raw genotypes.
+                    Earth Mover&apos;s Distance compatibility assessment — never raw data.
                   </Typography>
                   <Box sx={{ mt: 1.5 }}>
                     <Typography variant="caption" sx={{ fontWeight: 500 }}>
@@ -564,7 +567,7 @@ const StartCollaboration = () => {
                             checkedIcon={<CheckCircleIcon />}
                             sx={{ color: "#1976d2", "&.Mui-checked": { color: "#1565c0" }, "& .MuiSvgIcon-root": { borderRadius: "50%" } }}
                           />
-                          <Typography variant="body2">{label}</Typography>
+                          <Typography variant="body2">{qcLabel(label)}</Typography>
                         </Box>
                         <Collapse in={isSelected && !!defaults}>
                           {defaults && isSelected && (
@@ -616,8 +619,8 @@ const StartCollaboration = () => {
                     datasets.map((dataset, index) => (
                       <MenuItem key={index} value={dataset}>
                         {dataset.is_qc_data 
-                          ? `🔬 ${dataset.phenotype} | ${dataset.number_of_samples} samples`
-                          : `📄 ${dataset.phenotype} | ${dataset.number_of_samples} samples`
+                          ? `🔬 ${datasetLabel(dataset.phenotype)} | ${dataset.number_of_samples} samples`
+                          : `📄 ${datasetLabel(dataset.phenotype)} | ${dataset.number_of_samples} samples`
                         }
                       </MenuItem>
                     ))
@@ -685,7 +688,7 @@ const StartCollaboration = () => {
             {(csvFile && selectedDataset) && (
               <Box sx={{ bgcolor: '#f9fdff', mt: 2, p: 2, borderRadius: 2, border: 1, borderColor: '#85b1e6', gap: 2 }} display={'flex'}>
                 <InfoIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                <Typography variant="body2">{fileName} will be linked to {selectedDataset.phenotype} for this collaboration.</Typography>
+                <Typography variant="body2">{fileName} will be linked to {datasetLabel(selectedDataset.phenotype)} for this collaboration.</Typography>
               </Box>
             )}
           </CardContent>
@@ -768,7 +771,7 @@ const StartCollaboration = () => {
 
       <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={handleCloseSnackbar}>
         <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
-          {snackbar.message}
+          {relabel(snackbar.message)}
         </Alert>
       </Snackbar>
 
